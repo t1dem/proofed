@@ -1,0 +1,77 @@
+name: Proofed
+description: Runs the scenarios a PR touches in real Chrome with Kane CLI, records each run, and reports on the PR.
+branding:
+  icon: eye
+  color: orange
+
+inputs:
+  url:
+    description: Where the app under test is already running, e.g. http://localhost:4173
+    required: true
+  lt-username:
+    description: TestMu username (secrets.LT_USERNAME)
+    required: true
+  lt-access-key:
+    description: TestMu access key (secrets.LT_ACCESS_KEY)
+    required: true
+  scenarios:
+    description: Folder with scenario Markdown files
+    default: .proofed/scenarios
+  only:
+    description: Comma-separated scenario ids to run instead of picking them from the diff
+    default: ""
+  fix:
+    description: Offer the "Fix with Claude" checkbox on failures
+    default: "true"
+  github-token:
+    description: Token for the PR comment, commit status and the clips branch
+    default: ${{ github.token }}
+  kane-version:
+    description: "@testmuai/kane-cli version"
+    default: "0.10.3"
+
+outputs:
+  report:
+    description: Path to the Markdown report
+    value: ${{ steps.run.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+
+    - name: Install Kane CLI and ffmpeg
+      shell: bash
+      run: |
+        npm install -g "@testmuai/kane-cli@${{ inputs.kane-version }}" >/dev/null
+        command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null)
+        kane-cli --version
+
+    - name: Run scenarios with Kane
+      id: run
+      shell: bash
+      env:
+        PROOFED_URL: ${{ inputs.url }}
+        PROOFED_SCENARIOS: ${{ inputs.scenarios }}
+        PROOFED_ONLY: ${{ inputs.only }}
+        PROOFED_FIX: ${{ inputs.fix }}
+        PROOFED_OUT: ${{ runner.temp }}/proofed
+        LT_USERNAME: ${{ inputs.lt-username }}
+        LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        echo "report=$PROOFED_OUT/report.md" >> "$GITHUB_OUTPUT"
+        node "$GITHUB_ACTION_PATH/src/cli.ts"
+
+    - name: Keep the recordings
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: proofed-${{ github.run_attempt }}
+        path: |
+          ${{ runner.temp }}/proofed/**/clip.mp4
+          ${{ runner.temp }}/proofed/*.json
+          ${{ runner.temp }}/proofed/*.md
+        if-no-files-found: ignore
