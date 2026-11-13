@@ -8,6 +8,7 @@ export type RunEnd = {
   type: "run_end";
   status: "passed" | "failed" | (string & {});
   reason?: string;
+  final_state?: Record<string, unknown>;
   summary?: string;
   one_liner?: string;
   duration?: number;
@@ -41,6 +42,8 @@ type KaneOptions = {
   timeoutSeconds?: number;
   wallTimeoutSeconds?: number;
   onStep?: (step: Step) => void;
+  // Fires while the page is still in its final state, before Kane shuts down.
+  onEnd?: (end: RunEnd) => void;
 };
 
 const isStep = (e: object): e is Step => "step" in e && "status" in e;
@@ -89,6 +92,7 @@ export function runKane(o: KaneOptions): Promise<KaneResult> {
       o.onStep?.(event);
     } else if (isRunEnd(event)) {
       end = event;
+      o.onEnd?.(event);
     }
   });
 

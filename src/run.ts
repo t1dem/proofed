@@ -1,9 +1,9 @@
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { launchChrome } from "./chrome.ts";
 import { makeClip } from "./clip.ts";
 import { runKane, type RunEnd, type Step } from "./kane.ts";
-import { startRecorder } from "./recorder.ts";
+import { startRecorder, type Rect } from "./recorder.ts";
 import type { Scenario } from "./scenarios.ts";
 
 // "unsure" is Kane telling us the test itself looks wrong (verdict family automation_bug):
@@ -21,6 +21,23 @@ export type ScenarioResult = {
 
 // Failures of the browser plumbing rather than of the app: the run is retried, never reported as a bug.
 const INFRA = /Screenshot failed|TimeoutError|TargetClosedError|has been closed|ECONNREFUSED|ECONNRESET|socket hang up|Project and folder must be configured/i;
+
+// Words of what the run checked last: the quoted expectation of a failed check, or the values
+// Kane read off the page when it passed. The clip ends zoomed on the element that holds them.
+const STOP = new Set(["that", "this", "with", "from", "have", "after", "then", "should", "shows", "page", "into", "when", "each", "there", "them", "than", "what", "which", "only", "also", "visible", "displayed"]);
+
+export function focusWords(end: RunEnd) {
+  const text =
+    end.status === "passed"
+      ? Object.values(end.final_state ?? {})
+          .filter((v) => typeof v === "string" && !v.startsWith("http"))
+          .join(" ")
+      : (/["“«]([^"”»]+)["”»]/.exec(end.reason ?? "")?.[1] ?? "");
+  const words = (text.toLowerCase().replace(/[‘’]/g, "'").match(/[\p{L}\p{Sc}\d][\p{L}\p{N}\p{Sc}.,%'-]*/gu) ?? [])
+    .map((w) => w.replace(/[.,]+$/, ""))
+    .filter((w) => (/\d/.test(w) ? w.length >= 2 : w.length >= 4) && !STOP.has(w));
+  return [...new Set(words)];
+}
 
 export function outcomeOf(end: RunEnd | undefined): Outcome {
   if (!end || INFRA.test(end.reason ?? "")) return "error";
@@ -55,6 +72,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
   const chrome = await launchChrome({ headless: o.headless ?? true });
   try {
     const recorder = await startRecorder(chrome.endpoint, join(dir, "frames"));
+    let focus: Promise<Rect | undefined> = Promise.resolve(undefined);
     const kane = await runKane({
       objective: scenario.objective,
       url: new URL(scenario.url, o.baseUrl).href,
@@ -62,21 +80,33 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
       username: o.username,
       accessKey: o.accessKey,
       onStep: (s) => s.status !== "running" && s.remark && log(`${s.status === "failed" ? "✗" : "·"} ${s.remark}`),
+      onEnd: (end) => (focus = recorder.locate(focusWords(end))),
     });
+    const focusRect = await focus;
     // Drop the blank about:blank frames from before Kane's first navigation.
     const start = Date.parse(kane.steps[0]?.ts ?? "") / 1000 || 0;
-    const frames = recorder.stop().filter((f) => f.time >= start);
+    const recorded = recorder.stop();
+    const frames = recorded.frames.filter((f) => f.time >= start);
     const outcome = outcomeOf(kane.end);
     log(`→ ${outcome}${kane.end?.reason ? `: ${kane.end.reason}` : ""} (${frames.length} frames)`);
     const error = kane.timedOut
       ? "Kane stopped responding and the run was cut off"
       : (kane.end?.reason ?? kane.stderr.trim().split("\n").slice(-5).join("\n"));
+    const film = { frames, actions: recorded.actions, focus: focusRect };
+    writeFileSync(join(dir, "film.json"), JSON.stringify(film));
+    const clip = await makeClip(
+      { ...film, endpoint: chrome.endpoint },
+      join(dir, "clip"),
+    ).catch((e: unknown) => {
+      log(`clip failed: ${String(e)}`);
+      return undefined;
+    });
     return {
       scenario,
       outcome,
       steps: kane.steps,
       end: kane.end,
-      clip: makeClip(frames, join(dir, "clip")),
+      clip,
       ...(outcome === "error" && { error }),
     };
   } finally {
