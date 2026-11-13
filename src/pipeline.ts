@@ -38,7 +38,7 @@ export function pickScenarios({ changed, only }: { changed?: string[]; only?: st
 }
 
 // Every scenario gets its own Chrome, so they can run side by side; Kane is mostly waiting on its backend.
-export async function runAll(scenarios: Scenario[], outDir: string, concurrency = 3) {
+export async function runAll(scenarios: Scenario[], outDir: string, concurrency = Number(process.env.PROOFED_CONCURRENCY) || 3) {
   const results: ScenarioResult[] = new Array(scenarios.length);
   let next = 0;
   const worker = async () => {
