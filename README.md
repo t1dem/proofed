@@ -10,7 +10,20 @@ Built for the Kane CLI hackathon, November 2026.
 2. Each scenario runs in its own headless Chrome. Kane drives the browser; Proofed records the screen over the Chrome DevTools Protocol, since Kane doesn't record video. The clip keeps a moment around each of Kane's clicks and keystrokes and cuts the waiting between them. A cursor shows where Kane clicked, the camera zooms in on the element it's using, and the clip ends on the part of the page the final check was about.
 3. The PR gets one comment, edited on every run, with a GIF of each run, a link to the mp4, and Kane's explanation of what went wrong. The commit gets a `Proofed` status.
 4. If Kane decides the test itself is wrong rather than the code, the scenario is flagged and doesn't block the merge. Browser hiccups (a screenshot timeout, a closed tab) are retried once and never reported as bugs.
-5. Tick **Fix with Claude**. Claude Code (Haiku 5.5 at xhigh effort by default, set by the `model` and `effort` inputs) edits the code, the app is rebuilt, and Kane re-runs the broken scenarios. Up to three attempts, each one told why the last failed. Nothing is pushed until a fix passes.
+5. Tick **Fix with Claude**, or comment `/proofed fix`. Claude Code edits the code, the app is rebuilt, and Kane re-runs the broken scenarios. Up to three attempts, each one told why the last failed. Nothing is pushed until a fix passes. The report and the commit (a `Fixed-by:` line) say which model made the fix.
+
+## Commands
+
+Comment on a PR. Only people with write access to the repo can run them.
+
+| Comment | What happens |
+|---|---|
+| `/proofed` | Check the PR again. Works on PRs opened before Proofed was added; scenarios then come from the base branch. |
+| `/proofed <what to check>` | Kane checks just that, e.g. `/proofed the kettle goes into the bag at €45.00`. |
+| `/proofed fix` | Same as ticking the box: Claude fixes it with the repo's model. |
+| `/proofed fix opus high` | This one fix with another model. `haiku`, `sonnet`, `opus` and `fable` mean the latest version; `opus 5.1` picks a version; a full ID like `claude-opus-5-1` is used as written. Effort (`low`, `medium`, `high`, `xhigh`, `max`) goes last and is optional. |
+
+The repo's model is set in the [Proofed dashboard](https://proofed.neptunescodm.workers.dev/app) and saved as the `PROOFED_MODEL` and `PROOFED_EFFORT` Actions variables. Without them it's Haiku 5.5 at xhigh effort.
 
 ## Scenarios
 
@@ -31,26 +44,34 @@ A scenario without `paths` runs on every PR. Editing a scenario file also runs i
 
 ## Setup
 
-Add `LT_USERNAME` and `LT_ACCESS_KEY` (TestMu: Settings → Keys) to the repo secrets, and `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) for the fixer. Then start your app and call the action:
+The easy way: sign in at [proofed.neptunescodm.workers.dev](https://proofed.neptunescodm.workers.dev/app), save your keys and install the GitHub App on a repo. Proofed opens a PR with the workflow and a first scenario, and puts the keys into the repo's secrets.
+
+By hand: add `LT_USERNAME` and `LT_ACCESS_KEY` (TestMu: Settings → Keys) and `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) to the repo secrets, then add one workflow. The action checks out the PR, builds and serves the app with your commands, and checks or fixes depending on the event. The whole file, working, is [proofed-demo-store's](https://github.com/t1dem/proofed-demo-store/blob/main/.github/workflows/proofed.yml); the part that matters:
 
 ```yaml
-on: pull_request
+on:
+  pull_request:
+  issue_comment:
+    types: [created, edited]
 permissions: { contents: write, pull-requests: write, issues: write, statuses: write }
 jobs:
-  kane:
+  proofed:
+    if: # PR events, /proofed comments from people with write access, and a ticked box (see the demo store)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with: { ref: "${{ github.event.pull_request.head.sha }}", fetch-depth: 0 }
-      - run: npm ci && npm run build && (npm run preview &) && npx wait-on http://localhost:4173
       - uses: t1dem/proofed@main
         with:
           url: http://localhost:4173
+          install: npm ci
+          build: npm run build
+          serve: npm run preview
           lt-username: ${{ secrets.LT_USERNAME }}
           lt-access-key: ${{ secrets.LT_ACCESS_KEY }}
+          claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          vars: ${{ toJSON(vars) }}
 ```
 
-The fixer is a second workflow on `issue_comment: edited` that calls `t1dem/proofed/fix@main` with your install, build and serve commands. Both workflows, working, are in [proofed-demo-store](https://github.com/t1dem/proofed-demo-store/tree/main/.github/workflows).
+`vars` hands the action every Actions variable of the repo, so a new setting from the dashboard works without editing the workflow. Repos set up before this keep working: without `serve`, the action only runs the check against an app the workflow already serves, and `t1dem/proofed/fix@main` stays the fixer.
 
 Clips are committed to a `proofed-clips` branch of the same repo, so the GIFs render inline in the comment without any storage of your own. This works in private repos too: anyone who can open the PR can see the clips.
 
@@ -60,4 +81,4 @@ A scenario takes about a minute and 20–30 Kane credits. Proofed only runs the 
 
 ## Code
 
-TypeScript that Node 24 runs directly, no build step. `src/cli.ts` is the PR check, `src/fix.ts` the fix loop, `src/run.ts` one scenario (Chrome, recorder, Kane, clip). `pnpm test` runs the unit tests.
+TypeScript that Node 24 runs directly, no build step. `src/mode.ts` decides what an event asks for, `src/cli.ts` is the PR check, `src/fix.ts` the fix loop, `src/run.ts` one scenario (Chrome, recorder, Kane, clip). `pnpm test` runs the unit tests.

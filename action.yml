@@ -1,19 +1,41 @@
 name: Proofed
-description: Runs the scenarios a PR touches in real Chrome with Kane CLI, records each run, and reports on the PR.
+description: Runs the scenarios a PR touches in real Chrome with Kane CLI, records each run, reports on the PR, and has Claude fix what broke when asked.
 branding:
   icon: eye
   color: orange
 
+# Two ways to use it. With install/build/serve (what the Proofed setup PR writes), this action is the
+# whole workflow: it checks out the PR, serves the app, and either checks it or runs the fixer,
+# depending on the event. Without them it only runs the check, against an app the workflow already
+# serves; the fixer is then t1dem/proofed/fix in a second workflow.
 inputs:
   url:
-    description: Where the app under test is already running, e.g. http://localhost:4173
+    description: Where the app under test runs, e.g. http://localhost:4173
     required: true
+  install:
+    description: Command that installs dependencies
+    default: ""
+  build:
+    description: Command that builds the app (also after every fix attempt)
+    default: ""
+  serve:
+    description: Command that serves the built app on `url`. Setting it makes this action do the whole job.
+    default: ""
+  cache:
+    description: Package manager whose cache setup-node keeps (npm, pnpm, yarn), or empty
+    default: ""
   lt-username:
     description: TestMu username (secrets.LT_USERNAME)
     required: true
   lt-access-key:
     description: TestMu access key (secrets.LT_ACCESS_KEY)
     required: true
+  claude-code-oauth-token:
+    description: From `claude setup-token` (secrets.CLAUDE_CODE_OAUTH_TOKEN), for the fixer
+    default: ""
+  vars:
+    description: The repo's Actions variables as JSON, `${{ toJSON(vars) }}`. Carries settings from the Proofed dashboard, such as PROOFED_MODEL.
+    default: "{}"
   scenarios:
     description: Folder with scenario Markdown files
     default: .proofed/scenarios
@@ -21,10 +43,10 @@ inputs:
     description: Comma-separated scenario ids to run instead of picking them from the diff
     default: ""
   fix:
-    description: Offer the "Fix with Claude" checkbox on failures
+    description: Offer "Fix with Claude" on failures
     default: "true"
   github-token:
-    description: Token for the PR comment, commit status and the clips branch
+    description: Token for the PR comment, commit status, the clips branch and the fixer's push
     default: ${{ github.token }}
   kane-version:
     description: "@testmuai/kane-cli version"
@@ -42,14 +64,54 @@ runs:
       with:
         node-version: 24
 
+    - name: Decide what to run
+      id: mode
+      if: inputs.serve != ''
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PROOFED_FIX: ${{ inputs.fix }}
+        PROOFED_VARS: ${{ inputs.vars }}
+      run: node "$GITHUB_ACTION_PATH/src/mode.ts"
+
+    # The fixer pushes to the PR's branch, so it needs the branch; the check needs the exact commit.
+    - uses: actions/checkout@v4
+      if: steps.mode.outputs.mode == 'check' || steps.mode.outputs.mode == 'fix'
+      with:
+        ref: ${{ steps.mode.outputs.mode == 'fix' && steps.mode.outputs.head_ref || steps.mode.outputs.head_sha }}
+        fetch-depth: 0
+        token: ${{ inputs.github-token }}
+
+    - uses: actions/setup-node@v4
+      if: inputs.cache != '' && (steps.mode.outputs.mode == 'check' || steps.mode.outputs.mode == 'fix')
+      with:
+        node-version: 24
+        cache: ${{ inputs.cache }}
+
     - name: Install Kane CLI and ffmpeg
+      if: steps.mode.outputs.mode != 'none'
       shell: bash
       run: |
         npm install -g "@testmuai/kane-cli@${{ inputs.kane-version }}" >/dev/null
+        if [ "${{ steps.mode.outputs.mode }}" = fix ]; then npm install -g @anthropic-ai/claude-code >/dev/null; fi
         command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null)
         kane-cli --version
 
+    - name: Install the app's dependencies
+      if: steps.mode.outputs.mode == 'check' || steps.mode.outputs.mode == 'fix'
+      shell: bash
+      run: ${{ inputs.install }}
+
+    - name: Build and serve the app
+      if: steps.mode.outputs.mode == 'check'
+      shell: bash
+      run: |
+        ${{ inputs.build }}
+        (${{ inputs.serve }} > "$RUNNER_TEMP/proofed-serve.log" 2>&1 &)
+        npx --yes wait-on@8 -t 60000 "${{ inputs.url }}"
+
     - name: Log Kane in
+      if: steps.mode.outputs.mode != 'none'
       shell: bash
       env:
         LT_USERNAME: ${{ inputs.lt-username }}
@@ -60,6 +122,7 @@ runs:
 
     - name: Run scenarios with Kane
       id: run
+      if: steps.mode.outputs.mode != 'none' && steps.mode.outputs.mode != 'fix'
       shell: bash
       env:
         PROOFED_URL: ${{ inputs.url }}
@@ -78,8 +141,31 @@ runs:
         echo "report=$PROOFED_OUT/report.md" >> "$GITHUB_OUTPUT"
         node "$GITHUB_ACTION_PATH/src/cli.ts"
 
+    - name: Fix with Claude, verify with Kane
+      if: steps.mode.outputs.mode == 'fix'
+      shell: bash
+      env:
+        PROOFED_URL: ${{ inputs.url }}
+        PROOFED_BUILD: ${{ inputs.build }}
+        PROOFED_SERVE: ${{ inputs.serve }}
+        PROOFED_SCENARIOS: ${{ inputs.scenarios }}
+        PROOFED_BASE_SHA: ${{ steps.mode.outputs.base_sha }}
+        PROOFED_HEAD_REF: ${{ steps.mode.outputs.head_ref }}
+        PROOFED_BASE_REF: ${{ steps.mode.outputs.base_ref }}
+        PROOFED_CLAUDE_MODEL: ${{ steps.mode.outputs.model }}
+        PROOFED_CLAUDE_EFFORT: ${{ steps.mode.outputs.effort }}
+        PROOFED_OUT: ${{ runner.temp }}/proofed
+        LT_USERNAME: ${{ inputs.lt-username }}
+        LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
+        KANE_CLI_CDP_TIMEOUT_MS: "60000"
+        KANE_CLI_CDP_RETRIES: "2"
+        KANE_CLI_USER_AGENT: github-action
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: node "$GITHUB_ACTION_PATH/src/fix.ts"
+
     - name: Keep the recordings
-      if: always()
+      if: always() && steps.mode.outputs.mode != 'none'
       uses: actions/upload-artifact@v4
       with:
         name: proofed-${{ github.run_attempt }}

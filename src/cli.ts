@@ -2,9 +2,9 @@
 // Picks the scenarios the diff touches, adds what the PR description asks to have checked, runs
 // each in Chrome with Kane, publishes the clips and reports on the PR.
 import { mkdirSync } from "node:fs";
-import { acknowledge, getPullRequest, setStatus, type PullRequest } from "./github.ts";
+import { acknowledge, getPullRequest, reply, setStatus, type PullRequest } from "./github.ts";
 import { baseRev, changedFiles, ctx, env, isBroken, pickScenarios, publish, readEvent, runAll } from "./pipeline.ts";
-import { askedScenario, descriptionRequest, parseCommand } from "./requests.ts";
+import { askedScenario, descriptionRequest, parseCommand, parseFix } from "./requests.ts";
 import type { Scenario } from "./scenarios.ts";
 
 type Event = {
@@ -24,6 +24,16 @@ if (event.comment && command === undefined) {
   process.exit(0);
 }
 if (repo && event.comment) await acknowledge(repo, event.comment.id).catch(() => {});
+
+// With the current workflow, "/proofed fix" never gets here (src/mode.ts sends it to the fixer).
+// A repo still on the older check-only workflow would otherwise have Kane "check" the words "fix opus".
+if (command !== undefined && parseFix(command)) {
+  if (repo && event.issue) {
+    await reply(repo, event.issue.number,
+      "`/proofed fix` needs the newer Proofed workflow (one `proofed.yml`, see https://github.com/t1dem/proofed). Until then, tick **Fix with Claude** in the report.");
+  }
+  process.exit(0);
+}
 
 const pr = event.pull_request ?? (repo && event.issue?.pull_request ? await getPullRequest(repo, event.issue.number) : undefined);
 const sha = env("PROOFED_SHA", pr?.head.sha ?? process.env.GITHUB_SHA ?? "local");
