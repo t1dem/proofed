@@ -21,6 +21,12 @@ inputs:
   claude-code-oauth-token:
     description: From `claude setup-token`
     required: true
+  model:
+    description: Model Claude Code fixes with
+    default: claude-haiku-5-5
+  effort:
+    description: Claude Code effort level (low, medium, high, xhigh, max)
+    default: xhigh
   scenarios:
     default: .proofed/scenarios
   github-token:
@@ -70,5 +76,7 @@ runs:
         LT_USERNAME: ${{ inputs.lt-username }}
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
+        PROOFED_CLAUDE_MODEL: ${{ inputs.model }}
+        PROOFED_CLAUDE_EFFORT: ${{ inputs.effort }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
       run: node "$GITHUB_ACTION_PATH/../src/fix.ts"

@@ -66,6 +66,7 @@ function askClaude(text: string) {
   const run = spawnSync(
     "claude",
     ["-p", text, "--output-format", "json", "--permission-mode", "acceptEdits", "--max-turns", "40",
+      "--model", env("PROOFED_CLAUDE_MODEL", "claude-haiku-5-5"), "--effort", env("PROOFED_CLAUDE_EFFORT", "xhigh"),
       "--allowedTools", "Read,Edit,Write,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"],
     { encoding: "utf8", maxBuffer: 50 * 1024 * 1024 },
   );
