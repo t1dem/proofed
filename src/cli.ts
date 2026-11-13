@@ -51,8 +51,15 @@ if (command) {
 console.log(`Running ${selected.length} scenario(s)${asked.length ? `, including what the ${command ? "comment" : "PR description"} asks` : ""}.`);
 if (repo && pr) await setStatus(repo, sha, "pending", `Kane is checking ${selected.length} scenario(s) in Chrome`, runUrl);
 
-const results = await runAll(selected, outDir);
-const broken = await publish({ repo, pr: pr?.number, sha, results, skipped, runUrl, outDir, asked });
+let results, broken;
+try {
+  results = await runAll(selected, outDir);
+  broken = await publish({ repo, pr: pr?.number, sha, results, skipped, runUrl, outDir, asked });
+} catch (e) {
+  // Don't leave the PR on "pending" forever.
+  if (repo && pr) await setStatus(repo, sha, "error", "Proofed itself failed; see the logs", runUrl).catch(() => {});
+  throw e;
+}
 
 console.log(`\n${broken.length > 0 ? "✗" : "✓"} ${results.filter((r) => !isBroken(r)).length}/${results.length} passed`);
 process.exitCode = broken.length > 0 ? 1 : 0;

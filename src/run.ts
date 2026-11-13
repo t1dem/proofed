@@ -69,7 +69,13 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
 
-  const chrome = await launchChrome({ headless: o.headless ?? true });
+  let chrome: Awaited<ReturnType<typeof launchChrome>>;
+  try {
+    chrome = await launchChrome({ headless: o.headless ?? true });
+  } catch (e) {
+    // Counts as a browser hiccup: retried, and reported as "couldn't finish", never as a bug.
+    return { scenario, outcome: "error", steps: [], end: undefined, clip: undefined, error: String(e) };
+  }
   try {
     const recorder = await startRecorder(chrome.endpoint, join(dir, "frames"));
     let focus: Promise<Rect | undefined> = Promise.resolve(undefined);
