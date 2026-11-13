@@ -52,7 +52,7 @@ jobs:
 
 The fixer is a second workflow on `issue_comment: edited` that calls `t1dem/proofed/fix@main` with your install, build and serve commands. Both workflows, working, are in [proofed-demo-store](https://github.com/t1dem/proofed-demo-store/tree/main/.github/workflows).
 
-Clips are committed to a `proofed-clips` branch of the same repo, so the GIFs render inline in the comment without any storage of your own.
+Clips are committed to a `proofed-clips` branch of the same repo, so the GIFs render inline in the comment without any storage of your own. This works in private repos too: anyone who can open the PR can see the clips.
 
 ## Cost
 
