@@ -91,14 +91,65 @@ runs:
         node-version: 24
         cache: ${{ inputs.cache }}
 
-    - name: Install Kane CLI and ffmpeg
+    # apt-get install ffmpeg took 35-65 s of every run. A static build (ffmpeg 7.0.2 with libx264, from
+    # eugeneware/ffmpeg-static) is one 25-30 MB download, checked against its SHA-256 and kept in the cache.
+    # Other runners, or a failed download, get apt-get as before.
+    - name: Pick an ffmpeg build
+      id: ffmpeg
       if: steps.mode.outputs.mode != 'none'
       shell: bash
       run: |
+        case "$RUNNER_OS-$RUNNER_ARCH" in
+          Linux-X64) echo "arch=x64" >> "$GITHUB_OUTPUT" ;;
+          Linux-ARM64) echo "arch=arm64" >> "$GITHUB_OUTPUT" ;;
+        esac
+        echo "dir=${RUNNER_TOOL_CACHE:-$RUNNER_TEMP}/proofed-ffmpeg" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/cache/restore@v4
+      if: steps.ffmpeg.outputs.arch != ''
+      with:
+        path: ${{ steps.ffmpeg.outputs.dir }}
+        key: proofed-ffmpeg-b6.1.1-${{ steps.ffmpeg.outputs.arch }}
+
+    - name: Install Kane CLI and ffmpeg
+      id: tools
+      if: steps.mode.outputs.mode != 'none'
+      shell: bash
+      env:
+        FFMPEG_ARCH: ${{ steps.ffmpeg.outputs.arch }}
+        FFMPEG_DIR: ${{ steps.ffmpeg.outputs.dir }}
+      run: |
         npm install -g "@testmuai/kane-cli@${{ inputs.kane-version }}" >/dev/null
         if [ "${{ steps.mode.outputs.mode }}" = fix ]; then npm install -g @anthropic-ai/claude-code >/dev/null; fi
-        command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null)
+        if [ -n "$FFMPEG_ARCH" ] && [ ! -x "$FFMPEG_DIR/ffmpeg" ]; then
+          case "$FFMPEG_ARCH" in
+            x64) sum=bfe8a8fc511530457b528c48d77b5737527b504a3797a9bc4866aeca69c2dffa ;;
+            arm64) sum=754a678672298bc68156adff58aa7385a592c2b30b1d0ae8750c45c915c4bac0 ;;
+          esac
+          mkdir -p "$FFMPEG_DIR"
+          if curl -fsSL --retry 2 -o "$FFMPEG_DIR/ffmpeg.gz" "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-linux-$FFMPEG_ARCH.gz" &&
+            echo "$sum  $FFMPEG_DIR/ffmpeg.gz" | sha256sum -c --quiet - &&
+            gunzip -f "$FFMPEG_DIR/ffmpeg.gz" && chmod +x "$FFMPEG_DIR/ffmpeg" && "$FFMPEG_DIR/ffmpeg" -version >/dev/null; then
+            echo "fetched=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Couldn't get the static ffmpeg; installing it with apt-get"
+            rm -rf "$FFMPEG_DIR"
+          fi
+        fi
+        if [ -n "$FFMPEG_ARCH" ] && "$FFMPEG_DIR/ffmpeg" -version >/dev/null 2>&1; then
+          echo "$FFMPEG_DIR" >> "$GITHUB_PATH"
+          "$FFMPEG_DIR/ffmpeg" -version | sed -n 1p
+        else
+          command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null)
+        fi
         kane-cli --version
+
+    # Saved right away: the cache action's own post step skips saving when the job fails, and a red run is common here.
+    - uses: actions/cache/save@v4
+      if: steps.tools.outputs.fetched == 'true'
+      with:
+        path: ${{ steps.ffmpeg.outputs.dir }}
+        key: proofed-ffmpeg-b6.1.1-${{ steps.ffmpeg.outputs.arch }}
 
     # Each stage leaves its name and output behind, so a failure before Kane can be reported on the PR.
     - name: Install the app's dependencies

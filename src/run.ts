@@ -6,8 +6,9 @@ import { runKane, type RunEnd, type Step } from "./kane.ts";
 import { startRecorder, type Rect } from "./recorder.ts";
 import type { Scenario } from "./scenarios.ts";
 
-// "unsure" is Kane telling us the test itself looks wrong (verdict family automation_bug):
-// worth showing, not worth blocking a merge over.
+// "unsure": the run says nothing about the code. Either Kane decided the test itself looks wrong
+// (verdict family automation_bug), or it reported a pass without checking anything (see outcomeOf).
+// Worth showing, not worth blocking a merge over, and never counted as a pass.
 export type Outcome = "passed" | "failed" | "unsure" | "error";
 
 export type ScenarioResult = {
@@ -17,6 +18,8 @@ export type ScenarioResult = {
   end: RunEnd | undefined;
   clip: { mp4: string; gif: string; jpg: string } | undefined;
   error?: string;
+  // The uncaught exception that left the page blank, when Proofed failed the scenario before Kane ran (precheck.ts).
+  pageError?: string;
   // Wall time of the run, retries included.
   seconds?: number;
 };
@@ -41,11 +44,21 @@ export function focusWords(end: RunEnd) {
   return [...new Set(words)];
 }
 
-export function outcomeOf(end: RunEnd | undefined): Outcome {
+export const NOTHING_CHECKED = "Kane finished without checking anything on the page.";
+
+// Each step's remark starts with its kind ("navigate: …", "wait: …", "analyze: …", "assert: …").
+// Only an assert compares the page with what the scenario expects.
+const checked = (steps: Step[]) => steps.some((s) => s.status === "done" && /^assert:/i.test(s.remark));
+
+export function outcomeOf(end: RunEnd | undefined, steps: Step[]): Outcome {
   if (!end || INFRA.test(end.reason ?? "")) return "error";
-  if (end.status === "passed") return "passed";
+  // A vague objective lets Kane open the page, wait, and call that a pass.
+  if (end.status === "passed") return checked(steps) ? "passed" : "unsure";
   return end.verdict?.family === "automation_bug" ? "unsure" : "failed";
 }
+
+// An unsure run where Kane said "passed": nothing was checked, as opposed to Kane doubting the test.
+export const unchecked = (r: ScenarioResult) => r.outcome === "unsure" && r.end?.status === "passed";
 
 // Kane is good at reaching a goal, so on its own it routes around a broken button (a key press, another
 // link) and passes. A user who clicks the button and gets the wrong screen has found a bug.
@@ -106,8 +119,10 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     const start = Date.parse(kane.steps[0]?.ts ?? "") / 1000 || 0;
     const recorded = recorder.stop();
     const frames = recorded.frames.filter((f) => f.time >= start);
-    const outcome = outcomeOf(kane.end);
-    log(`→ ${outcome}${kane.end?.reason ? `: ${kane.end.reason}` : ""} (${frames.length} frames)`);
+    const outcome = outcomeOf(kane.end, kane.steps);
+    // Kane's reason for such a pass is "Objective completed"; the report, the run file and the fixer show ours.
+    const end = kane.end && outcome === "unsure" && kane.end.status === "passed" ? { ...kane.end, reason: NOTHING_CHECKED } : kane.end;
+    log(`→ ${outcome}${end?.reason ? `: ${end.reason}` : ""} (${frames.length} frames)`);
     const error = kane.timedOut
       ? "Kane stopped responding and the run was cut off"
       : (kane.end?.reason ?? kane.stderr.trim().split("\n").slice(-5).join("\n"));
@@ -124,7 +139,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
       scenario,
       outcome,
       steps: kane.steps,
-      end: kane.end,
+      end,
       clip,
       ...(outcome === "error" && { error }),
     };

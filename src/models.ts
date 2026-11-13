@@ -28,10 +28,10 @@ export function modelLabel(id: string) {
   return `${family[0]!.toUpperCase()}${family.slice(1)} ${major}.${minor}`;
 }
 
-// Who fixed it, for the PR comment: "Claude Opus 5.5 (`claude-opus-5-5`, high effort)".
+// Who fixed it, for the PR comment: "Claude Opus 5.5, high effort". An unknown ID is shown as written.
 export function describeFixer({ model, effort }: Fixer) {
   const label = modelLabel(model);
-  return label === model ? `\`${model}\` (${effort} effort)` : `Claude ${label} (\`${model}\`, ${effort} effort)`;
+  return `${label === model ? `\`${model}\`` : `Claude ${label}`}, ${effort} effort`;
 }
 
 export type ModelChoice = { model: string } | { error: string };

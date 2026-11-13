@@ -3,7 +3,7 @@
 // each in Chrome with Kane, publishes the clips and reports on the PR.
 import { mkdirSync } from "node:fs";
 import { acknowledge, findReport, getPullRequest, reply, setStatus, type PullRequest } from "./github.ts";
-import { baseRev, changedFiles, ctx, env, isBroken, pickScenarios, publish, readEvent, runAll } from "./pipeline.ts";
+import { baseRev, changedFiles, ctx, env, pickScenarios, publish, readEvent, runAll } from "./pipeline.ts";
 import { readReportData } from "./report.ts";
 import { askedScenario, descriptionRequest, parseCommand, parseFix } from "./requests.ts";
 import type { Scenario } from "./scenarios.ts";
@@ -74,5 +74,5 @@ try {
   throw e;
 }
 
-console.log(`\n${broken.length > 0 ? "✗" : "✓"} ${results.filter((r) => !isBroken(r)).length}/${results.length} passed`);
+console.log(`\n${broken.length > 0 ? "✗" : "✓"} ${results.filter((r) => r.outcome === "passed").length}/${results.length} passed`);
 process.exitCode = broken.length > 0 ? 1 : 0;
