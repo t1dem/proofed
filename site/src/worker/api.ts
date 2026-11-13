@@ -2,7 +2,7 @@ import { currentUser, userToken, type UserRow } from "./auth";
 import { decrypt, encrypt, sealForGitHub } from "./crypto";
 import { gh, GitHubError, installationToken } from "./github";
 import type { Env } from "./index";
-import { DEFAULT_FIXER, EFFORTS, MODELS, type Fixer } from "./models";
+import { DEFAULT_FIXER, isEffort, isModelId, MODELS, type Fixer } from "./models";
 import { openSetupPr } from "./setup";
 
 export const SECRET_NAMES = ["LT_USERNAME", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN"] as const;
@@ -203,10 +203,12 @@ export async function handleApi(request: Request, env: Env, path: string) {
     if (!repo) return json({ error: "Proofed isn't installed on that repository." }, 404);
     if (action === "fixer") {
       const body = (await request.json()) as Partial<Fixer>;
-      if (!MODELS.some((m) => m.id === body.model) || !EFFORTS.some((e) => e === body.effort)) {
-        return json({ error: "Pick one of the listed models and effort levels." }, 400);
+      const model = body.model?.trim().toLowerCase() ?? "";
+      const effort = body.effort ?? "";
+      if (!(MODELS.some((m) => m.id === model) || isModelId(model)) || !isEffort(effort)) {
+        return json({ error: "Pick a listed model or type a full model ID such as claude-opus-5-1, and a listed effort." }, 400);
       }
-      const fixer = { model: body.model!, effort: body.effort! };
+      const fixer = { model, effort };
       try {
         await setFixer(await installationToken(env, repo.installationId), repo.full_name, fixer);
       } catch (e) {

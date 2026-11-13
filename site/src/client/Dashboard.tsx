@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { MeView, RepoView } from "../worker/api";
-import { EFFORTS, MODELS, type Fixer } from "../worker/models";
+import { EFFORTS, modelLabel, MODELS, type Fixer } from "../worker/models";
 
 type Load<T> = { status: "loading" } | { status: "signed-out" } | { status: "error"; message: string } | { status: "ok"; data: T };
 
@@ -286,10 +286,14 @@ function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange:
   );
 }
 
+const EXACT = "exact";
+
 // Which Claude model (and effort) "Fix with Claude" uses in this repo. Saved as Actions variables.
 function FixerChoice({ repo }: { repo: RepoView }) {
   const [fixer, setFixer] = useState(repo.fixer);
   const [state, setState] = useState<ReactNode>();
+  // A model that isn't in the list was typed in as a full ID; show it in the field.
+  const [exact, setExact] = useState(() => !!repo.fixer && !MODELS.some((m) => m.id === repo.fixer?.model));
 
   if (!fixer) {
     return (
@@ -316,17 +320,44 @@ function FixerChoice({ repo }: { repo: RepoView }) {
     }
   };
 
+  const pickModel = (value: string) => {
+    if (value === EXACT) return setExact(true);
+    setExact(false);
+    void save({ ...fixer, model: value });
+  };
+  const saveExact = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const model = String(new FormData(e.currentTarget).get("model") ?? "").trim();
+    if (model && model !== fixer.model) void save({ ...fixer, model });
+  };
+
   const select = "min-h-11 rounded-lg border border-line bg-white px-2 text-[15px] outline-none focus:border-ink";
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[15px]">
       <span>Claude fixes with</span>
-      <select aria-label="Model" className={select} value={fixer.model} onChange={(e) => save({ ...fixer, model: e.target.value })}>
+      <select aria-label="Model" className={select} value={exact ? EXACT : fixer.model} onChange={(e) => pickModel(e.target.value)}>
         {MODELS.map((m) => (
           <option key={m.id} value={m.id}>
-            {m.label}
+            {modelLabel(m.id)}
           </option>
         ))}
+        <option value={EXACT}>Exact model ID…</option>
       </select>
+      {exact && (
+        <form onSubmit={saveExact} className="flex items-center gap-2">
+          <input
+            name="model"
+            aria-label="Model ID"
+            defaultValue={MODELS.some((m) => m.id === fixer.model) ? "" : fixer.model}
+            placeholder="claude-opus-5-1"
+            className={`${select} w-52 font-mono`}
+            autoComplete="off"
+            spellCheck={false}
+            required
+          />
+          <button className={secondary}>Save</button>
+        </form>
+      )}
       <select aria-label="Effort" className={select} value={fixer.effort} onChange={(e) => save({ ...fixer, effort: e.target.value })}>
         {EFFORTS.map((e) => (
           <option key={e} value={e}>

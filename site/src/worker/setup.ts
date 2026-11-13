@@ -4,7 +4,7 @@
 import { gh, GitHubError } from "./github";
 
 type Repo = { full_name: string; default_branch?: string };
-type Commands = { setup: string; fixSetup: string; cache: string; install: string; build: string; serve: string; url: string; notes: string[] };
+export type Commands = { setup: string; cache: string; install: string; build: string; serve: string; url: string; notes: string[] };
 
 const BRANCH = "proofed-setup";
 
@@ -23,7 +23,6 @@ async function guessCommands(token: string, repo: string): Promise<Commands> {
   if (!pkgText) {
     return {
       setup: "",
-      fixSetup: "",
       cache: "",
       install: "true",
       build: "true",
@@ -35,7 +34,6 @@ async function guessCommands(token: string, repo: string): Promise<Commands> {
 
   const pkg = JSON.parse(pkgText) as { scripts?: Record<string, string>; packageManager?: string };
   const scripts = pkg.scripts ?? {};
-  // pnpm/action-setup fails if a version is given while package.json also pins one.
   const pinned = /^pnpm@([\d.]+)/.exec(pkg.packageManager ?? "")?.[1];
   const [pnpm, yarn, npmLock] = await Promise.all(
     ["pnpm-lock.yaml", "yarn.lock", "package-lock.json"].map((f) => readFile(token, repo, f).then(Boolean)),
@@ -65,9 +63,8 @@ async function guessCommands(token: string, repo: string): Promise<Commands> {
   }
 
   return {
-    setup: pm !== "pnpm" ? "" : pinned ? "      - uses: pnpm/action-setup@v4\n" : "      - uses: pnpm/action-setup@v4\n        with:\n          version: 10\n",
-    // The fix job sets pnpm up before the checkout, so it always needs the version spelled out.
-    fixSetup: pm === "pnpm" ? `      - uses: pnpm/action-setup@v4\n        with:\n          version: ${pinned ?? "10"}\n` : "",
+    // pnpm is set up before the action checks the repo out, so it can't read packageManager itself.
+    setup: pm === "pnpm" ? `      - uses: pnpm/action-setup@v4\n        with:\n          version: ${pinned ?? "10"}\n` : "",
     cache: pm === "npm" ? "npm" : pm,
     install,
     build,
@@ -77,99 +74,63 @@ async function guessCommands(token: string, repo: string): Promise<Commands> {
   };
 }
 
-const checkWorkflow = (c: Commands) => `name: Proofed
+// One workflow does everything; the action reads the event and either checks the PR or fixes it.
+// `vars` hands it all of the repo's Actions variables, so settings added to the dashboard later
+// reach the action without another PR to this file.
+export const workflow = (c: Commands) => `name: Proofed
 
+# One workflow for everything Proofed does on a PR:
+# - every push to a PR: Kane checks the affected scenarios in Chrome;
+# - "/proofed" in a comment: check again; "/proofed <what to check>": check just that;
+# - "/proofed fix [model] [effort]", or ticking "Fix with Claude" in the report: Claude fixes it.
 on:
   pull_request:
-  # "/proofed" in a PR comment checks that PR again (also one opened before Proofed was added);
-  # "/proofed <what to check>" has Kane check just that.
   issue_comment:
-    types: [created]
+    types: [created, edited]
 
 permissions:
-  contents: write # clips go to the proofed-clips branch
+  contents: write # clips go to the proofed-clips branch, fixes to the PR's branch
   pull-requests: write
   issues: write
   statuses: write
 
 jobs:
-  kane:
-    name: Kane in Chrome
+  proofed:
+    name: Proofed
     # Comments count only from people with write access: the run uses this repo's keys on the PR's code.
+    # An edit counts only on Proofed's own report, which only people with write access can tick.
     if: >-
       github.event_name == 'pull_request' || (
-        github.event.issue.pull_request &&
-        contains(github.event.comment.body, '/proofed') &&
-        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+        github.event.issue.pull_request && ((
+          github.event.action == 'created' &&
+          contains(github.event.comment.body, '/proofed') &&
+          contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+        ) || (
+          github.event.action == 'edited' &&
+          github.event.comment.user.type == 'Bot' &&
+          contains(github.event.comment.body, '<!-- proofed -->') &&
+          contains(github.event.comment.body, '- [x] **Fix with Claude**')
+        ))
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     concurrency:
       group: proofed-\${{ github.event.pull_request.number || github.event.issue.number }}
-      cancel-in-progress: true
+      # A new push makes the running check stale; a comment waits for the run in progress.
+      cancel-in-progress: \${{ github.event_name == 'pull_request' }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: \${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', github.event.issue.number) }}
-          fetch-depth: 0
-${c.setup}      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: ${c.cache}
-
-      - name: Build and serve the app
-        run: |
-          ${c.install}
-          ${c.build}
-          (${c.serve} > serve.log 2>&1 &)
-          npx --yes wait-on@8 -t 60000 ${c.url}
-
-      - uses: t1dem/proofed@main
-        with:
-          url: ${c.url}
-          lt-username: \${{ secrets.LT_USERNAME }}
-          lt-access-key: \${{ secrets.LT_ACCESS_KEY }}
-`;
-
-const fixWorkflow = (c: Commands) => `name: Proofed fix
-
-on:
-  issue_comment:
-    types: [edited]
-
-permissions:
-  contents: write
-  pull-requests: write
-  issues: write
-  statuses: write
-
-jobs:
-  fix:
-    name: Claude fixes, Kane checks
-    # Only when the "Fix with Claude" box in Proofed's own comment gets ticked.
-    if: >-
-      github.event.issue.pull_request &&
-      contains(github.event.comment.body, '<!-- proofed -->') &&
-      contains(github.event.comment.body, '- [x] **Fix with Claude**')
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    concurrency:
-      group: proofed-fix-\${{ github.event.issue.number }}
-    steps:
-${c.fixSetup}      - uses: t1dem/proofed/fix@main
+${c.setup}      - uses: t1dem/proofed@main
         with:
           url: ${c.url}
           install: ${c.install}
           build: ${c.build}
           serve: ${c.serve}
-          lt-username: \${{ secrets.LT_USERNAME }}
+${c.cache ? `          cache: ${c.cache}\n` : ""}          lt-username: \${{ secrets.LT_USERNAME }}
           lt-access-key: \${{ secrets.LT_ACCESS_KEY }}
           claude-code-oauth-token: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Set per repo from the Proofed dashboard; empty means Haiku 5.5 at xhigh.
-          model: \${{ vars.PROOFED_MODEL }}
-          effort: \${{ vars.PROOFED_EFFORT }}
+          # Settings from the Proofed dashboard, such as the model Claude fixes with.
+          vars: \${{ toJSON(vars) }}
 `;
-
 const firstScenario = `---
 name: Home page loads
 url: /
@@ -181,8 +142,7 @@ const prBody = (repo: string, c: Commands) => `Proofed runs the user flows a pul
 
 This PR adds:
 
-- \`.github/workflows/proofed.yml\`: the check, on every pull request and on a \`/proofed\` comment
-- \`.github/workflows/proofed-fix.yml\`: the fixer, when the box is ticked
+- \`.github/workflows/proofed.yml\`: one workflow. It checks every pull request in Chrome, checks again on a \`/proofed\` comment, and has Claude fix a failure when you tick **Fix with Claude** or comment \`/proofed fix\`. \`/proofed fix opus high\` picks another model for that one fix; the repo's model is set in the dashboard.
 - \`.proofed/scenarios/home.md\`: a first scenario. Add one Markdown file per flow; \`paths\` limits a scenario to PRs that touch those files.
 
 **Keys.** The checks need three repository secrets: \`LT_USERNAME\`, \`LT_ACCESS_KEY\` (TestMu) and \`CLAUDE_CODE_OAUTH_TOKEN\` (from \`claude setup-token\`). If you saved them at https://proofed.neptunescodm.workers.dev/app, Proofed has already added them; otherwise add them under [Settings → Secrets → Actions](https://github.com/${repo}/settings/secrets/actions).
@@ -211,8 +171,7 @@ export async function openSetupPr(token: string, repo: Repo) {
   const tree = await gh<{ sha: string }>(token, "POST", `/repos/${name}/git/trees`, {
     base_tree: baseCommit.tree.sha,
     tree: [
-      { path: ".github/workflows/proofed.yml", mode: "100644", type: "blob", content: checkWorkflow(commands) },
-      { path: ".github/workflows/proofed-fix.yml", mode: "100644", type: "blob", content: fixWorkflow(commands) },
+      { path: ".github/workflows/proofed.yml", mode: "100644", type: "blob", content: workflow(commands) },
       { path: ".proofed/scenarios/home.md", mode: "100644", type: "blob", content: firstScenario },
     ],
   });
