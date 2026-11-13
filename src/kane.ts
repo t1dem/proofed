@@ -59,14 +59,24 @@ export function runKane(o: KaneOptions): Promise<KaneResult> {
     String(o.timeoutSeconds ?? 300),
     ...(o.username && o.accessKey ? ["--username", o.username, "--access-key", o.accessKey] : []),
   ];
-  const proc = spawn(process.env.KANE_CLI ?? "kane-cli", args, { stdio: ["ignore", "pipe", "pipe"] });
+  // Own process group: Kane spawns runner and Playwright children that outlive a plain kill.
+  const proc = spawn(process.env.KANE_CLI ?? "kane-cli", args, { stdio: ["ignore", "pipe", "pipe"], detached: true });
+  const killGroup = (signal: NodeJS.Signals) => {
+    try {
+      if (proc.pid) process.kill(-proc.pid, signal);
+    } catch {
+      // Already gone.
+    }
+  };
 
   const steps: Step[] = [];
   let end: RunEnd | undefined;
   let stderr = "";
   proc.stderr.on("data", (d) => (stderr += d));
 
-  createInterface({ input: proc.stdout }).on("line", (line) => {
+  const lines = createInterface({ input: proc.stdout });
+  const drained = new Promise((r) => lines.once("close", r));
+  lines.on("line", (line) => {
     let event: unknown;
     try {
       event = JSON.parse(line);
@@ -85,14 +95,21 @@ export function runKane(o: KaneOptions): Promise<KaneResult> {
   // Kane's own --timeout counts only active time; when its backend stalls a run can hang for
   // a quarter of an hour, so we also enforce a wall-clock limit.
   let timedOut = false;
+  let hardKill: NodeJS.Timeout | undefined;
   const watchdog = setTimeout(() => {
     timedOut = true;
-    proc.kill("SIGTERM");
+    killGroup("SIGTERM");
+    hardKill = setTimeout(() => killGroup("SIGKILL"), 5000);
   }, (o.wallTimeoutSeconds ?? 360) * 1000);
 
+  // "exit", not "close": an orphaned grandchild can hold stdout open long after Kane is gone.
   return new Promise((resolve) =>
-    proc.on("close", (exitCode) => {
+    proc.on("exit", async (exitCode) => {
       clearTimeout(watchdog);
+      clearTimeout(hardKill);
+      // Let the last lines (run_end) through, but don't wait on a stream an orphan keeps open.
+      await Promise.race([drained, new Promise((r) => setTimeout(r, 2000))]);
+      killGroup("SIGKILL");
       resolve({ steps, end, exitCode, stderr, timedOut });
     }),
   );
