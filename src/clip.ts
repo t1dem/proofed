@@ -79,7 +79,10 @@ function fit(shot: Shot, { width, height }: Size): Shot {
 // Frames the element with room around it; small targets get the most zoom.
 function shotOf(rect: Rect, maxZoom: number, size: Size, room = 1): Shot {
   const u = (room * size.width) / OUT_WIDTH;
-  const z = Math.min(size.width / (rect.width * 1.6 + 300 * u), size.height / (rect.height * 1.6 + 220 * u));
+  const z = Math.min(
+    size.width / (rect.width * (1 + 0.6 * room) + 300 * u),
+    size.height / (rect.height * (1 + 0.6 * room) + 220 * u),
+  );
   return fit({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, z: Math.min(z, maxZoom) }, size);
 }
 
@@ -223,7 +226,7 @@ export async function makeClip({ frames, actions, focus, endpoint }: ClipInput, 
       const s = time.scaleAt(a.time);
       return { t: time.toClip(a.time), kind: a.kind, x: a.x * s, y: a.y * s, rect: scaleRect(a.rect, s) };
     });
-  const focusShot = focus && shotOf(scaleRect(focus, last.scale), FOCUS_ZOOM, size, 0.6);
+  const focusShot = focus && shotOf(scaleRect(focus, last.scale), FOCUS_ZOOM, size, 0.5);
   const count = Math.ceil(time.duration * FPS);
   const shots = film(plan(beats, focusShot, time.holdStart, size), count, size);
   const pointer = cursor(beats, focusShot && time.holdStart + 0.4, size);
