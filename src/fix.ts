@@ -100,7 +100,7 @@ function askClaude(text: string) {
   const result = parsed.result?.trim() ?? "";
   // Usage limits and API errors come back as is_error with the message in `result`.
   if (parsed.api_error_status === 404) {
-    return { ok: false as const, message: `the model \`${fixer.model}\` isn't available to this Claude account. Pick another one with \`/proofed fix <model>\`` };
+    return { ok: false as const, message: `the model \`${fixer.model}\` isn't available to this Claude account` };
   }
   if (run.status !== 0 || parsed.is_error) return { ok: false as const, message: result || run.stderr.trim() || "Claude Code failed" };
   const summary = /^SUMMARY:\s*(.+)$/m.exec(result)?.[1] ?? result.split("\n").at(-1) ?? "";
@@ -157,7 +157,7 @@ while (!fixed && attempt < MAX_ATTEMPTS) {
   if (!answer.ok) {
     console.log(`Claude Code couldn't run: ${answer.message}`);
     git("checkout", "--", ".");
-    await restoreReport(`Claude Code couldn't run: ${answer.message}. Tick the box or comment \`/proofed fix\` to try again.`);
+    await restoreReport(`Claude Code couldn't run: ${answer.message}. Tick the box, or comment \`/proofed fix\` with a model, to try again.`);
     process.exit(1);
   }
   summary = answer.summary;
