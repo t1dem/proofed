@@ -1,0 +1,57 @@
+name: Proofed
+
+# One workflow for everything Proofed does on a PR:
+# - every push to a PR: Kane checks the affected scenarios in Chrome;
+# - "/proofed" in a comment: check again; "/proofed <what to check>": check just that;
+# - "/proofed fix [model] [effort]", or ticking "Fix with Claude" in the report: Claude fixes it.
+on:
+  pull_request:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: write # clips go to the proofed-clips branch, fixes to the PR's branch
+  pull-requests: write
+  issues: write
+  statuses: write
+
+jobs:
+  proofed:
+    name: Proofed
+    # Comments count only from people with write access: the run uses this repo's keys on the PR's code.
+    # An edit counts only on Proofed's own report, which only people with write access can tick.
+    if: >-
+      github.event_name == 'pull_request' || (
+        github.event.issue.pull_request && ((
+          github.event.action == 'created' &&
+          contains(github.event.comment.body, '/proofed') &&
+          contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+        ) || (
+          github.event.action == 'edited' &&
+          github.event.comment.user.type == 'Bot' &&
+          contains(github.event.comment.body, '<!-- proofed -->') &&
+          contains(github.event.comment.body, '- [x] **Fix with Claude**')
+        ))
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    concurrency:
+      group: proofed-${{ github.event.pull_request.number || github.event.issue.number }}
+      # A new push makes the running check stale; a comment waits for the run in progress.
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.20.0
+      - uses: t1dem/proofed@main
+        with:
+          url: http://localhost:4173
+          install: pnpm install --frozen-lockfile
+          build: true
+          serve: npx --yes serve@14 -l 4173 dist
+          cache: pnpm
+          lt-username: ${{ secrets.LT_USERNAME }}
+          lt-access-key: ${{ secrets.LT_ACCESS_KEY }}
+          claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Settings from the Proofed dashboard, such as the model Claude fixes with.
+          vars: ${{ toJSON(vars) }}
