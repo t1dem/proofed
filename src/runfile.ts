@@ -26,6 +26,10 @@ export type RunFix = {
 
 export type RunFile = { sha: string; scenarios: RunScenario[]; skipped?: string[]; fix?: RunFix; runUrl?: string };
 
+// The reason of a scenario Kane called passed without asserting anything; the dashboard words such a
+// scenario as "not checked" by it.
+export const NOTHING_CHECKED = "Kane finished without checking anything on the page.";
+
 export const RUN_FILE = "run.json";
 export const runMarker = (key: string) => `<!-- proofed:run ${key} -->`;
 export const readRunKey = (body: string) => /<!-- proofed:run (pr-\d+\/[\w.-]+) -->/.exec(body)?.[1];

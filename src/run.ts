@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { launchChrome } from "./chrome.ts";
 import { makeClip } from "./clip.ts";
 import { runKane, type RunEnd, type Step } from "./kane.ts";
+import { NOTHING_CHECKED } from "./runfile.ts";
 import { startRecorder, type Rect } from "./recorder.ts";
 import type { Scenario } from "./scenarios.ts";
 
@@ -44,7 +45,7 @@ export function focusWords(end: RunEnd) {
   return [...new Set(words)];
 }
 
-export const NOTHING_CHECKED = "Kane finished without checking anything on the page.";
+export { NOTHING_CHECKED };
 
 // Each step's remark starts with its kind ("navigate: …", "wait: …", "analyze: …", "assert: …").
 // Only an assert compares the page with what the scenario expects.

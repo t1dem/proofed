@@ -53,7 +53,7 @@ inputs:
     default: ${{ github.token }}
   kane-version:
     description: "@testmuai/kane-cli version"
-    default: "0.10.3"
+    default: "0.10.4"
 
 outputs:
   report:
