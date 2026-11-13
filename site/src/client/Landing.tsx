@@ -86,7 +86,6 @@ function HeroClip() {
         poster="/clips/fail.jpg"
         active={visible}
         loop
-        zoomOn="94% 58%"
         note={
           <>
             Kane expected shipping €4.90 and a total of €49.40.{" "}

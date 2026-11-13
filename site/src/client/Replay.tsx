@@ -39,19 +39,19 @@ export function Status({ pass, children }: { pass: boolean; children: ReactNode 
   );
 }
 
-// Plays while its step is on screen. With `zoomOn`, the frame closes in on the
-// part of the page Kane flagged once the run ends, like a reviewer leaning in.
-type ClipProps = { src: string; poster: string; active: boolean; zoomOn?: string; note?: ReactNode; loop?: boolean };
+// Plays while its step is on screen. The clip zooms in on what Kane flagged by itself
+// (Proofed renders it that way); `note` spells the verdict out once the run ends.
+type ClipProps = { src: string; poster: string; active: boolean; note?: ReactNode; loop?: boolean };
 
-export function Clip({ src, poster, active, zoomOn, note, loop }: ClipProps) {
+export function Clip({ src, poster, active, note, loop }: ClipProps) {
   const video = useRef<HTMLVideoElement>(null);
-  const [zoomed, setZoomed] = useState(false);
+  const [ended, setEnded] = useState(false);
 
-  // In a loop, hold the zoomed verdict long enough to read, then play the run again.
+  // In a loop, hold the verdict long enough to read, then play the run again.
   useEffect(() => {
-    if (!loop || !zoomed) return;
+    if (!loop || !ended) return;
     const t = setTimeout(() => {
-      setZoomed(false);
+      setEnded(false);
       const v = video.current;
       if (v) {
         v.currentTime = 0;
@@ -59,13 +59,13 @@ export function Clip({ src, poster, active, zoomOn, note, loop }: ClipProps) {
       }
     }, 5000);
     return () => clearTimeout(t);
-  }, [loop, zoomed]);
+  }, [loop, ended]);
 
   useEffect(() => {
     const v = video.current;
     if (!v) return;
     if (active) {
-      setZoomed(false);
+      setEnded(false);
       v.currentTime = 0;
       v.play().catch(() => {});
     } else {
@@ -83,15 +83,14 @@ export function Clip({ src, poster, active, zoomOn, note, loop }: ClipProps) {
           muted
           playsInline
           preload="metadata"
-          onEnded={() => zoomOn && setZoomed(true)}
-          className="h-full w-full transition-transform duration-[1200ms] ease-[cubic-bezier(.2,.8,.2,1)]"
-          style={{ transformOrigin: zoomOn, transform: zoomed ? "scale(1.7)" : "scale(1)" }}
+          onEnded={() => setEnded(true)}
+          className="h-full w-full"
         />
       </div>
       {note && (
         <div
           className={`bg-ink px-4 py-3 text-[14px] leading-snug text-paper transition-opacity duration-700 sm:absolute sm:bottom-4 sm:left-4 sm:max-w-sm sm:rounded-lg sm:bg-ink/90 ${
-            zoomed ? "opacity-100" : "opacity-0 sm:pointer-events-none"
+            ended ? "opacity-100" : "opacity-0 sm:pointer-events-none"
           }`}
         >
           {note}
@@ -178,7 +177,6 @@ const steps: Step[] = [
           src="/clips/fail.mp4"
           poster="/clips/fail.jpg"
           active={active}
-          zoomOn="94% 58%"
           note={
             <>
               Kane expected shipping €4.90 and a total of €49.40. <span className="text-[#ff9b8f]">The bag shows Free and €44.50.</span>
