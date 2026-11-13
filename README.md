@@ -10,7 +10,7 @@ Built for the Kane CLI hackathon, November 2026.
 2. Each scenario runs in its own headless Chrome. Kane drives the browser; Proofed records the screen over the Chrome DevTools Protocol, since Kane doesn't record video.
 3. The PR gets one comment, edited on every run, with a GIF of each run, a link to the mp4, and Kane's explanation of what went wrong. The commit gets a `Proofed` status.
 4. If Kane decides the test itself is wrong rather than the code, the scenario is flagged and doesn't block the merge. Browser hiccups (a screenshot timeout, a closed tab) are retried once and never reported as bugs.
-5. Tick **Fix with Claude**. Claude Code edits the code, the app is rebuilt, and Kane re-runs the broken scenarios. Up to three attempts, each one told why the last failed. Nothing is pushed until a fix passes.
+5. Tick **Fix with Claude**. Claude Code (Haiku 5.5 at xhigh effort by default, set by the `model` and `effort` inputs) edits the code, the app is rebuilt, and Kane re-runs the broken scenarios. Up to three attempts, each one told why the last failed. Nothing is pushed until a fix passes.
 
 ## Scenarios
 
