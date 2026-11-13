@@ -1,5 +1,6 @@
 import { Keyboard, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { NOTHING_CHECKED } from "../../../src/runfile";
 import type { PullView } from "../worker/runs";
 import { ago, plural, prefetch, type Ask, type Load, type Route, type useAsk } from "./lib";
 import { focus, iconButton, kindOf, Link, Mark, outline, PageTitle, Pips, sha7, solid } from "./ui";
@@ -45,6 +46,8 @@ function Why({ pull }: { pull: PullView }): ReactNode {
     );
   }
   if (kind === "unsure") {
+    // Kane called these passed without asserting anything, which is different from doubting the test.
+    if (unsure.every((s) => s.reason === NOTHING_CHECKED)) return <>{strong(names(unsure))}: not checked. {NOTHING_CHECKED}</>;
     return (
       <>
         {strong(names(unsure))}: the test may be wrong, not the code. {unsure[0]?.reason}

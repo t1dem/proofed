@@ -40,7 +40,7 @@ const rank: Kind[] = ["failed", "error", "unsure", "running", "fixing", "passed"
 const dotSays: Partial<Record<Kind, string>> = {
   failed: "a scenario broke",
   error: "Kane couldn't finish a run",
-  unsure: "a test may be wrong",
+  unsure: "a scenario wasn't confirmed",
   running: "Kane is checking",
   fixing: "Claude is fixing",
   passed: "everything passes",
