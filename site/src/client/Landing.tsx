@@ -41,7 +41,7 @@ function Hero() {
   return (
     <section className="mx-auto max-w-6xl px-4 pb-20 pt-12 sm:px-8 sm:pt-20">
       <h1 className="max-w-4xl font-serif text-[2.6rem] leading-[1.05] tracking-tight sm:text-7xl">
-        Every pull request, run in Chrome before you merge it.
+        Every pull request, run in Chrome before it gets merged.
       </h1>
       <p className="mt-6 max-w-2xl text-lg leading-relaxed text-ink/85 sm:text-xl">
         Proofed runs the user flows your diff touches with Kane CLI, posts the recording on the PR, and lets Claude fix what
