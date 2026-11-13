@@ -10,6 +10,22 @@
   --color-fail-bg: #fbe9e6;
   --color-pass: #1f7a3d;
   --color-pass-bg: #e5f3e8;
+  /* The app (/app) has its own palette: dark by default, light under data-theme="light". */
+  --color-bg: #121110;
+  --color-side: #0d0c0b;
+  --color-panel: #191816;
+  --color-hover: #211f1c;
+  --color-edge: #2d2b27;
+  --color-fg: #efede7;
+  --color-dim: #b9b5ab;
+  --color-faint: #938f85;
+  --color-ok: #5cbf7e;
+  --color-bad: #f0685b;
+  --color-busy: #e0ad4a;
+  /* Claude at work: its own colour, so amber only ever means "the test may be wrong". */
+  --color-work: #93a7f5;
+  --color-ok-bg: #132119;
+  --color-bad-bg: #2b1715;
   --font-serif: "Newsreader", Georgia, serif;
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
@@ -22,6 +38,33 @@ html {
 body {
   @apply bg-paper text-ink font-sans antialiased;
   font-size: 17px;
+}
+
+html[data-app] {
+  color-scheme: dark;
+}
+html[data-app] body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-size: 14px;
+  line-height: 1.45;
+}
+html[data-app][data-theme="light"] {
+  color-scheme: light;
+  --color-bg: #fbfaf7;
+  --color-side: #f3f1eb;
+  --color-panel: #ffffff;
+  --color-hover: #eceae3;
+  --color-edge: #dfdbd1;
+  --color-fg: #1a1814;
+  --color-dim: #4f4b43;
+  --color-faint: #777267;
+  --color-ok: #1f7a3d;
+  --color-bad: #c2362b;
+  --color-busy: #8a5d00;
+  --color-work: #3a56c9;
+  --color-ok-bg: #e5f3e8;
+  --color-bad-bg: #fbe9e6;
 }
 
 @media (prefers-reduced-motion: reduce) {

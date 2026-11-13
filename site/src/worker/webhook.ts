@@ -2,6 +2,7 @@ import { pushSecrets } from "./api";
 import type { UserRow } from "./auth";
 import { installationToken, verifySignature } from "./github";
 import type { Env } from "./index";
+import { saveRun } from "./runs";
 import { openSetupPr } from "./setup";
 
 type Repo = { full_name: string };
@@ -11,7 +12,8 @@ type Payload = {
   sender?: { id: number };
   repositories?: Repo[];
   repositories_added?: Repo[];
-  issue?: { number: number; pull_request?: object };
+  issue?: { number: number; title?: string; pull_request?: object };
+  pull_request?: { number: number };
   comment?: { body: string; html_url: string };
   repository?: { full_name: string };
 };
@@ -69,11 +71,29 @@ export async function handleWebhook(request: Request, env: Env, ctx: ExecutionCo
 
   if (event === "issue_comment" && payload.issue?.pull_request && payload.comment?.body.includes(MARKER) && payload.repository) {
     const { state, headline } = readReport(payload.comment.body);
+    const repo = payload.repository.full_name;
     await env.DB.prepare(
-      `INSERT INTO reports (repo, pr, state, headline, url, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-       ON CONFLICT(repo, pr) DO UPDATE SET state = ?3, headline = ?4, url = ?5, updated_at = ?6`,
+      `INSERT INTO reports (repo, pr, state, headline, url, updated_at, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+       ON CONFLICT(repo, pr) DO UPDATE SET state = ?3, headline = ?4, url = ?5, updated_at = ?6, title = ?7`,
     )
-      .bind(payload.repository.full_name, payload.issue.number, state, headline, payload.comment.html_url, Date.now())
+      .bind(repo, payload.issue.number, state, headline, payload.comment.html_url, Date.now(), payload.issue.title ?? null)
+      .run();
+    if (payload.installation) {
+      const { id } = payload.installation;
+      const { number } = payload.issue;
+      const { body: comment } = payload.comment;
+      ctx.waitUntil(
+        installationToken(env, id)
+          .then((token) => saveRun(env, token, repo, number, comment))
+          .catch((e: unknown) => console.log("run", repo, number, String(e))),
+      );
+    }
+  }
+
+  // A closed pull request leaves the inbox; reopening brings it back.
+  if (event === "pull_request" && payload.pull_request && payload.repository && (payload.action === "closed" || payload.action === "reopened")) {
+    await env.DB.prepare("UPDATE reports SET closed = ?1 WHERE repo = ?2 AND pr = ?3")
+      .bind(payload.action === "closed" ? 1 : 0, payload.repository.full_name, payload.pull_request.number)
       .run();
   }
 

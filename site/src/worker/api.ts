@@ -3,6 +3,7 @@ import { decrypt, encrypt, sealForGitHub } from "./crypto";
 import { gh, GitHubError, installationToken } from "./github";
 import type { Env } from "./index";
 import { DEFAULT_FIXER, isEffort, isModelId, MODELS, type Fixer } from "./models";
+import { getPull, listPulls } from "./runs";
 import { openSetupPr } from "./setup";
 
 export const SECRET_NAMES = ["LT_USERNAME", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN"] as const;
@@ -14,6 +15,8 @@ export type RepoView = {
   installationId: number;
   setup: "active" | "pr-open" | "none";
   setupPr?: string;
+  // The workflow is switched off on GitHub: pull requests aren't checked until it's switched back on.
+  paused: boolean;
   secrets: string[];
   // null when Proofed can't read the repo's Actions variables (the installation predates that permission).
   fixer: Fixer | null;
@@ -29,6 +32,8 @@ export type MeView = {
 };
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
+
+const WORKFLOW = "proofed.yml";
 
 type Installation = { id: number; account: { login: string } };
 type InstallationRepo = { id: number; full_name: string; html_url: string; private: boolean };
@@ -60,8 +65,12 @@ async function describeRepo(env: Env, repo: InstallationRepo & { installationId:
       },
     );
 
-  const [active, prs, secrets, fixer, report] = await Promise.all([
+  const [active, paused, prs, secrets, fixer, report] = await Promise.all([
     exists(".github/workflows/proofed.yml"),
+    gh<{ state: string }>(token, "GET", `/repos/${repo.full_name}/actions/workflows/${WORKFLOW}`).then(
+      (w) => w.state === "disabled_manually",
+      () => false,
+    ),
     gh<{ html_url: string }[]>(token, "GET", `/repos/${repo.full_name}/pulls?head=${repo.full_name.split("/")[0]}:proofed-setup&state=open`),
     gh<{ secrets: { name: string }[] }>(token, "GET", `/repos/${repo.full_name}/actions/secrets?per_page=100`).then(
       (r) => r.secrets.map((s) => s.name),
@@ -86,6 +95,7 @@ async function describeRepo(env: Env, repo: InstallationRepo & { installationId:
     installationId: repo.installationId,
     setup: active ? "active" : prs[0] ? "pr-open" : "none",
     setupPr: prs[0]?.html_url,
+    paused: active && paused,
     secrets: secrets.filter((s) => (SECRET_NAMES as readonly string[]).includes(s)),
     fixer,
     report: report
@@ -196,7 +206,37 @@ export async function handleApi(request: Request, env: Env, path: string) {
     return json({ ok: true, synced: synced.filter((s) => s.status === "fulfilled").length, of: repos.length });
   }
 
-  const repoAction = /^\/api\/repos\/([^/]+)\/([^/]+)\/(setup|secrets|fixer)$/.exec(path);
+  if (path === "/api/pulls" && request.method === "GET") {
+    const repos = await listRepos(env, token);
+    return json(await listPulls(env, repos.map((r) => r.full_name)));
+  }
+
+  const pull = /^\/api\/pulls\/([^/]+\/[^/]+)\/(\d+)(?:\/(fix|rerun))?$/.exec(path);
+  if (pull) {
+    const [, repoName = "", number, action] = pull;
+    if (!(await listRepos(env, token)).some((r) => r.full_name === repoName)) {
+      return json({ error: "Proofed isn't installed on that repository." }, 404);
+    }
+    if (!action && request.method === "GET") {
+      const detail = await getPull(env, repoName, Number(number));
+      return detail ? json(detail) : json({ error: "Proofed hasn't reported on that pull request." }, 404);
+    }
+    if (action && request.method === "POST") {
+      // The workflow listens for these comments, and only from people with write access:
+      // posted with the user's own token, the comment is theirs.
+      try {
+        await gh(token, "POST", `/repos/${repoName}/issues/${number}/comments`, { body: action === "fix" ? "/proofed fix" : "/proofed" });
+      } catch (e) {
+        if (e instanceof GitHubError && (e.status === 403 || e.status === 404)) {
+          return json({ error: "GitHub didn't let Proofed comment on this pull request for you. Comment /proofed there yourself." }, 403);
+        }
+        throw e;
+      }
+      return json({ ok: true });
+    }
+  }
+
+  const repoAction = /^\/api\/repos\/([^/]+)\/([^/]+)\/(setup|secrets|fixer|pause|resume)$/.exec(path);
   if (repoAction && request.method === "POST") {
     const [, owner, name, action] = repoAction;
     const repo = (await listRepos(env, token)).find((r) => r.full_name === `${owner}/${name}`);
@@ -218,6 +258,12 @@ export async function handleApi(request: Request, env: Env, path: string) {
         throw e;
       }
       return json({ fixer });
+    }
+    // Pause switches the repo's Proofed workflow off on GitHub; nothing in the repo changes.
+    if (action === "pause" || action === "resume") {
+      const token = await installationToken(env, repo.installationId);
+      await gh(token, "PUT", `/repos/${repo.full_name}/actions/workflows/${WORKFLOW}/${action === "pause" ? "disable" : "enable"}`);
+      return json({ paused: action === "pause" });
     }
     if (action === "setup") {
       const result = await openSetupPr(await installationToken(env, repo.installationId), repo);
