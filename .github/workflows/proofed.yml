@@ -18,6 +18,15 @@ permissions:
   id-token: write
 
 jobs:
+  oidc-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node .github/oidc-check.mjs
   proofed:
     name: Proofed
     # Comments count only from people with write access: the run uses this repo's keys on the PR's code.
@@ -46,7 +55,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 10.20.0
-      - uses: t1dem/proofed@main
+      - uses: t1dem/proofed@fix-push-as-app
         with:
           url: http://localhost:4173
           working-directory: site
