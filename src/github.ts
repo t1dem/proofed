@@ -22,6 +22,19 @@ async function api<T>(repo: Repo, method: string, path: string, body?: unknown):
   return (res.status === 204 ? undefined : await res.json()) as T;
 }
 
+export type PullRequest = {
+  number: number;
+  body: string | null;
+  base: { sha: string; ref: string };
+  head: { sha: string; ref: string };
+};
+
+export const getPullRequest = (repo: Repo, number: number) => api<PullRequest>(repo, "GET", `/pulls/${number}`);
+
+// 👀 on a /proofed comment, so whoever asked sees it was picked up.
+export const acknowledge = (repo: Repo, commentId: number) =>
+  api(repo, "POST", `/issues/comments/${commentId}/reactions`, { content: "eyes" });
+
 export class GitHubError extends Error {
   status: number;
   constructor(status: number, message: string) {

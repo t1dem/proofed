@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { publishClips, repoFromEnv, setStatus, upsertComment, type Repo } from "./github.ts";
 import { buildReport, type ClipLinks, type FixNote } from "./report.ts";
 import { runScenario, type ScenarioResult } from "./run.ts";
-import { affectedBy, loadScenarios, type Scenario } from "./scenarios.ts";
+import { affectedBy, loadScenariosOr, type Scenario } from "./scenarios.ts";
 
 export const env = (name: string, fallback?: string) => {
   const value = process.env[name]?.trim() || fallback;
@@ -31,8 +31,19 @@ export const ctx = () => {
 export const changedFiles = (base: string, head = "HEAD") =>
   execFileSync("git", ["diff", "--name-only", `${base}...${head}`], { encoding: "utf8" }).split("\n").filter(Boolean);
 
-export function pickScenarios({ changed, only }: { changed?: string[]; only?: string[] }) {
-  const all = loadScenarios(env("PROOFED_SCENARIOS", ".proofed/scenarios"));
+// The base branch as the runner sees it (origin/main), so the diff and any scenarios read from it
+// are current even for a PR whose recorded base commit is weeks old. Falls back to that commit.
+export function baseRev(base: { ref: string; sha: string }) {
+  try {
+    execFileSync("git", ["rev-parse", "--verify", "--quiet", `origin/${base.ref}`], { stdio: "ignore" });
+    return `origin/${base.ref}`;
+  } catch {
+    return base.sha;
+  }
+}
+
+export function pickScenarios({ changed, only, rev }: { changed?: string[]; only?: string[]; rev?: string }) {
+  const all = loadScenariosOr(env("PROOFED_SCENARIOS", ".proofed/scenarios"), rev);
   const selected = only?.length ? all.filter((s) => only.includes(s.id)) : changed ? affectedBy(all, changed) : all;
   return { selected, skipped: all.filter((s) => !selected.includes(s)).map((s) => s.name) };
 }
@@ -68,9 +79,10 @@ type PublishInput = {
   runUrl: string | undefined;
   outDir: string;
   fix?: FixNote;
+  asked?: Scenario[];
 };
 
-export async function publish({ repo, pr, sha, results, skipped, runUrl, outDir, fix }: PublishInput) {
+export async function publish({ repo, pr, sha, results, skipped, runUrl, outDir, fix, asked }: PublishInput) {
   const clips = new Map<string, ClipLinks>();
   if (repo && pr) {
     const prefix = `pr-${pr}/${sha.slice(0, 7)}-${process.env.GITHUB_RUN_ID ?? "local"}`;
@@ -86,7 +98,7 @@ export async function publish({ repo, pr, sha, results, skipped, runUrl, outDir,
     for (const f of files) clips.set(f.id, { ...clips.get(f.id), [f.kind]: urls.get(f.path) });
   }
 
-  const body = buildReport({ sha, results, skipped, clips, runUrl, fixEnabled: process.env.PROOFED_FIX !== "false", fix });
+  const body = buildReport({ sha, results, skipped, clips, runUrl, fixEnabled: process.env.PROOFED_FIX !== "false", fix, asked });
   writeFileSync(join(outDir, "report.md"), body);
   writeFileSync(join(outDir, "results.json"), JSON.stringify(results, null, 2));
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, body);

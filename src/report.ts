@@ -1,5 +1,6 @@
 import { MARKER } from "./github.ts";
 import type { ScenarioResult } from "./run.ts";
+import type { Scenario } from "./scenarios.ts";
 
 export type ClipLinks = { gif?: string; mp4?: string };
 
@@ -14,7 +15,8 @@ export type FailureData = {
   diagnosis: string;
   steps: string[];
 };
-export type ReportData = { sha: string; failures: FailureData[] };
+// `asked`: one-off checks from the PR description or a /proofed comment, kept so the fixer can re-run them.
+export type ReportData = { sha: string; failures: FailureData[]; asked?: Scenario[] };
 export type FixNote = { status: "fixed" | "gave-up"; attempts: number; summary: string; commit?: string; commitUrl?: string };
 
 const DATA_RE = /<!-- proofed:data (.*?) -->/s;
@@ -48,9 +50,10 @@ type ReportInput = {
   runUrl?: string;
   fixEnabled: boolean;
   fix?: FixNote;
+  asked?: Scenario[];
 };
 
-export function buildReport({ sha, results, skipped, clips, runUrl, fixEnabled, fix }: ReportInput) {
+export function buildReport({ sha, results, skipped, clips, runUrl, fixEnabled, fix, asked }: ReportInput) {
   const failed = results.filter((r) => r.outcome === "failed");
   const errored = results.filter((r) => r.outcome === "error");
   const unsure = results.filter((r) => r.outcome === "unsure");
@@ -118,6 +121,7 @@ export function buildReport({ sha, results, skipped, clips, runUrl, fixEnabled, 
 
   const data: ReportData = {
     sha,
+    ...(asked?.length && { asked }),
     failures: failed.map((r) => ({
       id: r.scenario.id,
       name: r.scenario.name,
@@ -132,8 +136,9 @@ export function buildReport({ sha, results, skipped, clips, runUrl, fixEnabled, 
   const footer = [`Run by Kane CLI on ${sha.slice(0, 7)}`, credits > 0 && `${Math.round(credits)} credits`, runUrl && `[logs](${runUrl})`]
     .filter(Boolean)
     .join(" · ");
+  const hint = "Comment <code>/proofed</code> to check again, or <code>/proofed</code> followed by what to check.";
   // JSON inside an HTML comment: "--" would end the comment early, so escape it.
   const hidden = `<!-- proofed:data ${JSON.stringify(data).replaceAll("--", "\\u002d\\u002d")} -->`;
 
-  return `${sections.join("\n\n")}\n\n<sub>${footer}</sub>\n${hidden}`;
+  return `${sections.join("\n\n")}\n\n<sub>${footer}<br>${hint}</sub>\n${hidden}`;
 }

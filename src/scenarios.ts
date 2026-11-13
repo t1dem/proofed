@@ -1,4 +1,5 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, matchesGlob } from "node:path";
 
 export type Scenario = {
@@ -52,6 +53,23 @@ export function loadScenarios(dir: string) {
     .filter((f) => f.endsWith(".md"))
     .sort()
     .map((f) => parseScenario(join(dir, f), readFileSync(join(dir, f), "utf8")));
+}
+
+// A PR opened before Proofed was added has no scenarios on its branch; they're read from the base
+// branch instead (`rev`, e.g. origin/main).
+export function loadScenariosOr(dir: string, rev: string | undefined) {
+  if (existsSync(dir)) return loadScenarios(dir);
+  if (!rev) return [];
+  const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  try {
+    return git("ls-tree", "--name-only", rev, `${dir.replace(/\/$/, "")}/`)
+      .split("\n")
+      .filter((f) => f.endsWith(".md"))
+      .sort()
+      .map((f) => parseScenario(f, git("show", `${rev}:${f}`)));
+  } catch {
+    return [];
+  }
 }
 
 // A scenario runs when the diff touches one of its paths, or the scenario file itself.
