@@ -14,6 +14,8 @@ permissions:
   pull-requests: write
   issues: write
   statuses: write
+  # Traded for a push token of the Proofed app, so the workflows on Claude's fix commit run without an approval.
+  id-token: write
 
 jobs:
   proofed:
@@ -37,8 +39,9 @@ jobs:
     timeout-minutes: 40
     concurrency:
       group: proofed-${{ github.event.pull_request.number || github.event.issue.number }}
-      # A new push makes the running check stale; a comment waits for the run in progress.
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+      # A new push makes the running check stale; a comment waits for the run in progress. So does the run
+      # on Claude's fix, pushed by the Proofed app: the fix run is still reporting on that commit.
+      cancel-in-progress: ${{ github.event_name == 'pull_request' && github.actor != 'proofed-by-kane[bot]' }}
     steps:
       - uses: pnpm/action-setup@v4
         with:

@@ -313,7 +313,7 @@ export async function handleApi(request: Request, env: Env, path: string) {
       return json({ paused: action === "pause" });
     }
     if (action === "setup") {
-      const result = await openSetupPr(await installationToken(env, repo.installationId), repo);
+      const result = await openSetupPr(await installationToken(env, repo.installationId), repo, env.GITHUB_APP_SLUG);
       return json(result);
     }
     return json({ pushed: await pushSecrets(env, user, repo.full_name, repo.installationId) });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { descriptionRequest, parseCommand, parseFix } from "./requests.ts";
+import { askedScenario, descriptionRequest, parseCommand, parseFix } from "./requests.ts";
 
 test("/proofed alone re-runs the check; with text it asks for that", () => {
   assert.equal(parseCommand("/proofed"), "");
@@ -26,4 +26,9 @@ test("a PR description is a request unless it's a template comment or a long cha
   assert.equal(descriptionRequest("<!-- describe your change -->\n"), undefined);
   assert.equal(descriptionRequest(null), undefined);
   assert.equal(descriptionRequest("x".repeat(2000)), undefined);
+});
+
+test("only a PR description gets told it may ask for nothing", () => {
+  assert.match(askedScenario("description", "Will be closed").objective, /stop right away without clicking anything[^]*Never sign in/);
+  assert.doesNotMatch(askedScenario("comment", "the cart total").objective, /Never sign in/);
 });

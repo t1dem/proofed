@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { publishClips, repoFromEnv, setStatus, upsertComment, type Repo } from "./github.ts";
 import { crashResult, findCrashes } from "./precheck.ts";
 import { buildReport, type ClipLinks, type FixNote, type ReportData } from "./report.ts";
+import { nothingAsked } from "./requests.ts";
 import { runScenario, type ScenarioResult } from "./run.ts";
 import { RUN_FILE, type RunFile } from "./runfile.ts";
 import { affectedBy, loadScenariosOr, type Scenario } from "./scenarios.ts";
@@ -100,12 +101,13 @@ type PublishInput = {
 };
 
 // The dashboard's copy of the run. Steps are capped like the comment's, so the file stays small.
+// A description that asked for nothing isn't in it, as it isn't in the comment's count.
 function runFile({ sha, results, skipped, runUrl, fix }: PublishInput, clips: Map<string, ClipLinks>): RunFile {
   return {
     sha,
     runUrl,
     skipped,
-    scenarios: results.map((r) => ({
+    scenarios: results.filter((r) => !nothingAsked(r)).map((r) => ({
       id: r.scenario.id,
       name: r.scenario.name,
       outcome: r.outcome,
@@ -167,18 +169,19 @@ export async function publish(input: PublishInput) {
   const broken = results.filter(isBroken);
   const failed = results.filter((r) => r.outcome === "failed");
   const passed = results.filter((r) => r.outcome === "passed");
+  const counted = results.filter((r) => !nothingAsked(r));
   if (repo && pr) {
     const comment = await upsertComment(repo, pr, body);
     const names = (rs: ScenarioResult[]) => rs.map((r) => r.scenario.name).join(", ");
     // Unsure runs don't block a merge, but they aren't passes either.
     const [state, description] =
       failed.length > 0
-        ? (["failure", `${failed.length} of ${results.length} broke: ${names(failed)}`] as const)
+        ? (["failure", `${failed.length} of ${counted.length} broke: ${names(failed)}`] as const)
         : broken.length > 0
           ? (["error", `Kane couldn't finish: ${names(broken)}`] as const)
-          : passed.length < results.length
-            ? (["success", `${passed.length} passed, ${results.length - passed.length} not checked`] as const)
-            : (["success", `${results.length} scenario(s) pass in Chrome`] as const);
+          : passed.length < counted.length
+            ? (["success", `${passed.length} passed, ${counted.length - passed.length} not checked`] as const)
+            : (["success", `${counted.length} scenario(s) pass in Chrome`] as const);
     await setStatus(repo, sha, state, description, comment.html_url);
   }
   return broken;

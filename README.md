@@ -53,11 +53,15 @@ on:
   pull_request:
   issue_comment:
     types: [created, edited]
-permissions: { contents: write, pull-requests: write, issues: write, statuses: write }
+permissions: { contents: write, pull-requests: write, issues: write, statuses: write, id-token: write }
 jobs:
   proofed:
     if: # PR events, /proofed comments from people with write access, and a ticked box (see the demo store)
     runs-on: ubuntu-latest
+    concurrency:
+      group: proofed-${{ github.event.pull_request.number || github.event.issue.number }}
+      # A new push cancels a stale check, but not the push of Claude's fix: that run waits for the fix run.
+      cancel-in-progress: ${{ github.event_name == 'pull_request' && github.actor != 'proofed-by-kane[bot]' }}
     steps:
       - uses: t1dem/proofed@main
         with:
@@ -71,7 +75,9 @@ jobs:
           vars: ${{ toJSON(vars) }}
 ```
 
-`vars` hands the action every Actions variable of the repo, so a new setting from the dashboard works without editing the workflow. Repos set up before this keep working: without `serve`, the action only runs the check against an app the workflow already serves, and `t1dem/proofed/fix@main` stays the fixer.
+`vars` hands the action every Actions variable of the repo, so a new setting from the dashboard works without editing the workflow.
+
+`id-token: write` lets the fixer push Claude's commit as the Proofed GitHub App: Proofed's server checks the job's OIDC token and returns a token that can only push to that one repository. A push with the job's own `GITHUB_TOKEN` would leave every workflow on the fix commit, your CI included, waiting for someone to approve it. The app's push starts a normal check of the fix commit; it sees the report is already about that commit and finishes in seconds. Without `id-token: write` the fix is pushed with `GITHUB_TOKEN` as before. Repos set up before this keep working: without `serve`, the action only runs the check against an app the workflow already serves, and `t1dem/proofed/fix@main` stays the fixer.
 
 Clips are committed to a `proofed-clips` branch of the same repo, so the GIFs render inline in the comment without any storage of your own. This works in private repos too: anyone who can open the PR can see the clips.
 

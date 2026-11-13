@@ -110,8 +110,8 @@ async function guessCommands(token: string, repo: string, ref: string): Promise<
 
 // One workflow does everything; the action reads the event and either checks the PR or fixes it.
 // `vars` hands it all of the repo's Actions variables, so settings added to the dashboard later
-// reach the action without another PR to this file.
-export const workflow = (c: Commands) => `name: Proofed
+// reach the action without another PR to this file. `bot` is the app's login, the author of the fixer's pushes.
+export const workflow = (c: Commands, bot: string) => `name: Proofed
 
 # One workflow for everything Proofed does on a PR:
 # - every push to a PR: Kane checks the affected scenarios in Chrome;
@@ -127,6 +127,8 @@ permissions:
   pull-requests: write
   issues: write
   statuses: write
+  # Traded for a push token of the Proofed app, so the workflows on Claude's fix commit run without an approval.
+  id-token: write
 
 jobs:
   proofed:
@@ -150,8 +152,9 @@ jobs:
     timeout-minutes: 40
     concurrency:
       group: proofed-\${{ github.event.pull_request.number || github.event.issue.number }}
-      # A new push makes the running check stale; a comment waits for the run in progress.
-      cancel-in-progress: \${{ github.event_name == 'pull_request' }}
+      # A new push makes the running check stale; a comment waits for the run in progress. So does the run
+      # on Claude's fix, pushed by the Proofed app: the fix run is still reporting on that commit.
+      cancel-in-progress: \${{ github.event_name == 'pull_request' && github.actor != '${bot}' }}
     steps:
 ${c.setup}      - uses: t1dem/proofed@main
         with:
@@ -191,7 +194,7 @@ Proofed checks this pull request with those commands too. If one of them is wron
 Docs: https://github.com/t1dem/proofed
 `;
 
-export async function openSetupPr(token: string, repo: Repo) {
+export async function openSetupPr(token: string, repo: Repo, appSlug: string) {
   const name = repo.full_name;
   if ((await readFile(token, name, ".github/workflows/proofed.yml")) !== undefined) return { skipped: "already set up" };
 
@@ -207,7 +210,7 @@ export async function openSetupPr(token: string, repo: Repo) {
   const tree = await gh<{ sha: string }>(token, "POST", `/repos/${name}/git/trees`, {
     base_tree: baseCommit.tree.sha,
     tree: [
-      { path: ".github/workflows/proofed.yml", mode: "100644", type: "blob", content: workflow(commands) },
+      { path: ".github/workflows/proofed.yml", mode: "100644", type: "blob", content: workflow(commands, `${appSlug}[bot]`) },
       { path: ".proofed/scenarios/home.md", mode: "100644", type: "blob", content: firstScenario },
     ],
   });

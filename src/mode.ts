@@ -2,10 +2,10 @@
 // check the PR in Chrome, or have Claude fix what the last check found. It also settles the fix model,
 // so a "/proofed fix" that can't run gets an answer before anything is installed.
 import { appendFileSync } from "node:fs";
-import { acknowledge, findReport, getPullRequest, reply, type PullRequest } from "./github.ts";
+import { acknowledge, findReport, getPullRequest, hasStatus, reply, setStatus, type PullRequest } from "./github.ts";
 import { DEFAULT_FIXER } from "./models.ts";
 import { ctx, readEvent } from "./pipeline.ts";
-import { fixRequested, readReportData } from "./report.ts";
+import { alreadyReported, fixRequested, readReportData } from "./report.ts";
 import { parseCommand, parseFix, type FixCommand } from "./requests.ts";
 
 type Event = {
@@ -60,6 +60,25 @@ if (event.action === "edited" && event.comment) {
       mode = "fix";
       asked = fix;
     }
+  }
+}
+
+// The run that Claude's fix commit starts: the fix run already checked that commit and reported on it.
+if (mode === "check" && event.pull_request) {
+  const sha = event.pull_request.head.sha;
+  const report = await findReport(repo, number);
+  const data = report?.body ? readReportData(report.body) : undefined;
+  if (report && data && alreadyReported(event.action, sha, data)) {
+    try {
+      if (!(await hasStatus(repo, sha))) {
+        const last = data.history?.at(-1);
+        const state = last?.sha === sha ? last.state : data.failures.length > 0 ? "failed" : "passed";
+        await setStatus(repo, sha, state === "failed" ? "failure" : state === "error" ? "error" : "success", "Already checked on this commit; see the report", report.html_url);
+      }
+    } catch (e) {
+      console.log(`Couldn't check the commit status: ${e instanceof Error ? e.message : e}`);
+    }
+    skip(`The report on this PR is already about ${sha.slice(0, 7)}; nothing to run.`);
   }
 }
 
