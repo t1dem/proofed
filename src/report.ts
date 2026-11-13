@@ -64,6 +64,8 @@ export function buildReport({ sha, results, skipped, clips, runUrl, fixEnabled, 
         ? `**${failed.length} of ${results.length}** scenarios broke on this PR.`
         : errored.length > 0
           ? `Kane couldn't finish ${errored.length} of ${results.length} scenarios. Nothing points at the code yet.`
+          : results.length === 1
+          ? "The affected scenario passes in a real browser."
           : `All ${results.length} affected scenarios pass in a real browser.`;
 
   const sections: string[] = [`${MARKER}\n### Proofed\n\n${headline}`];
