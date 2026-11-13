@@ -13,6 +13,9 @@ Check that shipping is €4.90 and the total is €49.40.
 Press + next to Paper Filters once.
 Check that shipping is now Free and the total is €51.00.`;
 
+// The scenario's own name, shown as a label above the file.
+const scenarioName = scenario.match(/^title: (.+)$/m)![1];
+
 function Header() {
   return (
     <header className="mx-auto flex max-w-6xl items-center justify-between px-4 py-5 sm:px-8">
@@ -142,7 +145,7 @@ function Setup() {
         </div>
         <figure className="self-start overflow-hidden rounded-xl border border-line bg-card lg:mt-24">
           <figcaption className="border-b border-line px-4 py-2.5 font-mono text-[13px] text-muted">
-            .proofed/scenarios/free-shipping.md
+            <span className="text-ink">{scenarioName}</span> · .proofed/scenarios/free-shipping.md
           </figcaption>
           <pre className="overflow-x-auto whitespace-pre-wrap p-4 font-mono text-[13px] leading-6 sm:text-sm">{scenario}</pre>
         </figure>
