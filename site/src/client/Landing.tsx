@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Clip, Replay, Status } from "./Replay";
 
 const REPO = "https://github.com/t1dem/proofed";
+const broken: number = "not a number";
 const PR = "https://github.com/t1dem/proofed-demo-store/pull/2";
 
 const scenario = `---
