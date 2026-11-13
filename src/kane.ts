@@ -29,6 +29,7 @@ export type KaneResult = {
   end: RunEnd | undefined;
   exitCode: number | null;
   stderr: string;
+  timedOut: boolean;
 };
 
 type KaneOptions = {
@@ -38,6 +39,7 @@ type KaneOptions = {
   username?: string;
   accessKey?: string;
   timeoutSeconds?: number;
+  wallTimeoutSeconds?: number;
   onStep?: (step: Step) => void;
 };
 
@@ -80,5 +82,18 @@ export function runKane(o: KaneOptions): Promise<KaneResult> {
     }
   });
 
-  return new Promise((resolve) => proc.on("close", (exitCode) => resolve({ steps, end, exitCode, stderr })));
+  // Kane's own --timeout counts only active time; when its backend stalls a run can hang for
+  // a quarter of an hour, so we also enforce a wall-clock limit.
+  let timedOut = false;
+  const watchdog = setTimeout(() => {
+    timedOut = true;
+    proc.kill("SIGTERM");
+  }, (o.wallTimeoutSeconds ?? 360) * 1000);
+
+  return new Promise((resolve) =>
+    proc.on("close", (exitCode) => {
+      clearTimeout(watchdog);
+      resolve({ steps, end, exitCode, stderr, timedOut });
+    }),
+  );
 }

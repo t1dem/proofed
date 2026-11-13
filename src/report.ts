@@ -5,8 +5,17 @@ export type ClipLinks = { gif?: string; mp4?: string };
 
 // What the fix workflow needs to know about a failure, kept in the comment itself
 // so the fix run doesn't depend on artifacts from another workflow.
-export type FailureData = { id: string; name: string; file: string; objective: string; reason: string; diagnosis: string };
+export type FailureData = {
+  id: string;
+  name: string;
+  file: string;
+  objective: string;
+  reason: string;
+  diagnosis: string;
+  steps: string[];
+};
 export type ReportData = { sha: string; failures: FailureData[] };
+export type FixNote = { status: "fixed" | "gave-up"; attempts: number; summary: string; commit?: string; commitUrl?: string };
 
 const DATA_RE = /<!-- proofed:data (.*?) -->/s;
 export const FIX_BOX = "Fix with Claude";
@@ -38,10 +47,12 @@ type ReportInput = {
   clips: Map<string, ClipLinks>;
   runUrl?: string;
   fixEnabled: boolean;
+  fix?: FixNote;
 };
 
-export function buildReport({ sha, results, skipped, clips, runUrl, fixEnabled }: ReportInput) {
-  const failed = results.filter((r) => r.outcome === "failed" || r.outcome === "error");
+export function buildReport({ sha, results, skipped, clips, runUrl, fixEnabled, fix }: ReportInput) {
+  const failed = results.filter((r) => r.outcome === "failed");
+  const errored = results.filter((r) => r.outcome === "error");
   const unsure = results.filter((r) => r.outcome === "unsure");
   const passed = results.filter((r) => r.outcome === "passed");
   const credits = results.reduce((sum, r) => sum + (r.end?.credits_consumed ?? 0), 0);
@@ -51,12 +62,21 @@ export function buildReport({ sha, results, skipped, clips, runUrl, fixEnabled }
       ? "This PR doesn't touch the files of any scenario, so there was nothing to run."
       : failed.length > 0
         ? `**${failed.length} of ${results.length}** scenarios broke on this PR.`
-        : `All ${results.length} affected scenarios pass in a real browser.`;
+        : errored.length > 0
+          ? `Kane couldn't finish ${errored.length} of ${results.length} scenarios. Nothing points at the code yet.`
+          : `All ${results.length} affected scenarios pass in a real browser.`;
 
   const sections: string[] = [`${MARKER}\n### Proofed\n\n${headline}`];
 
+  if (fix?.status === "fixed") {
+    const commit = fix.commit ? ` in [\`${fix.commit.slice(0, 7)}\`](${fix.commitUrl})` : "";
+    sections.push(`**Claude fixed it${commit}** after ${fix.attempts} attempt${fix.attempts > 1 ? "s" : ""}. ${fix.summary}`);
+  } else if (fix?.status === "gave-up") {
+    sections.push(`**Claude tried ${fix.attempts} times and couldn't make it pass.** Nothing was pushed. Last attempt: ${fix.summary}`);
+  }
+
   for (const r of failed) {
-    const reason = r.end?.reason ?? r.error ?? "Kane did not finish the run.";
+    const reason = r.end?.reason ?? "";
     const diagnosis = r.end?.verdict?.root_cause ?? r.end?.summary ?? "";
     sections.push(
       `#### ✗ ${r.scenario.name}\n\n${quote(reason)}${clip(clips.get(r.scenario.id))}` +
@@ -65,9 +85,17 @@ export function buildReport({ sha, results, skipped, clips, runUrl, fixEnabled }
     );
   }
 
-  if (failed.length > 0 && fixEnabled) {
+  if (failed.length > 0 && fixEnabled && fix?.status !== "gave-up") {
     sections.push(
       `- [ ] **${FIX_BOX}** — Claude Code gets the failure, the steps and the diff, pushes a fix to this branch, and Proofed checks again.`,
+    );
+  }
+
+  for (const r of errored) {
+    sections.push(
+      `#### ⚠ ${r.scenario.name}: Kane couldn't finish, even after a retry\n\n${quote(r.error)}` +
+        clip(clips.get(r.scenario.id), 560) +
+        `\n\nThis is about the test run, not your code. Re-run the check to try again.`,
     );
   }
 
@@ -93,8 +121,9 @@ export function buildReport({ sha, results, skipped, clips, runUrl, fixEnabled }
       name: r.scenario.name,
       file: r.scenario.file,
       objective: r.scenario.objective,
-      reason: r.end?.reason ?? r.error ?? "",
+      reason: r.end?.reason ?? "",
       diagnosis: r.end?.verdict?.root_cause ?? r.end?.summary ?? "",
+      steps: r.steps.filter((s) => s.status !== "running" && s.remark).map((s) => `${s.status === "failed" ? "✗" : "·"} ${s.remark}`),
     })),
   };
 
