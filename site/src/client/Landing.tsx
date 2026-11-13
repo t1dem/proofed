@@ -6,6 +6,7 @@ const PR = "https://github.com/t1dem/proofed-demo-store/pull/2";
 
 const scenario = `---
 name: Free shipping from €50
+file: free-shipping.md
 paths: [src/pricing.ts, src/pages/Cart.tsx]
 ---
 Add House Espresso and Paper Filters to the bag and open the bag.
