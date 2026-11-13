@@ -20,7 +20,7 @@ export type ScenarioResult = {
 };
 
 // Failures of the browser plumbing rather than of the app: the run is retried, never reported as a bug.
-const INFRA = /TargetClosedError|has been closed|ECONNREFUSED|ECONNRESET|socket hang up/i;
+const INFRA = /Screenshot failed|TimeoutError|TargetClosedError|has been closed|ECONNREFUSED|ECONNRESET|socket hang up|Project and folder must be configured/i;
 
 export function outcomeOf(end: RunEnd | undefined): Outcome {
   if (!end || INFRA.test(end.reason ?? "")) return "error";
