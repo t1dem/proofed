@@ -1,8 +1,7 @@
 import { MARKER } from "./github.ts";
-import { runMarker } from "./runfile.ts";
+import { BLANK_PAGE, runMarker } from "./runfile.ts";
 import type { Step } from "./kane.ts";
 import { describeFixer, type Fixer } from "./models.ts";
-import { BLANK_PAGE } from "./precheck.ts";
 import { nothingAsked } from "./requests.ts";
 import { unchecked, type ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { MeView } from "../worker/api";
 import type { PullView } from "../worker/runs";
 import { Inbox, needsYou } from "./Inbox";
-import { prefetch, useAsk, useLoad, useRoute, type Route } from "./lib";
+import { DEMO, prefetch, useAsk, useLoad, useRoute, type Route } from "./lib";
 import { Pull } from "./Pull";
 import { Settings } from "./Settings";
 import { focus, iconButton, kindOf, Link, marks, solid, useDismiss, type Kind } from "./ui";
@@ -17,7 +17,7 @@ function useTheme() {
   const [theme, setTheme] = useState(storedTheme);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem(THEME_KEY, theme);
+    if (!DEMO) localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
   return [theme, () => setTheme(theme === "dark" ? "light" : "dark")] as const;
 }
@@ -83,10 +83,11 @@ function Account({ me }: { me: MeView }) {
       </button>
       {open && (
         <div className="absolute right-0 top-full z-20 mt-1.5 w-52 rounded-lg border border-edge bg-panel p-1 shadow-xl shadow-black/30 md:bottom-full md:left-0 md:right-auto md:top-auto md:mb-1.5 md:mt-0">
-          <p className="truncate px-2 py-1.5 text-[13px] text-faint">Signed in as {me.login}</p>
-          <a href="/logout" className={`${navItem} w-full`}>
+          {/* The demo's account is made up; signing out from it would sign out whoever is really signed in. */}
+          <p className="truncate px-2 py-1.5 text-[13px] text-faint">{DEMO ? "Demo on sample data" : `Signed in as ${me.login}`}</p>
+          <a href={DEMO ? "/app" : "/logout"} className={`${navItem} w-full`}>
             <LogOut size={16} />
-            Sign out
+            {DEMO ? "Leave the demo" : "Sign out"}
           </a>
         </div>
       )}

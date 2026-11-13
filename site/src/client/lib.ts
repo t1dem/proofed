@@ -3,8 +3,10 @@ import type { PullDetail, PullView } from "../worker/runs";
 
 export class SignedOut extends Error {}
 
-// `pnpm dev` and /app?demo: the app runs on sample data, no sign-in and no GitHub.
-const DEMO = import.meta.env.DEV && new URLSearchParams(location.search).has("demo");
+// /app?demo: the app runs on sample data (demo.ts, its own chunk), in `pnpm dev` and in the built
+// site alike. No sign-in, no request to the API, and nothing stored: a signed-in user's cached
+// answers are neither shown nor overwritten. Links keep the query (pathOf), so the demo stays a demo.
+export const DEMO = new URLSearchParams(location.search).has("demo");
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (DEMO) return (await import("./demo")).demo(path, init) as T;
@@ -30,7 +32,7 @@ const watchers = new Map<string, Set<(data: unknown) => void>>();
 const inFlight = new Map<string, Promise<unknown>>();
 
 function cached<T>(path: string): T | undefined {
-  if (!memory.has(path)) {
+  if (!memory.has(path) && !DEMO) {
     try {
       const saved = localStorage.getItem(STORE_KEY + path);
       if (saved) memory.set(path, JSON.parse(saved));
@@ -44,7 +46,7 @@ function cached<T>(path: string): T | undefined {
 function store(path: string, data: unknown) {
   memory.set(path, data);
   try {
-    localStorage.setItem(STORE_KEY + path, JSON.stringify(data));
+    if (!DEMO) localStorage.setItem(STORE_KEY + path, JSON.stringify(data));
   } catch {
     // Full or blocked storage only costs the next cold start its instant paint.
   }

@@ -10,6 +10,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { connectCdp, type Cdp, type ExceptionDetails } from "./cdp.ts";
 import { launchChrome } from "./chrome.ts";
 import type { ScenarioResult } from "./run.ts";
+import { BLANK_PAGE } from "./runfile.ts";
 import type { Scenario } from "./scenarios.ts";
 
 const LOAD_TIMEOUT = 15_000;
@@ -19,8 +20,6 @@ const SETTLE = 3_000;
 // be about to render, and the exception may be someone else's (an analytics script).
 const RECHECK = 10_000;
 const POLL = 250;
-
-export const BLANK_PAGE = "The page is blank: it crashed while loading, before anything could be checked.";
 
 // Any text, or an element that shows something without text.
 const PAINTED = `(() => {

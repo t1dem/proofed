@@ -30,6 +30,9 @@ export type RunFile = { sha: string; scenarios: RunScenario[]; skipped?: string[
 // scenario as "not checked" by it.
 export const NOTHING_CHECKED = "Kane finished without checking anything on the page.";
 
+// The reason of a scenario whose start page crashed on load, so Kane never ran (src/precheck.ts).
+export const BLANK_PAGE = "The page is blank: it crashed while loading, before anything could be checked.";
+
 export const RUN_FILE = "run.json";
 export const runMarker = (key: string) => `<!-- proofed:run ${key} -->`;
 export const readRunKey = (body: string) => /<!-- proofed:run (pr-\d+\/[\w.-]+) -->/.exec(body)?.[1];
