@@ -134,8 +134,17 @@ const repos: RepoView[] = [
 // /app?demo=fixed shows PR #2 after Claude's fix; plain ?demo shows it still broken.
 const fixed = new URLSearchParams(location.search).get("demo") === "fixed";
 
+// "Run again" and "Fix with Claude" show as on their way for a while, as markAsked does in production.
+const asked = new Map<string, { action: string; at: number }>();
+const DEMO_RUN_MS = 20_000;
+
 export async function demo(path: string, init?: RequestInit): Promise<unknown> {
   await new Promise((done) => setTimeout(done, 150));
+  const ask = /^\/api\/pulls\/(.+\/\d+)\/(fix|rerun)$/.exec(path);
+  if (ask && init?.method === "POST") {
+    asked.set(ask[1]!, { action: ask[2]!, at: Date.now() });
+    return { ok: true };
+  }
   const pause = /^\/api\/repos\/(.+)\/(pause|resume)$/.exec(path);
   if (pause) {
     const repo = repos.find((r) => r.name === pause[1]);
@@ -150,7 +159,11 @@ export async function demo(path: string, init?: RequestInit): Promise<unknown> {
     ? [{ ...shipping, state: "passing" as const, scenarios: shipping.scenarios.map((s) => ({ name: s.name, outcome: "passed" as const })), fix: { status: "fixed" as const, model: "claude-opus-5-5", effort: "high", commit: "84514dbd", attempts: 2 } }, ...pulls.slice(1)]
     : pulls;
   // Pausing a repo in Settings shows on its pull requests, as it does in production.
-  const withPause = list.map((p) => ({ ...p, paused: repos.some((r) => r.name === p.repo && r.paused) }));
+  const withPause = list.map((p) => {
+    const ask = asked.get(`${p.repo}/${p.pr}`);
+    const state = ask && Date.now() - ask.at < DEMO_RUN_MS ? (ask.action === "fix" ? ("fixing" as const) : ("running" as const)) : p.state;
+    return { ...p, state, paused: repos.some((r) => r.name === p.repo && r.paused) };
+  });
   if (path === "/api/pulls") return withPause;
   const pull = withPause.find((p) => path === `/api/pulls/${p.repo}/${p.pr}`);
   if (!pull) throw new Error("Proofed hasn't reported on that pull request.");

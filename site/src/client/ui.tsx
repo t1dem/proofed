@@ -29,11 +29,12 @@ export function Link({ to, go, className, title, children }: { to: Route; go: Go
   );
 }
 
-export type Kind = Outcome | "fixing" | "skipped";
+export type Kind = Outcome | "fixing" | "running" | "skipped";
 
 // What a pull request's row says at a glance.
 export function kindOf(pull: PullView): Kind {
   if (pull.state === "fixing") return "fixing";
+  if (pull.state === "running") return "running";
   if (pull.state === "failing") return "failed";
   if (pull.state === "blocked") return "error";
   return pull.scenarios.some((s) => s.outcome === "unsure") ? "unsure" : "passed";
@@ -45,6 +46,7 @@ export const marks: Record<Kind, { icon: LucideIcon; text: string; fill: string;
   unsure: { icon: CircleQuestionMark, text: "text-busy", fill: "bg-busy", label: "The test may be wrong" },
   error: { icon: CircleExclamationPoint, text: "text-dim", fill: "bg-faint", label: "Kane couldn't finish" },
   fixing: { icon: LoaderCircle, text: "text-work", fill: "bg-work", label: "Claude is fixing" },
+  running: { icon: LoaderCircle, text: "text-busy", fill: "bg-busy", label: "Kane is checking" },
   skipped: { icon: CircleMinus, text: "text-faint", fill: "bg-edge", label: "Not run" },
 };
 
@@ -52,7 +54,7 @@ export function Mark({ kind, size = 16 }: { kind: Kind; size?: number }) {
   const { icon: Icon, text, label } = marks[kind];
   return (
     <span role="img" aria-label={label} title={label} className={`inline-grid shrink-0 place-items-center ${text}`}>
-      <Icon size={size} strokeWidth={2} className={kind === "fixing" ? "animate-spin" : undefined} />
+      <Icon size={size} strokeWidth={2} className={kind === "fixing" || kind === "running" ? "animate-spin" : undefined} />
     </span>
   );
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import type { PullDetail, PullView } from "../worker/runs";
 
 export class SignedOut extends Error {}
 
@@ -9,7 +10,10 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (DEMO) return (await import("./demo")).demo(path, init) as T;
   const res = await fetch(path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
   const body = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (res.status === 401) throw new SignedOut();
+  if (res.status === 401) {
+    forgetAll();
+    throw new SignedOut();
+  }
   if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
   return body;
 }
@@ -18,24 +22,94 @@ export const message = (e: unknown) => (e instanceof Error ? e.message : String(
 
 export type Load<T> = { status: "loading" } | { status: "signed-out" } | { status: "error"; message: string } | { status: "ok"; data: T };
 
+// The last answer for each GET path, kept in memory and in localStorage: a page opens on what it
+// showed last time and the fresh answer replaces it when it arrives, so "Loading…" shows only once.
+const STORE_KEY = "proofed-cache:";
+const memory = new Map<string, unknown>();
+const watchers = new Map<string, Set<(data: unknown) => void>>();
+const inFlight = new Map<string, Promise<unknown>>();
+
+function cached<T>(path: string): T | undefined {
+  if (!memory.has(path)) {
+    try {
+      const saved = localStorage.getItem(STORE_KEY + path);
+      if (saved) memory.set(path, JSON.parse(saved));
+    } catch {
+      // No storage (private window, blocked): memory alone is fine.
+    }
+  }
+  return memory.get(path) as T | undefined;
+}
+
+function store(path: string, data: unknown) {
+  memory.set(path, data);
+  try {
+    localStorage.setItem(STORE_KEY + path, JSON.stringify(data));
+  } catch {
+    // Full or blocked storage only costs the next cold start its instant paint.
+  }
+  for (const watch of watchers.get(path) ?? []) watch(data);
+}
+
+function forgetAll() {
+  memory.clear();
+  try {
+    for (const key of Object.keys(localStorage)) if (key.startsWith(STORE_KEY)) localStorage.removeItem(key);
+  } catch {
+    // Nothing stored.
+  }
+}
+
+// One request per path at a time; everyone showing that path gets the answer.
+export function fetchInto<T>(path: string): Promise<T> {
+  const running = inFlight.get(path);
+  if (running) return running as Promise<T>;
+  const request = api<T>(path).then(
+    (data) => {
+      store(path, data);
+      return data;
+    },
+  );
+  inFlight.set(path, request);
+  void request.finally(() => inFlight.delete(path)).catch(() => {});
+  return request;
+}
+
+// Warms a page before it's opened (hover in the inbox, Settings after the inbox loads).
+export const prefetch = (path: string) => {
+  if (cached(path) === undefined) fetchInto(path).catch(() => {});
+};
+
+// Changes what's on screen for `path` right away, ahead of the server's answer.
+export function mutate<T>(path: string, change: (data: T) => T) {
+  const data = cached<T>(path);
+  if (data !== undefined) store(path, change(data));
+}
+
 // With `refreshMs` the data is fetched again on that interval and whenever the tab comes back,
 // and what's on screen stays put until the new answer arrives.
 export function useLoad<T>(path: string, refreshMs?: number) {
-  const [state, setState] = useState<Load<T>>({ status: "loading" });
+  const fromCache = (): Load<T> => {
+    const data = cached<T>(path);
+    return data === undefined ? { status: "loading" } : { status: "ok", data };
+  };
+  const [state, setState] = useState<Load<T>>(fromCache);
   const reload = useCallback(() => {
-    api<T>(path).then(
-      (data) => setState({ status: "ok", data }),
-      (e: unknown) =>
-        setState((before) =>
-          e instanceof SignedOut ? { status: "signed-out" } : before.status === "ok" ? before : { status: "error", message: message(e) },
-        ),
+    fetchInto<T>(path).catch((e: unknown) =>
+      setState((before) =>
+        e instanceof SignedOut ? { status: "signed-out" } : before.status === "ok" ? before : { status: "error", message: message(e) },
+      ),
     );
   }, [path]);
 
   useEffect(() => {
-    setState({ status: "loading" });
+    setState(fromCache());
+    const watch = (data: unknown) => setState({ status: "ok", data: data as T });
+    const all = watchers.get(path) ?? new Set();
+    watchers.set(path, all.add(watch));
     reload();
-  }, [reload]);
+    return () => void all.delete(watch);
+  }, [path, reload]);
 
   useEffect(() => {
     if (!refreshMs) return;
@@ -88,24 +162,30 @@ export function ago(ts: number) {
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-type Asked = "sending" | "sent" | { error: string };
+type Asked = "sending" | { error: string };
 export type Ask = (pull: { repo: string; pr: number }, action: "fix" | "rerun") => void;
 
 // "Fix with Claude" and "Run again": Proofed comments /proofed on the pull request for the user,
-// and the workflow takes it from there. The report changes a few seconds later.
+// and the workflow takes it from there. The pull request turns "running" (or "fixing") on screen at
+// once; the server keeps that state until the workflow reports.
 export function useAsk(reload: () => void) {
-  const [asked, setAsked] = useState<Record<string, Asked>>({});
+  const [asked, setAsked] = useState<Record<string, Asked | undefined>>({});
   const ask: Ask = (pull, action) => {
     const key = `${pull.repo}#${pull.pr}`;
-    const set = (value: Asked) => setAsked((all) => ({ ...all, [key]: value }));
+    const set = (value: Asked | undefined) => setAsked((all) => ({ ...all, [key]: value }));
+    const detail = `/api/pulls/${pull.repo}/${pull.pr}`;
+    const state = action === "fix" ? "fixing" : "running";
+    const same = (p: PullView) => p.repo === pull.repo && p.pr === pull.pr;
+    mutate<PullView[]>("/api/pulls", (all) => all.map((p) => (same(p) ? { ...p, state } : p)));
+    mutate<PullDetail>(detail, (d) => ({ ...d, pull: { ...d.pull, state } }));
     set("sending");
-    api(`/api/pulls/${pull.repo}/${pull.pr}/${action}`, { method: "POST" }).then(
-      () => {
-        set("sent");
-        setTimeout(reload, 5000);
-      },
+    api(`${detail}/${action}`, { method: "POST" }).then(
+      () => set(undefined),
       (e: unknown) => set({ error: message(e) }),
-    );
+    ).finally(() => {
+      reload();
+      fetchInto(detail).catch(() => {});
+    });
   };
   const stateOf = (pull: { repo: string; pr: number }) => asked[`${pull.repo}#${pull.pr}`];
   return [stateOf, ask] as const;

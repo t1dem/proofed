@@ -1,16 +1,18 @@
 import { Keyboard, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { PullView } from "../worker/runs";
-import { ago, plural, type Ask, type Load, type Route, type useAsk } from "./lib";
+import { ago, plural, prefetch, type Ask, type Load, type Route, type useAsk } from "./lib";
 import { focus, iconButton, kindOf, Link, Mark, outline, PageTitle, Pips, sha7, solid } from "./ui";
 
 type AskedOf = ReturnType<typeof useAsk>[0];
 
 const isFixing = (pull: PullView) => pull.state === "fixing";
-export const needsYou = (pull: PullView) => !isFixing(pull) && kindOf(pull) !== "passed";
+const isRunning = (pull: PullView) => pull.state === "running";
+export const needsYou = (pull: PullView) => !isFixing(pull) && !isRunning(pull) && kindOf(pull) !== "passed";
 
 const sections = [
   { title: "Needs you", has: needsYou },
+  { title: "Kane is checking", has: isRunning },
   { title: "Claude is fixing", has: isFixing },
   { title: "Passed", has: (pull: PullView) => kindOf(pull) === "passed" },
 ];
@@ -25,6 +27,7 @@ function Why({ pull }: { pull: PullView }): ReactNode {
   const kind = kindOf(pull);
   const strong = (text: string) => <span className="font-medium text-fg">{text}</span>;
 
+  if (kind === "running") return "Kane is checking this pull request again.";
   if (scenarios.length === 0) return pull.headline;
   if (kind === "fixing") return <>Claude is fixing {strong(names(failed) || "this pull request")}. Kane checks again before anything is pushed.</>;
   if (kind === "failed") {
@@ -64,7 +67,6 @@ function Action({ pull, asked, ask }: { pull: PullView; asked: AskedOf; ask: Ask
   const kind = kindOf(pull);
   const state = asked(pull);
   if (pull.paused || (kind !== "failed" && kind !== "error")) return null;
-  if (state === "sent") return <span className="text-[13px] text-dim">Asked on the PR</span>;
   if (typeof state === "object") return <span className="text-[13px] text-bad" title={state.error}>Couldn't ask</span>;
   const gaveUp = pull.fix?.status === "gave-up";
   const fix = kind === "failed" && !gaveUp;
@@ -85,15 +87,19 @@ type RowProps = { pull: PullView; selected: boolean; go: (route: Route) => void;
 
 function Row({ pull, selected, go, asked, ask, showRepo }: RowProps) {
   const ref = useRef<HTMLLIElement>(null);
+  const detail = `/api/pulls/${pull.repo}/${pull.pr}`;
   useEffect(() => {
-    if (selected) ref.current?.scrollIntoView({ block: "nearest" });
-  }, [selected]);
+    if (!selected) return;
+    ref.current?.scrollIntoView({ block: "nearest" });
+    prefetch(detail);
+  }, [selected, detail]);
   // The action waits in its own column: shown on the keyboard's row and under the mouse, so the
   // column doesn't jump from row to row. Once asked, the answer stays in view.
   const shown = selected || !!asked(pull) ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100";
   return (
     <li
       ref={ref}
+      onPointerEnter={() => prefetch(detail)}
       className={`group relative grid grid-cols-[16px_minmax(0,1fr)_auto] gap-x-3 rounded-lg px-3 py-2.5 transition-colors lg:grid-cols-[16px_minmax(0,1fr)_auto_136px_44px] lg:items-center ${selected ? "lg:bg-hover" : "hover:bg-hover/50"}`}
     >
       <span className="pt-0.5 lg:pt-0">

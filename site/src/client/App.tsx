@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { MeView } from "../worker/api";
 import type { PullView } from "../worker/runs";
 import { Inbox, needsYou } from "./Inbox";
-import { useAsk, useLoad, useRoute, type Route } from "./lib";
+import { prefetch, useAsk, useLoad, useRoute, type Route } from "./lib";
 import { Pull } from "./Pull";
 import { Settings } from "./Settings";
 import { focus, iconButton, kindOf, Link, marks, solid, useDismiss, type Kind } from "./ui";
@@ -36,11 +36,12 @@ function SignIn() {
 }
 
 // The worst thing happening in a repo decides the colour of its dot.
-const rank: Kind[] = ["failed", "error", "unsure", "fixing", "passed"];
+const rank: Kind[] = ["failed", "error", "unsure", "running", "fixing", "passed"];
 const dotSays: Partial<Record<Kind, string>> = {
   failed: "a scenario broke",
   error: "Kane couldn't finish a run",
   unsure: "a test may be wrong",
+  running: "Kane is checking",
   fixing: "Claude is fixing",
   passed: "everything passes",
 };
@@ -183,6 +184,12 @@ export function App() {
     opened.current = true;
   }, [route.page, reloadPulls]);
 
+  // Settings asks GitHub a lot per repo; start on it while the inbox is being read.
+  const signedIn = me.status === "ok";
+  useEffect(() => {
+    if (signedIn) prefetch("/api/repos");
+  }, [signedIn]);
+
   if (me.status === "loading") return null;
   if (me.status === "signed-out") return <SignIn />;
   if (me.status === "error") return <p className="p-8 text-bad">{me.message}</p>;
@@ -195,7 +202,15 @@ export function App() {
         {route.page === "settings" ? (
           <Settings me={me.data} reloadMe={reloadMe} />
         ) : route.page === "pull" ? (
-          <Pull key={`${route.repo}#${route.pr}`} repo={route.repo} pr={route.pr} go={go} asked={asked} ask={ask} />
+          <Pull
+            key={`${route.repo}#${route.pr}`}
+            repo={route.repo}
+            pr={route.pr}
+            listed={list.find((p) => p.repo === route.repo && p.pr === route.pr)}
+            go={go}
+            asked={asked}
+            ask={ask}
+          />
         ) : (
           <Inbox pulls={pulls} repo={repo} onRepo={setRepo} go={go} asked={asked} ask={ask} />
         )}

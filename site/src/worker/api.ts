@@ -2,8 +2,9 @@ import { currentUser, userToken, type UserRow } from "./auth";
 import { decrypt, encrypt, sealForGitHub } from "./crypto";
 import { gh, GitHubError, installationToken } from "./github";
 import type { Env } from "./index";
+import { forget, memo } from "./memo";
 import { DEFAULT_FIXER, isEffort, isModelId, MODELS, type Fixer } from "./models";
-import { getPull, listPulls } from "./runs";
+import { getPull, listPulls, markAsked } from "./runs";
 import { openSetupPr } from "./setup";
 
 export const SECRET_NAMES = ["LT_USERNAME", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN"] as const;
@@ -39,7 +40,10 @@ const CLIP_TYPES = { mp4: "video/mp4", gif: "image/gif", jpg: "image/jpeg" };
 type Installation = { id: number; account: { login: string } };
 type InstallationRepo = { id: number; full_name: string; html_url: string; private: boolean };
 
-async function listRepos(env: Env, token: string) {
+// Every API call starts here, so the answer is kept for a minute per user token.
+const listRepos = (env: Env, token: string) => memo(`repos:${token}`, 60_000, () => fetchRepos(token));
+
+async function fetchRepos(token: string) {
   const { installations } = await gh<{ installations: Installation[] }>(token, "GET", "/user/installations?per_page=100");
   const perInstallation = await Promise.all(
     installations.map(async (inst) => {
@@ -105,18 +109,16 @@ async function describeRepo(env: Env, repo: InstallationRepo & { installationId:
   };
 }
 
-// Repos whose Proofed workflow is switched off on GitHub, one installation token per installation.
+// Whether a repo's Proofed workflow is switched off on GitHub. Pause and resume in Settings forget it.
+const isPaused = (env: Env, repo: InstallationRepo & { installationId: number }) =>
+  memo(`paused:${repo.full_name}`, 60_000, async () => {
+    const token = await installationToken(env, repo.installationId);
+    const workflow = await gh<{ state: string }>(token, "GET", `/repos/${repo.full_name}/actions/workflows/${WORKFLOW}`).catch(() => undefined);
+    return workflow?.state === "disabled_manually";
+  });
+
 async function pausedRepos(env: Env, repos: (InstallationRepo & { installationId: number })[]) {
-  const tokens = new Map<number, Promise<string>>();
-  const tokenFor = (id: number) => tokens.get(id) ?? tokens.set(id, installationToken(env, id)).get(id)!;
-  const paused = await Promise.all(
-    repos.map(async (r) => {
-      const workflow = await gh<{ state: string }>(await tokenFor(r.installationId), "GET", `/repos/${r.full_name}/actions/workflows/${WORKFLOW}`).catch(
-        () => undefined,
-      );
-      return workflow?.state === "disabled_manually" ? [r.full_name] : [];
-    }),
-  );
+  const paused = await Promise.all(repos.map(async (r) => ((await isPaused(env, r)) ? [r.full_name] : [])));
   return new Set(paused.flat());
 }
 
@@ -274,6 +276,8 @@ export async function handleApi(request: Request, env: Env, path: string) {
         }
         throw e;
       }
+      // The workflow only reports when it's done; until then the pull request shows it's on its way.
+      await markAsked(env, repoName, Number(number), action === "fix" ? "fix" : "rerun");
       return json({ ok: true });
     }
   }
@@ -305,6 +309,7 @@ export async function handleApi(request: Request, env: Env, path: string) {
     if (action === "pause" || action === "resume") {
       const token = await installationToken(env, repo.installationId);
       await gh(token, "PUT", `/repos/${repo.full_name}/actions/workflows/${WORKFLOW}/${action === "pause" ? "disable" : "enable"}`);
+      forget(`paused:${repo.full_name}`);
       return json({ paused: action === "pause" });
     }
     if (action === "setup") {

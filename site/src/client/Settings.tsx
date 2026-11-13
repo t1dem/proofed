@@ -1,9 +1,10 @@
-import { Check, ChevronDown, Pause, Play, Sparkles } from "lucide-react";
+import { Check, ChevronDown, LoaderCircle, Pause, Play } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { MeView, RepoView } from "../worker/api";
 import { EFFORTS, modelLabel, MODELS, type Fixer } from "../worker/models";
-import { api, message, useLoad } from "./lib";
-import { field, focus, link, outline, PageTitle, popover, Segmented, solid, useDismiss } from "./ui";
+import type { PullView } from "../worker/runs";
+import { api, message, mutate, useLoad } from "./lib";
+import { field, focus, link, outline, PageTitle, popover, solid, useDismiss } from "./ui";
 
 // `cancel` is there only when a key is already saved: then closing the form keeps the old one.
 type KeyBlockProps = { title: string; connected: string | null; hint: ReactNode; children: (done: () => void, cancel?: ReactNode) => ReactNode };
@@ -134,19 +135,26 @@ function Keys({ me, onSaved }: { me: MeView; onSaved: (message: string) => void 
   );
 }
 
-const effortOptions = EFFORTS.map((e) => ({ value: e as string, label: e }));
-const menuItem = `flex h-8 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-hover ${focus}`;
+// A row in the model menu: the same height and weight picked or not, so nothing moves under the mouse.
+const menuRow = `flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] transition-colors hover:bg-hover ${focus}`;
 
 // Which Claude model (and effort) "Fix with Claude" uses in this repo, saved as Actions variables.
-// One button in the repo's row; the choices open under it.
+// One button in the repo's row; models on the left of the menu, effort on the right.
 function FixerMenu({ repo }: { repo: RepoView }) {
-  const [fixer, setFixer] = useState(repo.fixer);
-  const [state, setState] = useState<ReactNode>();
+  const fixer = repo.fixer;
+  const [saving, setSaving] = useState<"model" | "effort">();
+  const [error, setError] = useState<string>();
   const [open, setOpen] = useState(false);
+  const [typing, setTyping] = useState(false);
   const box = useRef<HTMLDivElement>(null);
-  useDismiss(open, useCallback(() => setOpen(false), []), box);
-  // A model that isn't in the list was typed in as a full ID; show it in the field.
-  const [other, setOther] = useState(() => !!repo.fixer && !MODELS.some((m) => m.id === repo.fixer?.model));
+  useDismiss(
+    open,
+    useCallback(() => {
+      setOpen(false);
+      setTyping(false);
+    }, []),
+    box,
+  );
 
   if (!fixer) {
     return (
@@ -160,73 +168,103 @@ function FixerMenu({ repo }: { repo: RepoView }) {
     );
   }
 
-  const save = async (next: Fixer) => {
-    const before = fixer;
+  const custom = !MODELS.some((m) => m.id === fixer.model);
+  const setFixer = (next: Fixer) => mutate<RepoView[]>("/api/repos", (all) => all.map((r) => (r.name === repo.name ? { ...r, fixer: next } : r)));
+  const save = async (next: Fixer, what: "model" | "effort") => {
     setFixer(next);
-    setState("Saving…");
+    setSaving(what);
+    setError(undefined);
     try {
       await api(`/api/repos/${repo.name}/fixer`, { method: "POST", body: JSON.stringify(next) });
-      setState("Saved");
     } catch (e) {
-      setFixer(before);
-      setState(<span className="text-bad">{message(e)}</span>);
+      setFixer(fixer);
+      setError(message(e));
+    } finally {
+      setSaving(undefined);
     }
   };
   const saveOther = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const model = String(new FormData(e.currentTarget).get("model") ?? "").trim();
-    if (model && model !== fixer.model) void save({ ...fixer, model });
+    const model = String(new FormData(e.currentTarget).get("model") ?? "").trim().toLowerCase();
+    setTyping(false);
+    if (model && model !== fixer.model) void save({ ...fixer, model }, "model");
   };
+  // The tick on the picked row turns into a spinner while GitHub saves it.
+  const tick = (on: boolean, what: "model" | "effort") =>
+    on && (saving === what ? <LoaderCircle size={14} className="shrink-0 animate-spin text-faint" /> : <Check size={14} className="shrink-0" />);
 
   return (
     <div ref={box} className="relative">
       <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} title="The model Claude fixes with in this repository" className={outline}>
-        <Sparkles size={14} className="text-dim" />
-        {modelLabel(fixer.model)} <span className="font-normal text-dim">· {fixer.effort}</span>
+        {custom ? <span className="max-w-40 truncate font-mono text-[12px]">{fixer.model}</span> : modelLabel(fixer.model)}
+        <span className="font-normal text-dim">· {fixer.effort}</span>
         <ChevronDown size={14} className="text-dim" />
       </button>
       {open && (
-        <div className={`${popover} w-[min(300px,calc(100vw-32px))] p-1.5 max-sm:left-0 max-sm:right-auto`}>
-          <p className="px-2 pb-1 pt-1.5 text-[12px] font-medium text-faint">Claude fixes with</p>
-          {MODELS.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              className={menuItem}
-              onClick={() => {
-                setOther(false);
-                if (m.id !== fixer.model) void save({ ...fixer, model: m.id });
-              }}
-            >
-              <span className="flex-1">{modelLabel(m.id)}</span>
-              {!other && fixer.model === m.id && <Check size={15} />}
-            </button>
-          ))}
-          <button type="button" className={menuItem} onClick={() => setOther(true)}>
-            <span className="flex-1 text-dim">Other model ID…</span>
-            {other && <Check size={15} />}
-          </button>
-          {other && (
-            <form onSubmit={saveOther} className="flex items-center gap-2 px-2 pb-1 pt-1">
-              <input
-                name="model"
-                aria-label="Model ID"
-                defaultValue={MODELS.some((m) => m.id === fixer.model) ? "" : fixer.model}
-                placeholder="claude-opus-5-1"
-                className={`${field} h-8 min-w-0 flex-1`}
-                autoComplete="off"
-                spellCheck={false}
-                autoFocus
-                required
-              />
-              <button className={outline}>Save</button>
-            </form>
-          )}
-          <div className="mt-1.5 border-t border-edge px-2 pb-1.5 pt-2.5">
-            <p className="mb-2 text-[12px] font-medium text-faint">Effort</p>
-            <Segmented label="Effort" value={fixer.effort} options={effortOptions} onChange={(effort) => save({ ...fixer, effort })} />
+        <div className={`${popover} w-[min(400px,calc(100vw-48px))] max-sm:left-0 max-sm:right-auto`}>
+          <div className="grid grid-cols-[minmax(0,1fr)_128px]">
+            <div className="p-1.5">
+              <p className="px-2 pb-1 pt-1 text-[12px] font-medium text-faint">Model</p>
+              {MODELS.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  className={menuRow}
+                  onClick={() => {
+                    setTyping(false);
+                    if (m.id !== fixer.model) void save({ ...fixer, model: m.id }, "model");
+                  }}
+                >
+                  <span className="flex-1 truncate">{modelLabel(m.id)}</span>
+                  {tick(fixer.model === m.id, "model")}
+                </button>
+              ))}
+              {typing ? (
+                <form onSubmit={saveOther} className="flex h-8 items-center gap-1 rounded-md bg-hover pl-2 pr-1">
+                  <input
+                    name="model"
+                    aria-label="Model ID"
+                    defaultValue={custom ? fixer.model : ""}
+                    placeholder="claude-opus-5-1"
+                    className="h-full min-w-0 flex-1 bg-transparent font-mono text-[12px] outline-none placeholder:text-faint"
+                    autoComplete="off"
+                    spellCheck={false}
+                    autoFocus
+                    required
+                    onKeyDown={(e) => {
+                      // Escape leaves the field, not the whole menu.
+                      if (e.key !== "Escape") return;
+                      e.stopPropagation();
+                      setTyping(false);
+                    }}
+                  />
+                  <button className={`h-6 shrink-0 rounded px-2 text-[12px] font-medium text-bg transition-colors bg-fg hover:bg-fg/85 ${focus}`}>Save</button>
+                </form>
+              ) : (
+                <button type="button" className={menuRow} onClick={() => setTyping(true)} title="Any Claude model, by its full ID">
+                  <span className={`flex-1 truncate ${custom ? "font-mono text-[12px]" : "text-dim"}`}>{custom ? fixer.model : "Other model ID…"}</span>
+                  {tick(custom, "model")}
+                </button>
+              )}
+            </div>
+            <div role="radiogroup" aria-label="Effort" className="border-l border-edge p-1.5">
+              <p className="px-2 pb-1 pt-1 text-[12px] font-medium text-faint">Effort</p>
+              {EFFORTS.map((effort) => (
+                <button
+                  key={effort}
+                  type="button"
+                  role="radio"
+                  aria-checked={fixer.effort === effort}
+                  className={menuRow}
+                  onClick={() => effort !== fixer.effort && save({ ...fixer, effort }, "effort")}
+                >
+                  <span className="flex-1">{effort}</span>
+                  {tick(fixer.effort === effort, "effort")}
+                </button>
+              ))}
+            </div>
           </div>
-          {state && <p className="px-2 pb-1.5 text-[13px] text-faint">{state}</p>}
+          {error && <p className="border-t border-edge px-3.5 py-2.5 text-[13px] text-bad">{error}</p>}
         </div>
       )}
     </div>
@@ -251,6 +289,9 @@ function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange:
     try {
       const r = await api<{ paused: boolean }>(`/api/repos/${repo.name}/${action}`, { method: "POST" });
       setPaused(r.paused);
+      // The inbox and this list open on their cached copies; keep both in step.
+      mutate<RepoView[]>("/api/repos", (all) => all.map((x) => (x.name === repo.name ? { ...x, paused: r.paused } : x)));
+      mutate<PullView[]>("/api/pulls", (all) => all.map((p) => (p.repo === repo.name ? { ...p, paused: r.paused } : p)));
     } catch (e) {
       setNote(<span className="text-bad">{message(e)}</span>);
     } finally {

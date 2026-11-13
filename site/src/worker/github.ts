@@ -1,4 +1,6 @@
 // GitHub App plumbing for the Worker: app JWT, installation tokens, webhook signatures, REST calls.
+import { memo } from "./memo";
+
 export type AppEnv = {
   GITHUB_APP_ID: string;
   GITHUB_APP_PRIVATE_KEY: string; // PKCS#8 PEM
@@ -12,7 +14,10 @@ const b64url = (data: ArrayBuffer | string) => {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 };
 
-async function appJwt(env: AppEnv) {
+// Valid for nine minutes; signed again after five.
+const appJwt = (env: AppEnv) => memo("app-jwt", 5 * 60_000, () => signAppJwt(env));
+
+async function signAppJwt(env: AppEnv) {
   const der = Uint8Array.from(atob(env.GITHUB_APP_PRIVATE_KEY.replace(/-----[^-]+-----|\s/g, "")), (c) => c.charCodeAt(0));
   const key = await crypto.subtle.importKey("pkcs8", der, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
   const now = Math.floor(Date.now() / 1000);
@@ -45,10 +50,20 @@ export async function gh<T>(token: string, method: string, path: string, body?: 
   return (res.status === 204 ? undefined : await res.json()) as T;
 }
 
-export async function installationToken(env: AppEnv, installationId: number) {
-  const { token } = await gh<{ token: string }>(await appJwt(env), "POST", `/app/installations/${installationId}/access_tokens`);
-  return token;
-}
+// An installation token lasts an hour; reuse it until ten minutes before that.
+export const installationToken = (env: AppEnv, installationId: number) =>
+  memo(
+    `installation:${installationId}`,
+    ({ expires }) => expires - Date.now() - 10 * 60_000,
+    async () => {
+      const { token, expires_at } = await gh<{ token: string; expires_at: string }>(
+        await appJwt(env),
+        "POST",
+        `/app/installations/${installationId}/access_tokens`,
+      );
+      return { token, expires: Date.parse(expires_at) };
+    },
+  ).then((t) => t.token);
 
 export const appRequest = async <T>(env: AppEnv, method: string, path: string, body?: unknown) =>
   gh<T>(await appJwt(env), method, path, body);

@@ -1,9 +1,9 @@
 import { ChevronRight, Maximize2, Play, RotateCw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { modelLabel } from "../worker/models";
-import type { PullDetail, Run, RunScenario } from "../worker/runs";
+import type { PullDetail, PullView, Run, RunScenario } from "../worker/runs";
 import { ago, plural, useLoad, type Ask, type Route, type useAsk } from "./lib";
-import { focus, iconButton, kindOf, Link, link, Mark, outline, PageTitle, Segmented, sha7, solid } from "./ui";
+import { focus, kindOf, Link, link, Mark, outline, PageTitle, Segmented, sha7, solid } from "./ui";
 
 type Seen = { run: Run; scenario: RunScenario };
 
@@ -285,7 +285,7 @@ function Scenarios({ runs }: { runs: Run[] }) {
 }
 
 const GitHubMark = () => (
-  <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
+  <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
     <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
   </svg>
 );
@@ -308,11 +308,12 @@ function RunLine({ run }: { run: Run }) {
   );
 }
 
-type PullProps = { repo: string; pr: number; go: (route: Route) => void; asked: ReturnType<typeof useAsk>[0]; ask: Ask };
+// `listed` is the inbox's row for this pull request: the title and buttons show from it while the details load.
+type PullProps = { repo: string; pr: number; listed: PullView | undefined; go: (route: Route) => void; asked: ReturnType<typeof useAsk>[0]; ask: Ask };
 
-export function Pull({ repo, pr, go, asked, ask }: PullProps) {
+export function Pull({ repo, pr, listed, go, asked, ask }: PullProps) {
   const [detail] = useLoad<PullDetail>(`/api/pulls/${repo}/${pr}`, 20_000);
-  const pull = detail.status === "ok" ? detail.data.pull : undefined;
+  const pull = detail.status === "ok" ? detail.data.pull : listed;
   const state = asked({ repo, pr });
   const kind = pull && kindOf(pull);
   const canFix = kind === "failed" && pull?.fix?.status !== "gave-up";
@@ -332,19 +333,18 @@ export function Pull({ repo, pr, go, asked, ask }: PullProps) {
           pull && (
             <div className="flex items-center gap-2">
               {typeof state === "object" && <span className="text-[13px] text-bad">{state.error}</span>}
-              {state === "sent" && <span className="text-[13px] text-dim">Asked on the PR</span>}
-              {!state && canFix && !pull.paused && (
-                <button type="button" className={solid} onClick={() => ask(pull, "fix")}>
+              {canFix && !pull.paused && (
+                <button type="button" className={solid} disabled={state === "sending"} onClick={() => ask(pull, "fix")}>
                   Fix with Claude
                 </button>
               )}
-              {!state && pull.state !== "fixing" && !pull.paused && (
-                <button type="button" className={outline} onClick={() => ask(pull, "rerun")}>
+              {kind !== "fixing" && kind !== "running" && !pull.paused && (
+                <button type="button" className={outline} disabled={state === "sending"} onClick={() => ask(pull, "rerun")}>
                   <RotateCw size={14} /> Run again
                 </button>
               )}
-              <a href={pull.url} className={`${iconButton} border border-edge`} aria-label="Open on GitHub" title="Open on GitHub">
-                <GitHubMark />
+              <a href={pull.url} className={outline}>
+                <GitHubMark /> Open on GitHub
               </a>
             </div>
           )
@@ -362,7 +362,6 @@ export function Pull({ repo, pr, go, asked, ask }: PullProps) {
         </span>
       </PageTitle>
 
-      {detail.status === "loading" && <p className="mt-6 text-faint">Loading…</p>}
       {detail.status === "error" && <p className="mt-6 text-bad">{detail.message}</p>}
       {detail.status === "ok" && (
         <section className="mt-6">

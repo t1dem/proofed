@@ -9,7 +9,8 @@ export type { RunScenario };
 export type Outcome = RunScenario["outcome"];
 export type Run = RunFile & { key: string; at: number };
 
-export type PullState = "failing" | "passing" | "fixing" | "blocked";
+// "running": someone asked for a run from the dashboard and the workflow hasn't reported yet.
+export type PullState = "failing" | "passing" | "fixing" | "blocked" | "running";
 
 export type PullView = {
   repo: string;
@@ -58,7 +59,31 @@ export async function saveRun(env: Env, token: string, repo: string, pr: number,
     .run();
 }
 
-type ReportRow = { repo: string; pr: number; title: string | null; state: PullState; headline: string; url: string; updated_at: number };
+type ReportRow = {
+  repo: string;
+  pr: number;
+  title: string | null;
+  state: PullState;
+  headline: string;
+  url: string;
+  updated_at: number;
+  asked: "fix" | "rerun" | null;
+  asked_at: number | null;
+};
+
+// A run that never reports (the job failed before Kane started) stops showing as on its way after this.
+const ASK_LASTS = 30 * 60_000;
+
+export async function markAsked(env: Env, repo: string, pr: number, action: "fix" | "rerun") {
+  await env.DB.prepare("UPDATE reports SET asked = ?3, asked_at = ?4 WHERE repo = ?1 AND pr = ?2").bind(repo, pr, action, Date.now()).run();
+}
+
+// The workflow's next comment (newer than the ask) takes over from the ask.
+function stateOf(report: ReportRow): PullState {
+  const pending = report.asked_at && report.asked_at > report.updated_at && Date.now() - report.asked_at < ASK_LASTS;
+  if (!pending) return report.state;
+  return report.asked === "fix" ? "fixing" : "running";
+}
 type RunRow = { repo: string; pr: number; key: string; data: string; created_at: number };
 
 // Clip links point at github.com, which a private repo only serves to someone signed in there; the
@@ -82,7 +107,7 @@ function toPull(report: ReportRow, latest: Run | undefined): PullView {
     repo: report.repo,
     pr: report.pr,
     title: report.title,
-    state: report.state,
+    state: stateOf(report),
     headline: report.headline,
     url: report.url,
     updatedAt: report.updated_at,
