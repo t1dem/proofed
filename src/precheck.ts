@@ -1,7 +1,7 @@
 // Kane can't tell a page that crashed while loading from a slow one: on a blank page it waits,
 // reloads and waits again, for minutes and dozens of credits, before it fails. So each start URL
 // is opened once in headless Chrome first. A page that threw an uncaught exception and is still
-// blank a few seconds after loading fails at once, without Kane. Anything less certain (blank but
+// blank well after loading fails at once, without Kane. Anything less certain (blank but
 // no exception, an exception but something on screen, a page that doesn't load) goes to Kane as
 // before: this must never fail a healthy or a slow page.
 import { setTimeout as delay } from "node:timers/promises";
@@ -13,6 +13,9 @@ import type { Scenario } from "./scenarios.ts";
 const LOAD_TIMEOUT = 15_000;
 // How long a loaded page gets to put something on screen.
 const SETTLE = 3_000;
+// A blank page that threw gets this much longer before it's called a crash: a slow app may still
+// be about to render, and the exception may be someone else's (an analytics script).
+const RECHECK = 10_000;
 const POLL = 250;
 
 export const BLANK_PAGE = "The page is blank: it crashed while loading, before anything could be checked.";
@@ -44,7 +47,7 @@ export async function findCrashes(urls: string[]) {
     const cdp = await connectCdp(chrome.endpoint);
     await Promise.all(
       urls.map(async (url) => {
-        const error = await Promise.race([crashOf(cdp, url), limit(LOAD_TIMEOUT + SETTLE + 5_000)]).catch(() => undefined);
+        const error = await Promise.race([crashOf(cdp, url), limit(LOAD_TIMEOUT + SETTLE + RECHECK + 5_000)]).catch(() => undefined);
         if (error) crashes.set(url, error);
       }),
     );
@@ -78,14 +81,18 @@ async function crashOf(cdp: Cdp, url: string): Promise<string | undefined> {
 
   // `blank` only turns true on a definite answer; an evaluation lost to a navigation counts as unknown.
   let blank = false;
-  for (const until = Date.now() + SETTLE; ; await sleep(POLL)) {
+  let rechecking = false;
+  for (let until = Date.now() + SETTLE; ; await sleep(POLL)) {
     const painted = await page<{ result: { value?: unknown } }>("Runtime.evaluate", { expression: PAINTED, returnByValue: true }).then(
       ({ result }) => result.value,
       () => undefined,
     );
     if (painted === true) return undefined;
     blank = painted === false;
-    if (Date.now() >= until) break;
+    if (Date.now() < until) continue;
+    if (rechecking || !blank || errors.length === 0) break;
+    rechecking = true;
+    until += RECHECK;
   }
   return blank ? errors[0] : undefined;
 }
