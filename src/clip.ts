@@ -18,6 +18,7 @@ const LEAD = 0.5; // the camera starts moving this long before an action
 const LINGER = 1.8; // and pulls back out this long after the last one in a row
 const MAX_ZOOM = 1.8;
 const FOCUS_ZOOM = 2.2;
+const OVERVIEW_ZOOM = 1.4;
 const OUT_WIDTH = 1280;
 
 type Point = { x: number; y: number };
@@ -87,9 +88,17 @@ function shotOf(rect: Rect, maxZoom: number, size: Size, room = 1): Shot {
 }
 
 // Where the camera wants to be over time. Each action gets a shot just before it happens; a pause
-// pulls back to the whole page; the hold at the end settles on what the final check was about.
+// pulls back to the part of the page Kane worked in (not the empty margins of a wide screen);
+// the hold at the end settles on what the final check was about.
 function plan(beats: Beat[], focus: Shot | undefined, holdStart: number, size: Size) {
-  const full: Shot = { x: size.width / 2, y: size.height / 2, z: 1 };
+  const rects = beats.map((b) => b.rect);
+  const left = Math.min(...rects.map((r) => r.x));
+  const top = Math.min(...rects.map((r) => r.y));
+  const right = Math.max(...rects.map((r) => r.x + r.width));
+  const bottom = Math.max(...rects.map((r) => r.y + r.height));
+  const full: Shot = rects.length
+    ? shotOf({ x: left, y: top, width: right - left, height: bottom - top }, OVERVIEW_ZOOM, size, 0.5)
+    : { x: size.width / 2, y: size.height / 2, z: 1 };
   const raw: { start: number; shot: Shot }[] = [{ start: 0, shot: full }];
   const push = (start: number, shot: Shot) => {
     while (raw.length > 1 && raw.at(-1)!.start >= start) raw.pop();
