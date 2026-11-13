@@ -61,7 +61,7 @@ function Hero() {
           See a real PR
         </a>
       </div>
-      <p className="mt-5 text-[15px] text-muted">Runs in your own GitHub Actions, with your TestMu and Claude keys.</p>
+      <p className="mt-5 text-[15px] text-muted">Runs in your own GitHub Actions, with your own TestMu and Claude keys.</p>
       <HeroClip />
     </section>
   );
