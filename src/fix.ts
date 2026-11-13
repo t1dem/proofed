@@ -2,12 +2,15 @@
 // Claude Code gets the failure, Kane's steps and the PR diff; we rebuild, re-run the broken scenarios
 // in Chrome, and only push a fix that Kane has seen pass. Up to three attempts, each one told why the last one failed.
 import { execFileSync, execSync, spawn, spawnSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { findReport, setStatus, upsertComment } from "./github.ts";
 import { DEFAULT_FIXER, describeFixer, type Fixer } from "./models.ts";
-import { changedFiles, ctx, env, isBroken, pickScenarios, publish, readEvent, runAll } from "./pipeline.ts";
+import { changedFiles, ctx, env, pickScenarios, publish, readEvent, runAll } from "./pipeline.ts";
 import { fixRequested, FIX_BOX, readReportData, type FailureData, type FixAttempt } from "./report.ts";
 import type { ScenarioResult } from "./run.ts";
+import type { Scenario } from "./scenarios.ts";
 
 const MAX_ATTEMPTS = 3;
 
@@ -26,7 +29,12 @@ if (!prNumber || !event.issue?.pull_request || !data || (!fromCommand && !fixReq
 }
 // The app's folder when it isn't the repo root. Claude and git work from the root; build and serve run there.
 const appDir = env("PROOFED_DIR", ".");
-const buildCommand = appDir === "." ? env("PROOFED_BUILD") : `cd ${appDir} && ${env("PROOFED_BUILD")}`;
+const sh = (word: string) => (/^[\w./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`);
+// Claude Code allows a compound command only if each part of it is allowed on its own, so it refused
+// `cd site && pnpm build`. Wrapped in a script, any build is one simple command, allowed exactly as is.
+const buildScript = join(process.env.RUNNER_TEMP || tmpdir(), "proofed-build.sh");
+writeFileSync(buildScript, `set -e -o pipefail\ncd ${sh(resolve(appDir))}\n${env("PROOFED_BUILD")}\n`);
+const buildCommand = `bash ${sh(buildScript)}`;
 const fixer: Fixer = {
   model: env("PROOFED_CLAUDE_MODEL", DEFAULT_FIXER.model),
   effort: env("PROOFED_CLAUDE_EFFORT", DEFAULT_FIXER.effort),
@@ -56,20 +64,19 @@ if (repo) {
 
 function prompt(failures: FailureData[], feedback: string) {
   const diff = git("diff", `${base}...HEAD`).slice(0, 40_000);
+  // A failure without steps is a page that crashed while loading: Kane never ran (see precheck.ts).
   const described = failures
     .map(
-      (f) => `### Scenario "${f.name}" (${f.file})
-Objective Kane ran in Chrome:
+      (f) => `### Scenario "${f.name}" (${f.file || "asked for on the PR"})
+Objective checked in Chrome:
 ${f.objective}
 
-What Kane saw: ${f.reason}
-${f.diagnosis ? `Kane's diagnosis: ${f.diagnosis}\n` : ""}
-Kane's steps:
-${f.steps.join("\n")}`,
+What went wrong: ${f.reason}
+${f.diagnosis ? `Diagnosis: ${f.diagnosis}\n` : ""}${f.steps.length ? `\nKane's steps:\n${f.steps.join("\n")}` : ""}`,
     )
     .join("\n\n");
 
-  return `This pull request broke a user flow. Proofed ran the scenarios below in a real Chrome with Kane CLI against this branch, and they failed.
+  return `This pull request broke a user flow. Proofed checked the scenarios below in a real Chrome (with Kane CLI, an AI browser agent) against this branch, and they failed.
 
 ${described}
 
@@ -80,8 +87,8 @@ ${diff}
 ${feedback ? `\nA previous fix attempt didn't work:\n${feedback}\n` : ""}
 Find the cause in the application code and fix it with the smallest change that keeps what the PR set out to do.
 Don't edit anything under .proofed/, don't change the scenario expectations, and don't commit.
-You may run \`${buildCommand}\` to check that your change builds.
-End your answer with one line in English that starts with "SUMMARY:" and says what was wrong and what you changed.`;
+You may run \`${buildCommand}\` to check that your change builds (it runs \`${env("PROOFED_BUILD")}\` ${appDir === "." ? "at the repo root" : `in \`${appDir}\``}).
+End your answer with one line in English that starts with "SUMMARY:". It goes into the pull request as is, so it says only what was wrong in the code and what you changed, nothing about tools, builds, tests or permissions.`;
 }
 
 type ClaudeResult = { result?: string; is_error?: boolean; api_error_status?: number };
@@ -143,9 +150,16 @@ async function serve() {
   throw new Error(`App didn't come up at ${url}`);
 }
 
-const stillBroken = (results: ScenarioResult[]) =>
-  results.filter(isBroken).map((r) => `"${r.scenario.name}" still fails: ${r.end?.reason ?? r.error}`);
-const describe = (results: ScenarioResult[]) => stillBroken(results).map((line) => `- ${line}`).join("\n");
+// A fix counts only when Kane saw the scenario pass; an unsure run hasn't shown anything.
+const notPassing = (results: ScenarioResult[]) =>
+  results
+    .filter((r) => r.outcome !== "passed")
+    .map((r) =>
+      r.outcome === "unsure"
+        ? `"${r.scenario.name}" wasn't confirmed: ${r.end?.reason}`
+        : `"${r.scenario.name}" still fails: ${r.end?.reason ?? r.error}${r.pageError ? ` Browser console: ${r.pageError}` : ""}`,
+    );
+const describe = (results: ScenarioResult[]) => notPassing(results).map((line) => `- ${line}`).join("\n");
 
 let failures = data.failures;
 let feedback = "";
@@ -188,11 +202,11 @@ while (!fixed && attempt < MAX_ATTEMPTS) {
   } finally {
     stop();
   }
-  fixed = !lastResults.some(isBroken);
-  tries.push({ summary, result: fixed ? "Kane saw it pass." : `Kane: ${stillBroken(lastResults).join("; ")}` });
+  fixed = lastResults.every((r) => r.outcome === "passed");
+  tries.push({ summary, result: fixed ? "Kane saw it pass." : notPassing(lastResults).join("; ") });
   if (!fixed) {
-    feedback = `Your change was: ${summary}\nKane re-ran the scenarios in Chrome:\n${describe(lastResults)}`;
-    failures = data.failures.filter((f) => lastResults.some((r) => r.scenario.id === f.id && isBroken(r)));
+    feedback = `Your change was: ${summary}\nThe scenarios were checked again in Chrome:\n${describe(lastResults)}`;
+    failures = data.failures.filter((f) => lastResults.some((r) => r.scenario.id === f.id && r.outcome !== "passed"));
   }
 }
 
@@ -222,17 +236,25 @@ git("push", "origin", `HEAD:${branch}`);
 const sha = git("rev-parse", "HEAD");
 console.log(`Pushed ${sha} to ${branch}`);
 
-// The fix passed the scenarios that broke; now run everything this PR touches on the new commit.
-const stop = await serve();
-let results: ScenarioResult[];
-let skipped: string[];
-try {
-  const picked = pickScenarios({ changed: changedFiles(base, sha), rev });
-  skipped = picked.skipped;
-  results = await runAll([...picked.selected, ...asked], `${outDir}/final`);
-} finally {
-  stop();
+// The fix passed the scenarios that broke; now everything this PR touches has to pass on the new commit.
+// What the last attempt ran is already known for this tree, unless the commit left something out
+// (a new file git doesn't track yet); only the rest goes to Kane.
+const picked = pickScenarios({ changed: changedFiles(base, sha), rev });
+const final: Scenario[] = [...picked.selected, ...asked];
+const known = new Map(git("status", "--porcelain") ? [] : lastResults.map((r) => [r.scenario.id, r]));
+const missing = final.filter((s) => !known.has(s.id));
+console.log(`Final check: ${final.length - missing.length} result(s) from the last attempt, ${missing.length} to run.`);
+let ran: ScenarioResult[] = [];
+if (missing.length > 0) {
+  const stop = await serve();
+  try {
+    ran = await runAll(missing, `${outDir}/final`);
+  } finally {
+    stop();
+  }
 }
+const results = final.map((s) => known.get(s.id) ?? ran.find((r) => r.scenario.id === s.id)!);
+const skipped = picked.skipped;
 const repoUrl = repo && `https://github.com/${repo.owner}/${repo.name}`;
 const broken = await publish({
   repo, pr: prNumber, sha, results, skipped, runUrl, outDir, asked, previous: data,

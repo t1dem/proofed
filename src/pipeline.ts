@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { publishClips, repoFromEnv, setStatus, upsertComment, type Repo } from "./github.ts";
+import { crashResult, findCrashes } from "./precheck.ts";
 import { buildReport, type ClipLinks, type FixNote, type ReportData } from "./report.ts";
 import { runScenario, type ScenarioResult } from "./run.ts";
 import { RUN_FILE, type RunFile } from "./runfile.ts";
@@ -50,16 +51,28 @@ export function pickScenarios({ changed, only, rev }: { changed?: string[]; only
 }
 
 // Every scenario gets its own Chrome, so they can run side by side; Kane is mostly waiting on its backend.
+// A start page that crashes while loading fails its scenarios without Kane (see precheck.ts).
 export async function runAll(scenarios: Scenario[], outDir: string, concurrency = Number(process.env.PROOFED_CONCURRENCY) || 3) {
+  const baseUrl = env("PROOFED_URL");
+  const urlOf = (s: Scenario) => new URL(s.url, baseUrl).href;
+  const checking = Date.now();
+  const crashes = await findCrashes([...new Set(scenarios.map(urlOf))]);
+  const checkSeconds = Math.round((Date.now() - checking) / 1000);
   const results: ScenarioResult[] = new Array(scenarios.length);
   let next = 0;
   const worker = async () => {
     for (let i = next++; i < scenarios.length; i = next++) {
       const scenario = scenarios[i]!;
+      const crash = crashes.get(urlOf(scenario));
+      if (crash) {
+        console.log(`✗ ${scenario.name}: ${urlOf(scenario)} crashed while loading (${crash}); Kane not run`);
+        results[i] = { ...crashResult(scenario, crash), seconds: checkSeconds };
+        continue;
+      }
       console.log(`▶ ${scenario.name}`);
       const started = Date.now();
       const result = await runScenario(scenario, {
-        baseUrl: env("PROOFED_URL"),
+        baseUrl,
         outDir,
         username: process.env.LT_USERNAME,
         accessKey: process.env.LT_ACCESS_KEY,
@@ -153,15 +166,19 @@ export async function publish(input: PublishInput) {
 
   const broken = results.filter(isBroken);
   const failed = results.filter((r) => r.outcome === "failed");
+  const passed = results.filter((r) => r.outcome === "passed");
   if (repo && pr) {
     const comment = await upsertComment(repo, pr, body);
     const names = (rs: ScenarioResult[]) => rs.map((r) => r.scenario.name).join(", ");
+    // Unsure runs don't block a merge, but they aren't passes either.
     const [state, description] =
       failed.length > 0
         ? (["failure", `${failed.length} of ${results.length} broke: ${names(failed)}`] as const)
         : broken.length > 0
           ? (["error", `Kane couldn't finish: ${names(broken)}`] as const)
-          : (["success", `${results.length} scenario(s) pass in Chrome`] as const);
+          : passed.length < results.length
+            ? (["success", `${passed.length} passed, ${results.length - passed.length} not checked`] as const)
+            : (["success", `${results.length} scenario(s) pass in Chrome`] as const);
     await setStatus(repo, sha, state, description, comment.html_url);
   }
   return broken;

@@ -2,7 +2,7 @@ import { MARKER } from "./github.ts";
 import { runMarker } from "./runfile.ts";
 import type { Step } from "./kane.ts";
 import { describeFixer, type Fixer } from "./models.ts";
-import type { ScenarioResult } from "./run.ts";
+import { unchecked, type ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
 
 export type ClipLinks = { gif?: string; mp4?: string; jpg?: string };
@@ -82,6 +82,8 @@ const oneLine = (text = "", max = 300) => {
 // Inside <details> and tables GitHub would take "<Cart>" for a tag and drop it.
 const html = (text: string) => text.replaceAll("<", "&lt;");
 const cell = (text: string) => html(oneLine(text)).replaceAll("|", "\\|");
+const code = (text: string) => `\`${oneLine(text).replaceAll("`", "'")}\``;
+const commitRef = (sha: string, url?: string) => (url ? `[\`${short(sha)}\`](${url})` : `\`${short(sha)}\``);
 
 function clip(links: ClipLinks | undefined, width = 720) {
   if (!links?.gif) return "";
@@ -136,9 +138,8 @@ function whatChanged(fix: FixNote) {
 
 type Repaired = { before: FailureData; after: ScenarioResult };
 
-function beforeAfter({ before, after }: Repaired, beforeSha: string, sha: string, links: ClipLinks | undefined, fix: FixNote) {
-  const commit = fix.commit ?? sha;
-  const ref = fix.commitUrl ? `[\`${short(commit)}\`](${fix.commitUrl})` : `\`${short(commit)}\``;
+// The commit, the fixer and what changed are said once, above all the repaired scenarios.
+function beforeAfter({ before, after }: Repaired, beforeSha: string, sha: string, links: ClipLinks | undefined) {
   const stills = [still(before.clip), still(links)];
   const confirmed = after.end?.summary?.trim() || after.end?.reason?.trim() || "Passes.";
   const rows = [
@@ -147,7 +148,7 @@ function beforeAfter({ before, after }: Repaired, beforeSha: string, sha: string
     ...(stills.some(Boolean) ? [`| ${stills.join(" | ")} |`] : []),
     `| ✗ ${cell(before.reason || before.diagnosis || "Failed.")} | ✓ ${cell(confirmed)} |`,
   ];
-  return `#### ✓ ${after.scenario.name}: fixed in ${ref}\n\n${rows.join("\n")}${whatChanged(fix)}`;
+  return `#### ✓ ${after.scenario.name}\n\n${rows.join("\n")}`;
 }
 
 const MARKS: Record<RunState, string> = { failed: "✗", passed: "✓", fixed: "✓ fixed", error: "⚠" };
@@ -218,43 +219,61 @@ function compose(
         ? `**${failed.length} of ${results.length}** scenarios broke on this PR.`
         : errored.length > 0
           ? `Kane couldn't finish ${errored.length} of ${results.length} scenarios. Nothing points at the code yet.`
-          : results.length === 1
-          ? "The affected scenario passes in a real browser."
-          : `All ${results.length} affected scenarios pass in a real browser.`;
+          : unsure.length > 0
+            ? passed.length > 0
+              ? `**${passed.length} of ${results.length}** scenarios pass in a real browser; ${unsure.length} ${unsure.length === 1 ? "wasn't" : "weren't"} checked.`
+              : results.length === 1
+                ? "The affected scenario wasn't checked."
+                : `None of the ${results.length} affected scenarios were checked.`
+            : results.length === 1
+              ? "The affected scenario passes in a real browser."
+              : `All ${results.length} affected scenarios pass in a real browser.`;
 
   const sections: string[] = [`${MARKER}\n### Proofed\n\n${headline}`];
 
   if (results.length >= 4) {
     const tag = (r: ScenarioResult) =>
-      r.outcome === "error" ? ": couldn't finish" : r.outcome === "unsure" ? ": the test may be wrong" : isRepaired(r) ? ": fixed" : "";
+      r.outcome === "error"
+        ? ": couldn't finish"
+        : unchecked(r)
+          ? ": not checked"
+          : r.outcome === "unsure"
+            ? ": the test may be wrong"
+            : isRepaired(r)
+              ? ": fixed"
+              : "";
     const mark = (r: ScenarioResult) => (r.outcome === "failed" ? "✗" : r.outcome === "passed" ? "✓" : "⚠");
     sections.push([...failed, ...errored, ...unsure, ...passed].map((r) => `- ${mark(r)} ${r.scenario.name}${tag(r)}`).join("\n"));
   }
 
   if (fix?.status === "fixed") {
-    const commit = fix.commit ? ` in [\`${short(fix.commit)}\`](${fix.commitUrl})` : "";
-    // With a before/after section the summary is under "What changed".
-    const summary = repaired.length > 0 ? "" : ` ${fix.summary}`;
+    const commit = fix.commit ? ` in ${commitRef(fix.commit, fix.commitUrl)}` : "";
     sections.push(
-      `**Fixed${commit}** by ${describeFixer(fix)} after ${fix.attempts} attempt${fix.attempts > 1 ? "s" : ""}.${summary}${attemptList(fix)}`,
+      `**Fixed${commit}** by ${describeFixer(fix)}, after ${fix.attempts} attempt${fix.attempts > 1 ? "s" : ""}.${whatChanged(fix)}${attemptList(fix)}`,
     );
   } else if (fix?.status === "gave-up") {
     sections.push(
-      `**${describeFixer(fix)} tried ${fix.attempts} times and couldn't make it pass.** Nothing was pushed. Last attempt: ${fix.summary}` +
+      `**Tried ${fix.attempts} times with ${describeFixer(fix)} and couldn't make it pass.** Nothing was pushed. Last attempt: ${fix.summary}` +
         attemptList(fix),
     );
   }
 
   if (fix && previous) {
-    for (const r of repaired) sections.push(beforeAfter(r, previous.sha, sha, clips.get(r.after.scenario.id), fix));
+    for (const r of repaired) sections.push(beforeAfter(r, previous.sha, sha, clips.get(r.after.scenario.id)));
   }
 
   for (const r of failed) {
     const reason = r.end?.reason ?? "";
     const diagnosis = r.end?.verdict?.root_cause ?? r.end?.summary ?? "";
+    // A page that crashed on load never reached Kane: the error is the browser's, not Kane's reading.
+    const seen = r.pageError
+      ? `\n\n**Browser console error:** ${code(r.pageError)}`
+      : diagnosis && diagnosis !== reason
+        ? `\n\n**What Kane saw:** ${diagnosis}`
+        : "";
     sections.push(
       `#### ✗ ${r.scenario.name}\n\n${quote(reason)}${clip(clips.get(r.scenario.id))}` +
-        (diagnosis && diagnosis !== reason ? `\n\n**What Kane saw:** ${diagnosis}` : "") +
+        seen +
         (withSteps ? stepList(r.steps) : "") +
         (r.end?.test_url ? `\n\n[Kane's step-by-step report](${r.end.test_url})` : ""),
     );
@@ -276,8 +295,10 @@ function compose(
 
   for (const r of unsure) {
     sections.push(
-      `#### ⚠ ${r.scenario.name}: the test may be wrong, not the code\n\n${quote(r.end?.reason)}` +
-        (r.end?.verdict?.suggestion ? `\n\n**Kane suggests:** ${r.end.verdict.suggestion}` : "") +
+      (unchecked(r)
+        ? `#### ⚠ ${r.scenario.name}: not checked\n\n${quote(r.end?.reason)}\n\nKane called it a pass, but none of its steps checked the page, so this says nothing about the code either way.`
+        : `#### ⚠ ${r.scenario.name}: the test may be wrong, not the code\n\n${quote(r.end?.reason)}` +
+          (r.end?.verdict?.suggestion ? `\n\n**Kane suggests:** ${r.end.verdict.suggestion}` : "")) +
         clip(clips.get(r.scenario.id), 560),
     );
   }

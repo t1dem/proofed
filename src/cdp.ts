@@ -3,12 +3,15 @@
 
 export type TargetInfo = { type: string; targetId: string };
 export type ScreencastMetadata = { timestamp: number; deviceWidth: number; deviceHeight: number };
+export type ExceptionDetails = { text: string; exception?: { description?: string; value?: unknown } };
 
 type Events = {
   "Target.targetCreated": { targetInfo: TargetInfo };
   "Target.attachedToTarget": { sessionId: string; targetInfo: TargetInfo };
   "Page.screencastFrame": { data: string; sessionId: number; metadata: ScreencastMetadata };
   "Runtime.bindingCalled": { name: string; payload: string };
+  "Runtime.exceptionThrown": { exceptionDetails: ExceptionDetails };
+  "Page.loadEventFired": { timestamp: number };
 };
 
 type Message = {

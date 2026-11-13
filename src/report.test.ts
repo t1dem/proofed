@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { addRun, buildReport, fixRequested, readReportData, type ReportData } from "./report.ts";
-import type { ScenarioResult } from "./run.ts";
+import { crashResult } from "./precheck.ts";
+import { NOTHING_CHECKED, type ScenarioResult } from "./run.ts";
 
 const failed: ScenarioResult = {
   scenario: { id: "promo", file: "promo.md", name: "Promo", paths: [], url: "/", objective: "Total is €81.90 -- after the code" },
@@ -22,29 +23,37 @@ test("failure data survives the round trip through the comment", () => {
   assert.match(body, /<code>\/proofed fix<\/code>/);
 });
 
-test("the report names the model that fixed it", () => {
+test("the report names the model that fixed it once", () => {
   const body = buildReport({ sha: "abc1234def", results: [passed], skipped: [], clips: new Map(), fixEnabled: true, fix });
-  assert.match(body, /by Claude Haiku 5\.5 \(`claude-haiku-5-5`, high effort\) after 1 attempt/);
+  assert.match(body, /\*\*Fixed in `9f8e7d6`\*\* by Claude Haiku 5\.5, high effort, after 1 attempt\.\n\n\*\*What changed:\*\* Prices are in cents\./);
+  assert.doesNotMatch(body, /claude-haiku-5-5/);
   assert.doesNotMatch(body, /\/proofed fix/);
 });
 
 test("after a fix, the failing report and the passing run make a before/after", () => {
   const raw = "https://github.com/o/r/raw/proofed-clips/pr-1";
+  const cart: ScenarioResult = { ...failed, scenario: { ...failed.scenario, id: "cart", name: "Cart" } };
   const failing = buildReport({
-    sha: "1111111aaaa", results: [failed], skipped: [], fixEnabled: true,
+    sha: "1111111aaaa", results: [failed, cart], skipped: [], fixEnabled: true,
     clips: new Map([["promo", { gif: `${raw}/a/promo.gif`, mp4: `${raw}/a/promo.mp4`, jpg: `${raw}/a/promo.jpg` }]]),
   });
   const after = { ...passed, end: { type: "run_end", status: "passed", summary: "The total is €81.90." } } satisfies ScenarioResult;
   const body = buildReport({
-    sha: "9f8e7d6c5b", results: [after], skipped: [], fixEnabled: true, previous: readReportData(failing),
+    sha: "9f8e7d6c5b", results: [after, { ...cart, outcome: "passed" }], skipped: [], fixEnabled: true, previous: readReportData(failing),
     clips: new Map([["promo", { gif: `${raw}/b/promo.gif`, mp4: `${raw}/b/promo.mp4` }]]),
-    fix: { ...fix, changes: [{ file: "src/pricing.ts", added: 3, removed: 1 }] },
+    fix: { ...fix, commitUrl: "https://github.com/o/r/commit/9f8e7d6c5b", changes: [{ file: "src/pricing.ts", added: 3, removed: 1 }] },
   });
-  assert.match(body, /#### ✓ Promo: fixed in `9f8e7d6`\n\n\| Before · `1111111` \| After · `9f8e7d6` \|/);
+  assert.match(
+    body,
+    /All 2 affected scenarios pass in a real browser\.\n\n\*\*Fixed in \[`9f8e7d6`\]\(https:\/\/github\.com\/o\/r\/commit\/9f8e7d6c5b\)\*\* by Claude Haiku 5\.5, high effort, after 1 attempt\.\n\n\*\*What changed:\*\* `src\/pricing\.ts` \(\+3 −1\)\. Prices are in cents\.\n\n#### ✓ Promo\n\n\| Before · `1111111` \| After · `9f8e7d6` \|/,
+  );
+  assert.match(body, /\n\n#### ✓ Cart\n\n\| Before/);
+  // Said once for the whole fix, not under every repaired scenario.
+  assert.equal(body.split("What changed").length, 2);
+  assert.equal(body.split("/commit/9f8e7d6c5b").length, 2);
   // The old run has a still; the new one only a GIF, which stands in for it.
   assert.match(body, /\| <a href="[^"]+\/a\/promo\.mp4"><img src="[^"]+\/a\/promo\.jpg" width="360"[^|]+\| <a href="[^"]+\/b\/promo\.mp4"><img src="[^"]+\/b\/promo\.gif" width="360"/);
   assert.match(body, /\| ✗ Total shows €91\.00, not €81\.90\. \| ✓ The total is €81\.90\. \|/);
-  assert.match(body, /\*\*What changed:\*\* `src\/pricing\.ts` \(\+3 −1\)\. Prices are in cents\./);
   assert.doesNotMatch(body, /Passed:/);
   assert.deepEqual(readReportData(body)?.history, [{ sha: "1111111aaaa", state: "failed" }, { sha: "9f8e7d6c5b", state: "fixed" }]);
   assert.match(body, /1111111 ✗ → 9f8e7d6 ✓ fixed/);
@@ -67,4 +76,27 @@ test("the run history keeps the last 8 runs, one per commit", () => {
   history = addRun(history, { sha: "sha9", state: "passed" });
   assert.deepEqual(history.map((h) => h.sha), ["sha2", "sha3", "sha4", "sha5", "sha6", "sha7", "sha8", "sha9"]);
   assert.equal(history.at(-1)?.state, "passed");
+});
+
+test("a pass where nothing was checked isn't counted as one", () => {
+  const nothing: ScenarioResult = {
+    ...failed,
+    scenario: { ...failed.scenario, id: "asked-in-description", name: "What the PR description asks" },
+    outcome: "unsure",
+    end: { type: "run_end", status: "passed", reason: NOTHING_CHECKED },
+  };
+  const body = buildReport({ sha: "abc1234def", results: [passed, nothing], skipped: [], clips: new Map(), fixEnabled: true });
+  assert.match(body, /\*\*1 of 2\*\* scenarios pass in a real browser; 1 wasn't checked\./);
+  assert.match(body, /#### ⚠ What the PR description asks: not checked\n\n> Kane finished without checking anything on the page\./);
+  assert.doesNotMatch(body, /may be wrong|All 2/);
+});
+
+test("a page that crashed on load shows the browser's error, not Kane's", () => {
+  const body = buildReport({
+    sha: "abc1234def", results: [crashResult(failed.scenario, "TypeError: Cannot read properties of null (reading '1')")],
+    skipped: [], clips: new Map(), fixEnabled: true,
+  });
+  assert.match(body, /> The page is blank: it crashed while loading, before anything could be checked\.\n\n\*\*Browser console error:\*\* `TypeError: Cannot read properties of null \(reading '1'\)`/);
+  assert.doesNotMatch(body, /What Kane saw/);
+  assert.equal(readReportData(body)?.failures[0]?.diagnosis, "TypeError: Cannot read properties of null (reading '1')");
 });
