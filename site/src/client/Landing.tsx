@@ -26,8 +26,11 @@ function Header() {
         <a href="#setup" className="hidden hover:underline sm:inline">
           Set up
         </a>
-        <a href={REPO} className="hover:underline">
+        <a href={REPO} className="hidden hover:underline sm:inline">
           GitHub
+        </a>
+        <a href="/app" className="font-medium hover:underline">
+          Sign in
         </a>
       </nav>
     </header>
