@@ -45,10 +45,17 @@ export class GitHubError extends Error {
 
 export const MARKER = "<!-- proofed -->";
 
+// Proofed's own report on the PR. Only a bot's comment counts: anyone can paste the marker.
+export async function findReport(repo: Repo, pr: number) {
+  const comments = await api<{ id: number; body?: string; user?: { type: string } }[]>(repo, "GET", `/issues/${pr}/comments?per_page=100`);
+  return comments.find((c) => c.user?.type === "Bot" && c.body?.includes(MARKER));
+}
+
+export const reply = (repo: Repo, pr: number, body: string) => api(repo, "POST", `/issues/${pr}/comments`, { body });
+
 // One comment per PR, edited in place on every run, so the thread doesn't fill up with bot noise.
 export async function upsertComment(repo: Repo, pr: number, body: string) {
-  const comments = await api<{ id: number; body?: string }[]>(repo, "GET", `/issues/${pr}/comments?per_page=100`);
-  const mine = comments.find((c) => c.body?.includes(MARKER));
+  const mine = await findReport(repo, pr);
   return mine
     ? api<{ html_url: string }>(repo, "PATCH", `/issues/comments/${mine.id}`, { body })
     : api<{ html_url: string }>(repo, "POST", `/issues/${pr}/comments`, { body });

@@ -1,3 +1,4 @@
+import { isEffort, parseModel, type Effort } from "./models.ts";
 import type { Scenario } from "./scenarios.ts";
 
 // "/proofed" in a PR comment re-runs the check, which also gives a PR opened before Proofed was
@@ -8,6 +9,22 @@ const COMMAND = /(?:^|\s)\/proofed\b([\s\S]*)/i;
 export function parseCommand(comment: string): string | undefined {
   const match = COMMAND.exec(comment);
   return match ? match[1]!.trim() : undefined;
+}
+
+export type FixCommand = { model?: string; effort?: Effort } | { error: string };
+
+// "/proofed fix [model] [effort]" has Claude fix the broken scenarios, with that model this once.
+// Only the first line counts, so a note under the command doesn't become part of the model name.
+export function parseFix(command: string): FixCommand | undefined {
+  const words = (command.split("\n")[0] ?? "").trim().split(/\s+/).filter(Boolean);
+  if (words[0]?.toLowerCase() !== "fix") return undefined;
+  const rest = words.slice(1);
+  const last = rest.at(-1)?.toLowerCase() ?? "";
+  const effort = isEffort(last) ? last : undefined;
+  const modelWords = effort ? rest.slice(0, -1) : rest;
+  if (modelWords.length === 0) return { effort };
+  const choice = parseModel(modelWords);
+  return "error" in choice ? choice : { model: choice.model, effort };
 }
 
 // What the PR description asks to have checked. HTML comments (PR templates) are dropped, and a

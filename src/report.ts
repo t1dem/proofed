@@ -1,4 +1,5 @@
 import { MARKER } from "./github.ts";
+import { describeFixer, type Fixer } from "./models.ts";
 import type { ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
 
@@ -17,7 +18,7 @@ export type FailureData = {
 };
 // `asked`: one-off checks from the PR description or a /proofed comment, kept so the fixer can re-run them.
 export type ReportData = { sha: string; failures: FailureData[]; asked?: Scenario[] };
-export type FixNote = { status: "fixed" | "gave-up"; attempts: number; summary: string; commit?: string; commitUrl?: string };
+export type FixNote = Fixer & { status: "fixed" | "gave-up"; attempts: number; summary: string; commit?: string; commitUrl?: string };
 
 const DATA_RE = /<!-- proofed:data (.*?) -->/s;
 export const FIX_BOX = "Fix with Claude";
@@ -75,9 +76,11 @@ export function buildReport({ sha, results, skipped, clips, runUrl, fixEnabled, 
 
   if (fix?.status === "fixed") {
     const commit = fix.commit ? ` in [\`${fix.commit.slice(0, 7)}\`](${fix.commitUrl})` : "";
-    sections.push(`**Claude fixed it${commit}** after ${fix.attempts} attempt${fix.attempts > 1 ? "s" : ""}. ${fix.summary}`);
+    sections.push(`**Fixed${commit}** by ${describeFixer(fix)} after ${fix.attempts} attempt${fix.attempts > 1 ? "s" : ""}. ${fix.summary}`);
   } else if (fix?.status === "gave-up") {
-    sections.push(`**Claude tried ${fix.attempts} times and couldn't make it pass.** Nothing was pushed. Last attempt: ${fix.summary}`);
+    sections.push(
+      `**${describeFixer(fix)} tried ${fix.attempts} times and couldn't make it pass.** Nothing was pushed. Last attempt: ${fix.summary}`,
+    );
   }
 
   for (const r of failed) {
@@ -136,7 +139,10 @@ export function buildReport({ sha, results, skipped, clips, runUrl, fixEnabled, 
   const footer = [`Run by Kane CLI on ${sha.slice(0, 7)}`, credits > 0 && `${Math.round(credits)} credits`, runUrl && `[logs](${runUrl})`]
     .filter(Boolean)
     .join(" · ");
-  const hint = "Comment <code>/proofed</code> to check again, or <code>/proofed</code> followed by what to check.";
+  const canFix = failed.length > 0 && fixEnabled;
+  const hint =
+    "Comment <code>/proofed</code> to check again, or <code>/proofed</code> followed by what to check." +
+    (canFix ? " <code>/proofed fix</code> has Claude fix it; add a model for this one fix: <code>/proofed fix opus high</code>." : "");
   // JSON inside an HTML comment: "--" would end the comment early, so escape it.
   const hidden = `<!-- proofed:data ${JSON.stringify(data).replaceAll("--", "\\u002d\\u002d")} -->`;
 

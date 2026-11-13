@@ -1,26 +1,34 @@
-// "Fix with Claude": someone ticked the box in the Proofed comment. Claude Code gets the failure,
-// Kane's steps and the PR diff; we rebuild, re-run the broken scenarios in Chrome, and only push
-// a fix that Kane has seen pass. Up to three attempts, each one told why the last one failed.
+// "Fix with Claude": someone ticked the box in the Proofed comment, or commented "/proofed fix [model]".
+// Claude Code gets the failure, Kane's steps and the PR diff; we rebuild, re-run the broken scenarios
+// in Chrome, and only push a fix that Kane has seen pass. Up to three attempts, each one told why the last one failed.
 import { execFileSync, execSync, spawn, spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { setStatus, upsertComment } from "./github.ts";
+import { findReport, setStatus, upsertComment } from "./github.ts";
+import { DEFAULT_FIXER, describeFixer, type Fixer } from "./models.ts";
 import { changedFiles, ctx, env, isBroken, pickScenarios, publish, readEvent, runAll } from "./pipeline.ts";
 import { fixRequested, FIX_BOX, readReportData, type FailureData } from "./report.ts";
 import type { ScenarioResult } from "./run.ts";
 
 const MAX_ATTEMPTS = 3;
 
-type CommentEvent = { comment: { body: string }; issue: { number: number; pull_request?: object } };
+type CommentEvent = { action: string; comment: { body: string }; issue: { number: number; pull_request?: object } };
 const event = readEvent<CommentEvent>();
-const body = event.comment?.body ?? "";
+const { repo, runUrl, outDir } = ctx();
 const prNumber = event.issue?.number;
+// A ticked box arrives as an edit of the report itself; "/proofed fix" as a new comment next to it.
+const fromCommand = event.action === "created";
+const report = fromCommand && repo && prNumber ? await findReport(repo, prNumber) : undefined;
+const body = (fromCommand ? report?.body : event.comment?.body) ?? "";
 const data = readReportData(body);
-if (!prNumber || !event.issue?.pull_request || !data || !fixRequested(body)) {
+if (!prNumber || !event.issue?.pull_request || !data || (!fromCommand && !fixRequested(body))) {
   console.log("No fix requested.");
   process.exit(0);
 }
+const fixer: Fixer = {
+  model: env("PROOFED_CLAUDE_MODEL", DEFAULT_FIXER.model),
+  effort: env("PROOFED_CLAUDE_EFFORT", DEFAULT_FIXER.effort),
+};
 
-const { repo, runUrl, outDir } = ctx();
 mkdirSync(outDir, { recursive: true });
 const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
 const base = env("PROOFED_BASE_SHA");
@@ -33,8 +41,13 @@ const scenariosFor = (ids: string[]) => [
   ...asked.filter((s) => ids.includes(s.id)),
 ];
 
+const BOX = new RegExp(`- \\[[ x]\\] \\*\\*${FIX_BOX}\\*\\*.*`);
+// Puts a line where the checkbox is, or under the headline when there's none (Claude gave up last time).
+const withLine = (text: string, line: string) =>
+  BOX.test(text) ? text.replace(BOX, line) : text.replace(/(### Proofed\n\n[^\n]*\n)/, `$1\n${line}\n`);
+
 if (repo) {
-  await upsertComment(repo, prNumber, body.replace(new RegExp(`- \\[x\\] \\*\\*${FIX_BOX}\\*\\*.*`), `⏳ **Claude is working on a fix.** [Follow along](${runUrl})`));
+  await upsertComment(repo, prNumber, withLine(body, `⏳ **Claude is working on a fix** with ${describeFixer(fixer)}. [Follow along](${runUrl})`));
   await setStatus(repo, git("rev-parse", "HEAD"), "pending", "Claude is fixing, Kane will re-check", runUrl);
 }
 
@@ -68,13 +81,13 @@ You may run \`${env("PROOFED_BUILD")}\` to check that your change builds.
 End your answer with one line in English that starts with "SUMMARY:" and says what was wrong and what you changed.`;
 }
 
-type ClaudeResult = { result?: string; is_error?: boolean };
+type ClaudeResult = { result?: string; is_error?: boolean; api_error_status?: number };
 
 function askClaude(text: string) {
   const run = spawnSync(
     "claude",
     ["-p", text, "--output-format", "json", "--permission-mode", "acceptEdits", "--max-turns", "40",
-      "--model", env("PROOFED_CLAUDE_MODEL", "claude-haiku-5-5"), "--effort", env("PROOFED_CLAUDE_EFFORT", "xhigh"),
+      "--model", fixer.model, "--effort", fixer.effort,
       "--allowedTools", `Read,Edit,Write,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(${env("PROOFED_BUILD")})`],
     { encoding: "utf8", maxBuffer: 50 * 1024 * 1024 },
   );
@@ -86,6 +99,9 @@ function askClaude(text: string) {
   }
   const result = parsed.result?.trim() ?? "";
   // Usage limits and API errors come back as is_error with the message in `result`.
+  if (parsed.api_error_status === 404) {
+    return { ok: false as const, message: `the model \`${fixer.model}\` isn't available to this Claude account. Pick another one with \`/proofed fix <model>\`` };
+  }
   if (run.status !== 0 || parsed.is_error) return { ok: false as const, message: result || run.stderr.trim() || "Claude Code failed" };
   const summary = /^SUMMARY:\s*(.+)$/m.exec(result)?.[1] ?? result.split("\n").at(-1) ?? "";
   return { ok: true as const, summary: summary.trim() };
@@ -94,8 +110,10 @@ function askClaude(text: string) {
 // Claude couldn't run at all: put the original report back, untick the box, and say why.
 async function restoreReport(note: string) {
   if (!repo || !prNumber) return;
-  const original = body.replace(`- [x] **${FIX_BOX}**`, `- [ ] **${FIX_BOX}**`);
-  await upsertComment(repo, prNumber, original.replace(`- [ ] **${FIX_BOX}**`, `> ${note}\n\n- [ ] **${FIX_BOX}**`));
+  const box = `- [ ] **${FIX_BOX}**`;
+  const original = body.replace(`- [x] **${FIX_BOX}**`, box);
+  const quoted = `> ${note}`;
+  await upsertComment(repo, prNumber, original.includes(box) ? original.replace(box, `${quoted}\n\n${box}`) : withLine(original, quoted));
   await setStatus(repo, git("rev-parse", "HEAD"), "failure", "Fix didn't run; the original failure stands", runUrl);
 }
 
@@ -134,12 +152,12 @@ let attempt = 0;
 
 while (!fixed && attempt < MAX_ATTEMPTS) {
   attempt++;
-  console.log(`\n=== Attempt ${attempt}: asking Claude about ${failures.map((f) => f.name).join(", ")}`);
+  console.log(`\n=== Attempt ${attempt}: asking ${fixer.model} (${fixer.effort}) about ${failures.map((f) => f.name).join(", ")}`);
   const answer = askClaude(prompt(failures, feedback));
   if (!answer.ok) {
     console.log(`Claude Code couldn't run: ${answer.message}`);
     git("checkout", "--", ".");
-    await restoreReport(`Claude Code couldn't run: ${answer.message}. Tick the box again to retry.`);
+    await restoreReport(`Claude Code couldn't run: ${answer.message}. Tick the box or comment \`/proofed fix\` to try again.`);
     process.exit(1);
   }
   summary = answer.summary;
@@ -179,14 +197,14 @@ if (!fixed) {
   }
   await publish({
     repo, pr: prNumber, sha: git("rev-parse", "HEAD"), results: lastResults, skipped: [], runUrl, outDir, asked,
-    fix: { status: "gave-up", attempts: attempt, summary },
+    fix: { status: "gave-up", attempts: attempt, summary, ...fixer },
   });
   process.exit(1);
 }
 
 const names = data.failures.map((f) => f.name).join(", ");
 git("-c", "user.name=Claude", "-c", "user.email=noreply@anthropic.com", "commit", "-am",
-  `Fix ${names}\n\n${summary}\n\nWritten by Claude Code from a Proofed report; Kane re-ran the scenario in Chrome and it passes.`);
+  `Fix ${names}\n\n${summary}\n\nWritten by Claude Code from a Proofed report; Kane re-ran the scenario in Chrome and it passes.\n\nFixed-by: ${fixer.model} (${fixer.effort} effort)`);
 git("push", "origin", `HEAD:${branch}`);
 const sha = git("rev-parse", "HEAD");
 console.log(`Pushed ${sha} to ${branch}`);
@@ -205,6 +223,6 @@ try {
 const repoUrl = repo && `https://github.com/${repo.owner}/${repo.name}`;
 const broken = await publish({
   repo, pr: prNumber, sha, results, skipped, runUrl, outDir, asked,
-  fix: { status: "fixed", attempts: attempt, summary, commit: sha, commitUrl: repoUrl ? `${repoUrl}/commit/${sha}` : undefined },
+  fix: { status: "fixed", attempts: attempt, summary, ...fixer, commit: sha, commitUrl: repoUrl ? `${repoUrl}/commit/${sha}` : undefined },
 });
 process.exitCode = broken.length > 0 ? 1 : 0;
