@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { MeView, RepoView } from "../worker/api";
+import { EFFORTS, MODELS, type Fixer } from "../worker/models";
 
 type Load<T> = { status: "loading" } | { status: "signed-out" } | { status: "error"; message: string } | { status: "ok"; data: T };
 
@@ -269,6 +270,8 @@ function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange:
         </p>
       </div>
 
+      <FixerChoice repo={repo} />
+
       {repo.report && report && (
         <p className="mt-3 text-[15px]">
           <span className={`${report.className} mr-2 font-semibold`}>{report.mark}</span>
@@ -280,6 +283,59 @@ function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange:
       )}
       {note && <p className="mt-3 text-[15px]">{note}</p>}
     </li>
+  );
+}
+
+// Which Claude model (and effort) "Fix with Claude" uses in this repo. Saved as Actions variables.
+function FixerChoice({ repo }: { repo: RepoView }) {
+  const [fixer, setFixer] = useState(repo.fixer);
+  const [state, setState] = useState<ReactNode>();
+
+  if (!fixer) {
+    return (
+      <p className="mt-3 text-[15px] text-muted">
+        To choose the model Claude fixes with,{" "}
+        <a href={`https://github.com/settings/installations/${repo.installationId}`} className="text-ink underline underline-offset-4">
+          accept Proofed's new permission on GitHub
+        </a>
+        .
+      </p>
+    );
+  }
+
+  const save = async (next: Fixer) => {
+    const before = fixer;
+    setFixer(next);
+    setState("Saving…");
+    try {
+      await api(`/api/repos/${repo.name}/fixer`, { method: "POST", body: JSON.stringify(next) });
+      setState("Saved");
+    } catch (e) {
+      setFixer(before);
+      setState(<span className="text-fail">{e instanceof Error ? e.message : String(e)}</span>);
+    }
+  };
+
+  const select = "min-h-11 rounded-lg border border-line bg-white px-2 text-[15px] outline-none focus:border-ink";
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[15px]">
+      <span>Claude fixes with</span>
+      <select aria-label="Model" className={select} value={fixer.model} onChange={(e) => save({ ...fixer, model: e.target.value })}>
+        {MODELS.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.label}
+          </option>
+        ))}
+      </select>
+      <select aria-label="Effort" className={select} value={fixer.effort} onChange={(e) => save({ ...fixer, effort: e.target.value })}>
+        {EFFORTS.map((e) => (
+          <option key={e} value={e}>
+            {e} effort
+          </option>
+        ))}
+      </select>
+      {state && <span className="text-muted">{state}</span>}
+    </div>
   );
 }
 

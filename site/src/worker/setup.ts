@@ -81,6 +81,10 @@ const checkWorkflow = (c: Commands) => `name: Proofed
 
 on:
   pull_request:
+  # "/proofed" in a PR comment checks that PR again (also one opened before Proofed was added);
+  # "/proofed <what to check>" has Kane check just that.
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: write # clips go to the proofed-clips branch
@@ -88,19 +92,25 @@ permissions:
   issues: write
   statuses: write
 
-concurrency:
-  group: proofed-\${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   kane:
     name: Kane in Chrome
+    # Comments count only from people with write access: the run uses this repo's keys on the PR's code.
+    if: >-
+      github.event_name == 'pull_request' || (
+        github.event.issue.pull_request &&
+        contains(github.event.comment.body, '/proofed') &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    concurrency:
+      group: proofed-\${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: \${{ github.event.pull_request.head.sha }}
+          ref: \${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', github.event.issue.number) }}
           fetch-depth: 0
 ${c.setup}      - uses: actions/setup-node@v4
         with:
@@ -155,6 +165,9 @@ ${c.fixSetup}      - uses: t1dem/proofed/fix@main
           lt-username: \${{ secrets.LT_USERNAME }}
           lt-access-key: \${{ secrets.LT_ACCESS_KEY }}
           claude-code-oauth-token: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Set per repo from the Proofed dashboard; empty means Haiku 5.5 at xhigh.
+          model: \${{ vars.PROOFED_MODEL }}
+          effort: \${{ vars.PROOFED_EFFORT }}
 `;
 
 const firstScenario = `---
@@ -168,7 +181,7 @@ const prBody = (repo: string, c: Commands) => `Proofed runs the user flows a pul
 
 This PR adds:
 
-- \`.github/workflows/proofed.yml\`: the check, on every pull request
+- \`.github/workflows/proofed.yml\`: the check, on every pull request and on a \`/proofed\` comment
 - \`.github/workflows/proofed-fix.yml\`: the fixer, when the box is ticked
 - \`.proofed/scenarios/home.md\`: a first scenario. Add one Markdown file per flow; \`paths\` limits a scenario to PRs that touch those files.
 
