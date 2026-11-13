@@ -1,3 +1,4 @@
+import { handleActionsToken } from "./actions";
 import { handleApi } from "./api";
 import { callback, login, logout } from "./auth";
 import type { AppEnv } from "./github";
@@ -22,6 +23,13 @@ export default {
     if (pathname === "/logout") return logout(request, env);
     if (pathname === "/api/health") return Response.json({ ok: true });
     if (pathname === "/api/github/webhook" && request.method === "POST") return handleWebhook(request, env, ctx);
+    // Called by the action, not the dashboard: it carries a GitHub Actions token, not a session.
+    if (pathname === "/api/actions/token" && request.method === "POST") {
+      return handleActionsToken(request, env).catch((e: unknown) => {
+        console.error(pathname, e);
+        return Response.json({ error: "Something went wrong talking to GitHub. Try again." }, { status: 502 });
+      });
+    }
     if (pathname.startsWith("/api/")) {
       try {
         return await handleApi(request, env, pathname);

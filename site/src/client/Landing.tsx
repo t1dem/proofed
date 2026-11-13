@@ -114,7 +114,7 @@ function Setup() {
             <li>
               <h3 className="text-lg font-semibold">Install the GitHub app</h3>
               <p className="mt-1.5 leading-relaxed text-ink/85">
-                Pick the repos. Proofed opens a pull request in each that adds two workflows and an example scenario.
+                Pick the repos. Proofed opens a pull request in each that adds a workflow and an example scenario.
               </p>
             </li>
             <li>

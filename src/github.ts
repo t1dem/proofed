@@ -47,7 +47,7 @@ export const MARKER = "<!-- proofed -->";
 
 // Proofed's own report on the PR. Only a bot's comment counts: anyone can paste the marker.
 export async function findReport(repo: Repo, pr: number) {
-  const comments = await api<{ id: number; body?: string; user?: { type: string } }[]>(repo, "GET", `/issues/${pr}/comments?per_page=100`);
+  const comments = await api<{ id: number; html_url: string; body?: string; user?: { type: string } }[]>(repo, "GET", `/issues/${pr}/comments?per_page=100`);
   return comments.find((c) => c.user?.type === "Bot" && c.body?.includes(MARKER));
 }
 
@@ -61,6 +61,11 @@ export async function upsertComment(repo: Repo, pr: number, body: string) {
     : api<{ html_url: string }>(repo, "POST", `/issues/${pr}/comments`, { body });
 }
 
+const STATUS = "Proofed";
+
+export const hasStatus = async (repo: Repo, sha: string) =>
+  (await api<{ statuses: { context: string }[] }>(repo, "GET", `/commits/${sha}/status`)).statuses.some((s) => s.context === STATUS);
+
 export function setStatus(
   repo: Repo,
   sha: string,
@@ -70,7 +75,7 @@ export function setStatus(
 ) {
   return api(repo, "POST", `/statuses/${sha}`, {
     state,
-    context: "Proofed",
+    context: STATUS,
     description: description.slice(0, 140),
     ...(targetUrl && { target_url: targetUrl }),
   });

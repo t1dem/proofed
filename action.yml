@@ -51,6 +51,9 @@ inputs:
   github-token:
     description: Token for the PR comment, commit status, the clips branch and the fixer's push
     default: ${{ github.token }}
+  proofed-url:
+    description: Proofed's server. With `id-token: write` in the workflow, the fixer gets a token of the Proofed GitHub App there and pushes with it, so the workflows on the fix commit run without an approval.
+    default: https://proofed.neptunescodm.workers.dev
   kane-version:
     description: "@testmuai/kane-cli version"
     default: "0.10.4"
@@ -247,6 +250,7 @@ runs:
         KANE_CLI_CDP_RETRIES: "2"
         KANE_CLI_USER_AGENT: github-action
         GITHUB_TOKEN: ${{ inputs.github-token }}
+        PROOFED_SERVER: ${{ inputs.proofed-url }}
       run: node "$GITHUB_ACTION_PATH/src/fix.ts"
 
     - name: Keep the recordings

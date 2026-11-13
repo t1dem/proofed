@@ -2,6 +2,8 @@ import { MARKER } from "./github.ts";
 import { runMarker } from "./runfile.ts";
 import type { Step } from "./kane.ts";
 import { describeFixer, type Fixer } from "./models.ts";
+import { BLANK_PAGE } from "./precheck.ts";
+import { nothingAsked } from "./requests.ts";
 import { unchecked, type ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
 
@@ -54,6 +56,12 @@ export function readReportData(body: string): ReportData | undefined {
     return undefined;
   }
 }
+
+// A push of the very commit the report is about: the Proofed app pushing Claude's fix, which the fix
+// run checked and reported before it ended. Any other push brings a new commit, and a /proofed
+// comment always runs, whatever the commit.
+export const alreadyReported = (action: string | undefined, headSha: string, report: ReportData | undefined) =>
+  action === "synchronize" && report?.sha === headSha;
 
 export const fixRequested = (body: string) => body.includes(`- [x] **${FIX_BOX}**`);
 
@@ -139,14 +147,19 @@ function whatChanged(fix: FixNote) {
 type Repaired = { before: FailureData; after: ScenarioResult };
 
 // The commit, the fixer and what changed are said once, above all the repaired scenarios.
+// A page that crashed on load has no clip, only the browser's error (precheck.ts keeps it as the diagnosis).
+// With a still on one side only, it goes above that side's text instead of in a half-empty row.
 function beforeAfter({ before, after }: Repaired, beforeSha: string, sha: string, links: ClipLinks | undefined) {
   const stills = [still(before.clip), still(links)];
   const confirmed = after.end?.summary?.trim() || after.end?.reason?.trim() || "Passes.";
+  const consoleError = before.reason === BLANK_PAGE && before.diagnosis ? `<br><br>${code(before.diagnosis).replaceAll("|", "\\|")}` : "";
+  const texts = [`✗ ${cell(before.reason || before.diagnosis || "Failed.")}${consoleError}`, `✓ ${cell(confirmed)}`];
+  const both = stills.every(Boolean);
   const rows = [
     `| Before · \`${short(beforeSha)}\` | After · \`${short(sha)}\` |`,
     "|---|---|",
-    ...(stills.some(Boolean) ? [`| ${stills.join(" | ")} |`] : []),
-    `| ✗ ${cell(before.reason || before.diagnosis || "Failed.")} | ✓ ${cell(confirmed)} |`,
+    ...(both ? [`| ${stills.join(" | ")} |`] : []),
+    `| ${texts.map((t, i) => (!both && stills[i] ? `${stills[i]}<br>${t}` : t)).join(" | ")} |`,
   ];
   return `#### ✓ ${after.scenario.name}\n\n${rows.join("\n")}`;
 }
@@ -195,14 +208,16 @@ export function buildReport(input: ReportInput) {
 }
 
 function compose(
-  { sha, results, skipped, clips, runUrl, fixEnabled, fix, asked, previous, repoUrl, runKey }: ReportInput,
+  { sha, results: all, skipped, clips, runUrl, fixEnabled, fix, asked, previous, repoUrl, runKey }: ReportInput,
   { stepList: withSteps, storedSteps }: Fit,
 ) {
+  const unasked = all.filter(nothingAsked);
+  const results = all.filter((r) => !nothingAsked(r));
   const failed = results.filter((r) => r.outcome === "failed");
   const errored = results.filter((r) => r.outcome === "error");
   const unsure = results.filter((r) => r.outcome === "unsure");
   const passed = results.filter((r) => r.outcome === "passed");
-  const credits = results.reduce((sum, r) => sum + (r.end?.credits_consumed ?? 0), 0);
+  const credits = all.reduce((sum, r) => sum + (r.end?.credits_consumed ?? 0), 0);
   const repaired: Repaired[] =
     fix?.status === "fixed" && previous
       ? passed.flatMap((after) => {
@@ -310,12 +325,15 @@ function compose(
   }
 
   if (skipped.length > 0) sections.push(`<sub>Not affected by this diff: ${skipped.join(", ")}</sub>`);
+  if (unasked.length > 0) sections.push("<sub>The PR description didn't name anything Kane could check in the browser.</sub>");
 
   const state: RunState = failed.length > 0 ? "failed" : errored.length > 0 ? "error" : fix?.status === "fixed" ? "fixed" : "passed";
   const history = addRun(previous?.history, { sha, state });
+  // Not kept for the fixer: its final check would only spend credits finding nothing to check again.
+  const rerun = asked?.filter((s) => !unasked.some((r) => r.scenario.id === s.id));
   const data: ReportData = {
     sha,
-    ...(asked?.length && { asked }),
+    ...(rerun?.length && { asked: rerun }),
     failures: failed.map((r) => ({
       id: r.scenario.id,
       name: r.scenario.name,

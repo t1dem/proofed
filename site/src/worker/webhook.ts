@@ -61,7 +61,7 @@ export async function handleWebhook(request: Request, env: Env, ctx: ExecutionCo
           ? await env.DB.prepare("SELECT * FROM users WHERE id = ?1").bind(payload.sender.id).first<UserRow>()
           : null;
         for (const repo of added) {
-          const result = await openSetupPr(token, repo).catch((e: unknown) => ({ error: String(e) }));
+          const result = await openSetupPr(token, repo, env.GITHUB_APP_SLUG).catch((e: unknown) => ({ error: String(e) }));
           console.log("setup", repo.full_name, JSON.stringify(result));
           if (user) await pushSecrets(env, user, repo.full_name, installationId).catch((e: unknown) => console.log("secrets", String(e)));
         }

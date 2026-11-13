@@ -1,4 +1,5 @@
 import { isEffort, parseModel, type Effort } from "./models.ts";
+import type { ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
 
 // "/proofed" in a PR comment re-runs the check, which also gives a PR opened before Proofed was
@@ -34,6 +35,16 @@ export function descriptionRequest(body: string | null | undefined) {
   return text && text.length <= 1500 ? text : undefined;
 }
 
+// Any short description becomes a request, and many ask for nothing ("Will be closed, not merged.").
+// Left to itself Kane then improvises: it signs in, ends up on GitHub's OAuth page, and the report
+// says the test may be wrong. A /proofed comment is always a request, so it gets no such way out.
+const MAY_ASK_NOTHING =
+  "If the text above doesn't describe something a user can see or do in this app, stop right away " +
+  "without clicking anything: there is nothing to check. Never sign in, and never leave the app's own pages to get there.";
+
+// The description asked for nothing Kane could check: not a result of the PR, only a line under the report.
+export const nothingAsked = (r: ScenarioResult) => r.scenario.id === "asked-in-description" && r.outcome === "unsure";
+
 export function askedScenario(where: "description" | "comment", text: string): Scenario {
   return {
     id: `asked-in-${where}`,
@@ -44,6 +55,7 @@ export function askedScenario(where: "description" | "comment", text: string): S
     objective:
       `The author of this pull request asked for this to be checked:\n\n${text}\n\n` +
       "Open the app and check exactly that in the browser, the way a user would. It passes only if what they " +
-      "asked about actually works; the page loading is not enough.",
+      "asked about actually works; the page loading is not enough." +
+      (where === "description" ? ` ${MAY_ASK_NOTHING}` : ""),
   };
 }
