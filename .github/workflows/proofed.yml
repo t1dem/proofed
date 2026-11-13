@@ -46,7 +46,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 10.20.0
-      - uses: t1dem/proofed@main
+      - uses: t1dem/proofed@scenarios-from-setup
         with:
           url: http://localhost:4173
           working-directory: site
