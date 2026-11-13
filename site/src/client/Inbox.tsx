@@ -27,7 +27,7 @@ function Why({ pull }: { pull: PullView }): ReactNode {
   const kind = kindOf(pull);
   const strong = (text: string) => <span className="font-medium text-fg">{text}</span>;
 
-  if (kind === "running") return "Kane is checking this pull request again.";
+  if (kind === "running") return scenarios.length === 0 ? "Kane is checking this pull request." : "Kane is checking this pull request again.";
   if (scenarios.length === 0) return pull.headline;
   if (kind === "fixing") return <>Claude is fixing {strong(names(failed) || "this pull request")}. Kane checks again before anything is pushed.</>;
   if (kind === "failed") {

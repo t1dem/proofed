@@ -367,6 +367,8 @@ export function Pull({ repo, pr, listed, go, asked, ask }: PullProps) {
         <section className="mt-6">
             {detail.data.runs.length > 0 ? (
               <Scenarios runs={detail.data.runs} />
+            ) : kind === "running" ? (
+              <p className="max-w-xl">Kane is checking this pull request. The clips and Kane's notes will show here when the run is done.</p>
             ) : (
               <div className="max-w-xl">
                 <p>{detail.data.pull.headline}</p>

@@ -1,6 +1,6 @@
 import { pushSecrets } from "./api";
 import type { UserRow } from "./auth";
-import { installationToken, verifySignature } from "./github";
+import { gh, installationToken, verifySignature } from "./github";
 import type { Env } from "./index";
 import { saveRun } from "./runs";
 import { openSetupPr } from "./setup";
@@ -13,7 +13,7 @@ type Payload = {
   repositories?: Repo[];
   repositories_added?: Repo[];
   issue?: { number: number; title?: string; pull_request?: object };
-  pull_request?: { number: number };
+  pull_request?: { number: number; title?: string; html_url?: string; head?: { sha: string } };
   comment?: { body: string; html_url: string };
   repository?: { full_name: string };
 };
@@ -88,6 +88,29 @@ export async function handleWebhook(request: Request, env: Env, ctx: ExecutionCo
           .catch((e: unknown) => console.log("run", repo, number, String(e))),
       );
     }
+  }
+
+  // A pull request is in the inbox from its first push, as "Kane is checking": the workflow reports
+  // only when it's done. Without the workflow on that commit nothing would run, so nothing is shown.
+  const checked = event === "pull_request" && ["opened", "synchronize", "reopened"].includes(payload.action ?? "");
+  if (checked && payload.pull_request?.head && payload.repository && payload.installation) {
+    const { number, title, html_url, head } = payload.pull_request;
+    const repo = payload.repository.full_name;
+    const { id } = payload.installation;
+    ctx.waitUntil(
+      (async () => {
+        const token = await installationToken(env, id);
+        await gh(token, "GET", `/repos/${repo}/contents/.github/workflows/proofed.yml?ref=${head.sha}`);
+        // The row's own state is what's left if the run never reports (see stateOf in runs.ts).
+        await env.DB.prepare(
+          `INSERT INTO reports (repo, pr, state, headline, url, updated_at, title, asked, asked_at)
+           VALUES (?1, ?2, 'blocked', 'Proofed didn''t report on this pull request.', ?3, ?4, ?5, 'rerun', ?4)
+           ON CONFLICT(repo, pr) DO UPDATE SET asked = 'rerun', asked_at = ?4, title = ?5`,
+        )
+          .bind(repo, number, html_url ?? `https://github.com/${repo}/pull/${number}`, Date.now(), title ?? null)
+          .run();
+      })().catch((e: unknown) => console.log("checking", repo, number, String(e))),
+    );
   }
 
   // A closed pull request leaves the inbox; reopening brings it back.
