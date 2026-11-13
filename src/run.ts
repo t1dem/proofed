@@ -15,8 +15,10 @@ export type ScenarioResult = {
   outcome: Outcome;
   steps: Step[];
   end: RunEnd | undefined;
-  clip: { mp4: string; gif: string } | undefined;
+  clip: { mp4: string; gif: string; jpg: string } | undefined;
   error?: string;
+  // Wall time of the run, retries included.
+  seconds?: number;
 };
 
 // Failures of the browser plumbing rather than of the app: the run is retried, never reported as a bug.

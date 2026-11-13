@@ -302,5 +302,8 @@ export async function makeClip({ frames, actions, focus, endpoint }: ClipInput, 
     "-vf", "fps=10,scale=720:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle",
     gif,
   );
-  return { mp4, gif };
+  // The still for the before/after table after a fix: the last frame, settled on what the check was about.
+  const jpg = `${base}.jpg`;
+  ffmpeg("-i", join(dir, `${String(count - 1).padStart(5, "0")}.jpg`), "-vf", "scale=720:-1:flags=lanczos", "-frames:v", "1", "-q:v", "3", jpg);
+  return { mp4, gif, jpg };
 }

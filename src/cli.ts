@@ -2,8 +2,9 @@
 // Picks the scenarios the diff touches, adds what the PR description asks to have checked, runs
 // each in Chrome with Kane, publishes the clips and reports on the PR.
 import { mkdirSync } from "node:fs";
-import { acknowledge, getPullRequest, reply, setStatus, type PullRequest } from "./github.ts";
+import { acknowledge, findReport, getPullRequest, reply, setStatus, type PullRequest } from "./github.ts";
 import { baseRev, changedFiles, ctx, env, isBroken, pickScenarios, publish, readEvent, runAll } from "./pipeline.ts";
+import { readReportData } from "./report.ts";
 import { askedScenario, descriptionRequest, parseCommand, parseFix } from "./requests.ts";
 import type { Scenario } from "./scenarios.ts";
 
@@ -64,7 +65,9 @@ if (repo && pr) await setStatus(repo, sha, "pending", `Kane is checking ${select
 let results, broken;
 try {
   results = await runAll(selected, outDir);
-  broken = await publish({ repo, pr: pr?.number, sha, results, skipped, runUrl, outDir, asked });
+  // Read just before it's overwritten, so the run history carries over.
+  const previous = repo && pr ? readReportData((await findReport(repo, pr.number))?.body ?? "") : undefined;
+  broken = await publish({ repo, pr: pr?.number, sha, results, skipped, runUrl, outDir, asked, previous });
 } catch (e) {
   // Don't leave the PR on "pending" forever.
   if (repo && pr) await setStatus(repo, sha, "error", "Proofed itself failed; see the logs", runUrl).catch(() => {});

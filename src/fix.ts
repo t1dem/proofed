@@ -6,7 +6,7 @@ import { mkdirSync } from "node:fs";
 import { findReport, setStatus, upsertComment } from "./github.ts";
 import { DEFAULT_FIXER, describeFixer, type Fixer } from "./models.ts";
 import { changedFiles, ctx, env, isBroken, pickScenarios, publish, readEvent, runAll } from "./pipeline.ts";
-import { fixRequested, FIX_BOX, readReportData, type FailureData } from "./report.ts";
+import { fixRequested, FIX_BOX, readReportData, type FailureData, type FixAttempt } from "./report.ts";
 import type { ScenarioResult } from "./run.ts";
 
 const MAX_ATTEMPTS = 3;
@@ -140,13 +140,15 @@ async function serve() {
   throw new Error(`App didn't come up at ${url}`);
 }
 
-const describe = (results: ScenarioResult[]) =>
-  results.filter(isBroken).map((r) => `- "${r.scenario.name}" still fails: ${r.end?.reason ?? r.error}`).join("\n");
+const stillBroken = (results: ScenarioResult[]) =>
+  results.filter(isBroken).map((r) => `"${r.scenario.name}" still fails: ${r.end?.reason ?? r.error}`);
+const describe = (results: ScenarioResult[]) => stillBroken(results).map((line) => `- ${line}`).join("\n");
 
 let failures = data.failures;
 let feedback = "";
 let summary = "";
 let lastResults: ScenarioResult[] = [];
+const tries: FixAttempt[] = [];
 let fixed = false;
 let attempt = 0;
 
@@ -165,6 +167,7 @@ while (!fixed && attempt < MAX_ATTEMPTS) {
 
   if (!git("status", "--porcelain")) {
     feedback = "You made no changes to the code.";
+    tries.push({ summary, result: "No change to the code." });
     continue;
   }
   try {
@@ -172,6 +175,7 @@ while (!fixed && attempt < MAX_ATTEMPTS) {
   } catch (e) {
     const output = e instanceof Error && "stdout" in e && "stderr" in e ? `${e.stdout}${e.stderr}` : String(e);
     feedback = `Your change didn't build:\n${output.slice(-3000)}`;
+    tries.push({ summary, result: "It didn't build." });
     continue;
   }
 
@@ -182,6 +186,7 @@ while (!fixed && attempt < MAX_ATTEMPTS) {
     stop();
   }
   fixed = !lastResults.some(isBroken);
+  tries.push({ summary, result: fixed ? "Kane saw it pass." : `Kane: ${stillBroken(lastResults).join("; ")}` });
   if (!fixed) {
     feedback = `Your change was: ${summary}\nKane re-ran the scenarios in Chrome:\n${describe(lastResults)}`;
     failures = data.failures.filter((f) => lastResults.some((r) => r.scenario.id === f.id && isBroken(r)));
@@ -196,12 +201,17 @@ if (!fixed) {
     process.exit(1);
   }
   await publish({
-    repo, pr: prNumber, sha: git("rev-parse", "HEAD"), results: lastResults, skipped: [], runUrl, outDir, asked,
-    fix: { status: "gave-up", attempts: attempt, summary, ...fixer },
+    repo, pr: prNumber, sha: git("rev-parse", "HEAD"), results: lastResults, skipped: [], runUrl, outDir, asked, previous: data,
+    fix: { status: "gave-up", attempts: attempt, summary, ...fixer, tries },
   });
   process.exit(1);
 }
 
+// What `commit -a` is about to commit, for "What changed" in the report.
+const changes = git("diff", "--numstat", "HEAD").split("\n").filter(Boolean).map((line) => {
+  const [added = "", removed = "", file = ""] = line.split("\t");
+  return { file, added: Number(added) || 0, removed: Number(removed) || 0 };
+});
 const names = data.failures.map((f) => f.name).join(", ");
 git("-c", "user.name=Claude", "-c", "user.email=noreply@anthropic.com", "commit", "-am",
   `Fix ${names}\n\n${summary}\n\nWritten by Claude Code from a Proofed report; Kane re-ran the scenario in Chrome and it passes.\n\nFixed-by: ${fixer.model} (${fixer.effort} effort)`);
@@ -222,7 +232,10 @@ try {
 }
 const repoUrl = repo && `https://github.com/${repo.owner}/${repo.name}`;
 const broken = await publish({
-  repo, pr: prNumber, sha, results, skipped, runUrl, outDir, asked,
-  fix: { status: "fixed", attempts: attempt, summary, ...fixer, commit: sha, commitUrl: repoUrl ? `${repoUrl}/commit/${sha}` : undefined },
+  repo, pr: prNumber, sha, results, skipped, runUrl, outDir, asked, previous: data,
+  fix: {
+    status: "fixed", attempts: attempt, summary, ...fixer, tries, changes,
+    commit: sha, commitUrl: repoUrl ? `${repoUrl}/commit/${sha}` : undefined,
+  },
 });
 process.exitCode = broken.length > 0 ? 1 : 0;

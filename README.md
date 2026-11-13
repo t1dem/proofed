@@ -10,7 +10,7 @@ Built for the Kane CLI hackathon, November 2026.
 2. Each scenario runs in its own headless Chrome. Kane drives the browser; Proofed records the screen over the Chrome DevTools Protocol, since Kane doesn't record video. The clip keeps a moment around each of Kane's clicks and keystrokes and cuts the waiting between them. A cursor shows where Kane clicked, the camera zooms in on the element it's using, and the clip ends on the part of the page the final check was about.
 3. The PR gets one comment, edited on every run, with a GIF of each run, a link to the mp4, and Kane's explanation of what went wrong. The commit gets a `Proofed` status.
 4. If Kane decides the test itself is wrong rather than the code, the scenario is flagged and doesn't block the merge. Browser hiccups (a screenshot timeout, a closed tab) are retried once and never reported as bugs.
-5. Tick **Fix with Claude**, or comment `/proofed fix`. Claude Code edits the code, the app is rebuilt, and Kane re-runs the broken scenarios. Up to three attempts, each one told why the last failed. Nothing is pushed until a fix passes. The report and the commit (a `Fixed-by:` line) say which model made the fix.
+5. Tick **Fix with Claude**, or comment `/proofed fix`. Claude Code edits the code, the app is rebuilt, and Kane re-runs the broken scenarios. Up to three attempts, each one told why the last failed. Nothing is pushed until a fix passes. The report and the commit (a `Fixed-by:` line) say which model made the fix. The report then shows each repaired scenario before and after: the failing run next to the passing one, and the files the fix changed.
 
 ## Commands
 
