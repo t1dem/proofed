@@ -296,7 +296,7 @@ export async function makeClip({ frames, actions, focus, endpoint }: ClipInput, 
   const mp4 = `${base}.mp4`;
   const gif = `${base}.gif`;
   const ffmpeg = (...args: string[]) => execFileSync("ffmpeg", ["-y", "-loglevel", "error", ...args]);
-  ffmpeg("-framerate", String(FPS), "-i", join(dir, "%05d.jpg"), "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", mp4);
+  ffmpeg("-framerate", String(FPS), "-i", join(dir, "%05d.jpg"), "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", mp4);
   ffmpeg(
     "-i", mp4,
     "-vf", "fps=10,scale=720:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle",
