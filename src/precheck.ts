@@ -36,8 +36,11 @@ export async function findCrashes(urls: string[]) {
   const crashes = new Map<string, string>();
   if (urls.length === 0) return crashes;
   let chrome: Awaited<ReturnType<typeof launchChrome>> | undefined;
+  const seconds = (from: number, to = Date.now()) => ((to - from) / 1000).toFixed(1);
+  const started = Date.now();
   try {
     chrome = await launchChrome();
+    const opened = Date.now();
     const cdp = await connectCdp(chrome.endpoint);
     await Promise.all(
       urls.map(async (url) => {
@@ -46,6 +49,7 @@ export async function findCrashes(urls: string[]) {
       }),
     );
     cdp.close();
+    console.log(`Checked ${urls.length} start page(s) for a crash on load in ${seconds(started)} s (Chrome took ${seconds(started, opened)} s to start)`);
   } catch (e) {
     // The check is only a shortcut: without it, Kane runs every scenario as it always did.
     console.log(`Couldn't check the pages before Kane: ${e instanceof Error ? e.message : e}`);
