@@ -57,7 +57,8 @@ ${diff}
 ${feedback ? `\nA previous fix attempt didn't work:\n${feedback}\n` : ""}
 Find the cause in the application code and fix it with the smallest change that keeps what the PR set out to do.
 Don't edit anything under .proofed/, don't change the scenario expectations, and don't commit.
-When you're done, answer in English with a single sentence: what was wrong and what you changed.`;
+You may run \`${env("PROOFED_BUILD")}\` to check that your change builds.
+End your answer with one line in English that starts with "SUMMARY:" and says what was wrong and what you changed.`;
 }
 
 type ClaudeResult = { result?: string; is_error?: boolean };
@@ -67,7 +68,7 @@ function askClaude(text: string) {
     "claude",
     ["-p", text, "--output-format", "json", "--permission-mode", "acceptEdits", "--max-turns", "40",
       "--model", env("PROOFED_CLAUDE_MODEL", "claude-haiku-5-5"), "--effort", env("PROOFED_CLAUDE_EFFORT", "xhigh"),
-      "--allowedTools", "Read,Edit,Write,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"],
+      "--allowedTools", `Read,Edit,Write,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(${env("PROOFED_BUILD")})`],
     { encoding: "utf8", maxBuffer: 50 * 1024 * 1024 },
   );
   let parsed: ClaudeResult = {};
@@ -79,7 +80,8 @@ function askClaude(text: string) {
   const result = parsed.result?.trim() ?? "";
   // Usage limits and API errors come back as is_error with the message in `result`.
   if (run.status !== 0 || parsed.is_error) return { ok: false as const, message: result || run.stderr.trim() || "Claude Code failed" };
-  return { ok: true as const, summary: result.split("\n").at(-1) ?? "" };
+  const summary = /^SUMMARY:\s*(.+)$/m.exec(result)?.[1] ?? result.split("\n").at(-1) ?? "";
+  return { ok: true as const, summary: summary.trim() };
 }
 
 // Claude couldn't run at all: put the original report back, untick the box, and say why.
