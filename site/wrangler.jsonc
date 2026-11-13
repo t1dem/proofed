@@ -1,0 +1,15 @@
+{
+  "name": "proofed",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-11-01",
+  "account_id": "c0f143c145a53cbc87a3a7709d6dfb26",
+  "assets": {
+    "not_found_handling": "single-page-application",
+    // The Worker answers these; everything else is the static site.
+    "run_worker_first": ["/api/*", "/install"]
+  },
+  "vars": {
+    "GITHUB_APP_SLUG": "proofed-by-kane"
+  },
+  "observability": { "enabled": true }
+}
