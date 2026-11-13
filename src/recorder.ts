@@ -56,10 +56,24 @@ const LOCATE = (words: string[]) => `(() => {
     const text = (el.innerText ?? "").toLowerCase().replace(/[‘’]/g, "'");
     const hits = words.filter((w) => text.includes(w)).length;
     if (hits && (!best || hits > best.hits || (hits === best.hits && area < best.area))) {
-      best = { hits, area, x: r.x, y: r.y, width: r.width, height: r.height };
+      best = { hits, area, el, rect: { x: r.x, y: r.y, width: r.width, height: r.height } };
     }
   }
-  return best && best.hits >= Math.min(2, words.length) ? JSON.stringify(best) : null;
+  if (!best || best.hits < Math.min(2, words.length)) return null;
+  // Tighten to the text itself: a block is often page-wide while its words sit on the left.
+  let box = null;
+  const walker = document.createTreeWalker(best.el, NodeFilter.SHOW_TEXT);
+  const range = document.createRange();
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!node.textContent.trim()) continue;
+    range.selectNodeContents(node);
+    const r = range.getBoundingClientRect();
+    if (!r.width || !r.height) continue;
+    box = box
+      ? { left: Math.min(box.left, r.left), top: Math.min(box.top, r.top), right: Math.max(box.right, r.right), bottom: Math.max(box.bottom, r.bottom) }
+      : { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+  }
+  return JSON.stringify(box ? { x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top } : best.rect);
 })()`;
 
 // Kane doesn't record video, so we attach to the same Chrome over CDP and keep every
