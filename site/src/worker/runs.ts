@@ -9,7 +9,7 @@ export type { RunScenario };
 export type Outcome = RunScenario["outcome"];
 export type Run = RunFile & { key: string; at: number };
 
-// "running": someone asked for a run from the dashboard and the workflow hasn't reported yet.
+// "running": a push or a "Run again" started a run and the workflow hasn't reported yet.
 export type PullState = "failing" | "passing" | "fixing" | "blocked" | "running";
 
 export type PullView = {
@@ -79,8 +79,9 @@ export async function markAsked(env: Env, repo: string, pr: number, action: "fix
 }
 
 // The workflow's next comment (newer than the ask) takes over from the ask.
+// A pull request that has no report yet is created with both times equal.
 function stateOf(report: ReportRow): PullState {
-  const pending = report.asked_at && report.asked_at > report.updated_at && Date.now() - report.asked_at < ASK_LASTS;
+  const pending = report.asked_at && report.asked_at >= report.updated_at && Date.now() - report.asked_at < ASK_LASTS;
   if (!pending) return report.state;
   return report.asked === "fix" ? "fixing" : "running";
 }

@@ -1,6 +1,7 @@
 import { ChevronRight, Maximize2, Play, RotateCw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { modelLabel } from "../worker/models";
+import { NOTHING_CHECKED } from "../../../src/runfile";
 import type { PullDetail, PullView, Run, RunScenario } from "../worker/runs";
 import { ago, plural, useLoad, type Ask, type Route, type useAsk } from "./lib";
 import { focus, kindOf, Link, link, Mark, outline, PageTitle, Segmented, sha7, solid } from "./ui";
@@ -152,7 +153,8 @@ function runLabel(run: Run) {
   if (run.fix?.status === "fixed") return "fixed by Claude";
   if (count("failed") > 0) return `${count("failed")} of ${run.scenarios.length} broke`;
   if (count("error") > 0) return "couldn't finish";
-  if (count("unsure") > 0) return "test may be wrong";
+  const unsure = run.scenarios.filter((s) => s.outcome === "unsure");
+  if (unsure.length > 0) return unsure.every((s) => s.reason === NOTHING_CHECKED) ? "not checked" : "test may be wrong";
   return run.scenarios.length === 0 ? "nothing to run" : `${run.scenarios.length} pass`;
 }
 
@@ -250,8 +252,9 @@ function Scenarios({ runs }: { runs: Run[] }) {
         <div className="min-w-0">
       {now.scenario.outcome !== "passed" && now.scenario.diagnosis && now.scenario.diagnosis !== now.scenario.reason && (
         <>
-          <Heading>What Kane saw</Heading>
-          <p className="max-w-3xl text-dim">{now.scenario.diagnosis}</p>
+          {/* A failure without steps is a page that crashed on load: Kane never ran, the browser said this. */}
+          <Heading>{now.scenario.steps?.length ? "What Kane saw" : "Browser console error"}</Heading>
+          <p className={`max-w-3xl text-dim ${now.scenario.steps?.length ? "" : "font-mono text-[13px]"}`}>{now.scenario.diagnosis}</p>
         </>
       )}
 
@@ -367,6 +370,8 @@ export function Pull({ repo, pr, listed, go, asked, ask }: PullProps) {
         <section className="mt-6">
             {detail.data.runs.length > 0 ? (
               <Scenarios runs={detail.data.runs} />
+            ) : kind === "running" ? (
+              <p className="max-w-xl">Kane is checking this pull request. The clips and Kane's notes will show here when the run is done.</p>
             ) : (
               <div className="max-w-xl">
                 <p>{detail.data.pull.headline}</p>
