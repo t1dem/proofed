@@ -44,7 +44,7 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
         gh api "repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}" \
-          --jq '"base=\(.base.sha)\nhead_ref=\(.head.ref)"' >> "$GITHUB_OUTPUT"
+          --jq '"base=\(.base.sha)\nbase_ref=\(.base.ref)\nhead_ref=\(.head.ref)"' >> "$GITHUB_OUTPUT"
 
     - uses: actions/checkout@v4
       with:
@@ -81,6 +81,7 @@ runs:
         PROOFED_SCENARIOS: ${{ inputs.scenarios }}
         PROOFED_BASE_SHA: ${{ steps.pr.outputs.base }}
         PROOFED_HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+        PROOFED_BASE_REF: ${{ steps.pr.outputs.base_ref }}
         PROOFED_OUT: ${{ runner.temp }}/proofed
         LT_USERNAME: ${{ inputs.lt-username }}
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}

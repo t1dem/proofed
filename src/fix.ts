@@ -25,6 +25,13 @@ mkdirSync(outDir, { recursive: true });
 const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
 const base = env("PROOFED_BASE_SHA");
 const branch = env("PROOFED_HEAD_REF");
+// Where scenarios come from when the PR's branch has none (opened before Proofed was added).
+const rev = process.env.PROOFED_BASE_REF ? `origin/${process.env.PROOFED_BASE_REF}` : base;
+const asked = data.asked ?? [];
+const scenariosFor = (ids: string[]) => [
+  ...pickScenarios({ only: ids, rev }).selected,
+  ...asked.filter((s) => ids.includes(s.id)),
+];
 
 if (repo) {
   await upsertComment(repo, prNumber, body.replace(new RegExp(`- \\[x\\] \\*\\*${FIX_BOX}\\*\\*.*`), `⏳ **Claude is working on a fix.** [Follow along](${runUrl})`));
@@ -152,8 +159,7 @@ while (!fixed && attempt < MAX_ATTEMPTS) {
 
   const stop = await serve();
   try {
-    const { selected } = pickScenarios({ only: failures.map((f) => f.id) });
-    lastResults = await runAll(selected, `${outDir}/attempt-${attempt}`);
+    lastResults = await runAll(scenariosFor(failures.map((f) => f.id)), `${outDir}/attempt-${attempt}`);
   } finally {
     stop();
   }
@@ -172,7 +178,7 @@ if (!fixed) {
     process.exit(1);
   }
   await publish({
-    repo, pr: prNumber, sha: git("rev-parse", "HEAD"), results: lastResults, skipped: [], runUrl, outDir,
+    repo, pr: prNumber, sha: git("rev-parse", "HEAD"), results: lastResults, skipped: [], runUrl, outDir, asked,
     fix: { status: "gave-up", attempts: attempt, summary },
   });
   process.exit(1);
@@ -190,15 +196,15 @@ const stop = await serve();
 let results: ScenarioResult[];
 let skipped: string[];
 try {
-  const picked = pickScenarios({ changed: changedFiles(base, sha) });
+  const picked = pickScenarios({ changed: changedFiles(base, sha), rev });
   skipped = picked.skipped;
-  results = await runAll(picked.selected, `${outDir}/final`);
+  results = await runAll([...picked.selected, ...asked], `${outDir}/final`);
 } finally {
   stop();
 }
 const repoUrl = repo && `https://github.com/${repo.owner}/${repo.name}`;
 const broken = await publish({
-  repo, pr: prNumber, sha, results, skipped, runUrl, outDir,
+  repo, pr: prNumber, sha, results, skipped, runUrl, outDir, asked,
   fix: { status: "fixed", attempts: attempt, summary, commit: sha, commitUrl: repoUrl ? `${repoUrl}/commit/${sha}` : undefined },
 });
 process.exitCode = broken.length > 0 ? 1 : 0;
