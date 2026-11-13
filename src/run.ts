@@ -45,6 +45,17 @@ export function outcomeOf(end: RunEnd | undefined): Outcome {
   return end.verdict?.family === "automation_bug" ? "unsure" : "failed";
 }
 
+// Kane is good at reaching a goal, so on its own it routes around a broken button (a key press, another
+// link) and passes. A user who clicks the button and gets the wrong screen has found a bug.
+const NO_WORKAROUNDS =
+  "Do each step once, the way it is described. If a click or a key press does something other than what " +
+  "the step expects, the check fails: don't retry it, and don't reach the goal another way (other " +
+  "buttons, links, keyboard shortcuts, typing the URL). Waiting for a slow page to load is fine.";
+
+export function kaneObjective(objective: string) {
+  return `${objective}\n\n${NO_WORKAROUNDS}`;
+}
+
 type RunOptions = {
   baseUrl: string;
   outDir: string;
@@ -80,7 +91,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     const recorder = await startRecorder(chrome.endpoint, join(dir, "frames"));
     let focus: Promise<Rect | undefined> = Promise.resolve(undefined);
     const kane = await runKane({
-      objective: scenario.objective,
+      objective: kaneObjective(scenario.objective),
       url: new URL(scenario.url, o.baseUrl).href,
       cdpEndpoint: chrome.endpoint,
       username: o.username,
