@@ -34,7 +34,7 @@ inputs:
     description: From `claude setup-token` (secrets.CLAUDE_CODE_OAUTH_TOKEN), for the fixer
     default: ""
   vars:
-    description: The repo's Actions variables as JSON, `${{ toJSON(vars) }}`. Carries settings from the Proofed dashboard, such as PROOFED_MODEL.
+    description: The repo's Actions variables as JSON (pass toJSON(vars) in an expression). Carries settings from the Proofed dashboard, such as PROOFED_MODEL.
     default: "{}"
   scenarios:
     description: Folder with scenario Markdown files
