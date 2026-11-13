@@ -6,8 +6,11 @@
   "assets": {
     "not_found_handling": "single-page-application",
     // The Worker answers these; everything else is the static site.
-    "run_worker_first": ["/api/*", "/install"]
+    "run_worker_first": ["/api/*", "/install", "/login", "/logout", "/auth/*"]
   },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "proofed", "database_id": "8586a0a7-e70c-4280-a835-21bf0950ba09" }
+  ],
   "vars": {
     "GITHUB_APP_SLUG": "proofed-by-kane"
   },
