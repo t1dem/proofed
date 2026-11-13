@@ -1,0 +1,74 @@
+name: Proofed fix
+description: When "Fix with Claude" is ticked in the Proofed comment, Claude Code fixes the broken scenario and Kane checks the fix in Chrome before it is pushed.
+
+inputs:
+  url:
+    description: Where the app runs once served, e.g. http://localhost:4173
+    required: true
+  install:
+    description: Command that installs dependencies (runs once)
+    required: true
+  build:
+    description: Command that builds the app (runs after every fix attempt)
+    required: true
+  serve:
+    description: Command that serves the built app on `url` (Proofed starts and stops it)
+    required: true
+  lt-username:
+    required: true
+  lt-access-key:
+    required: true
+  claude-code-oauth-token:
+    description: From `claude setup-token`
+    required: true
+  scenarios:
+    default: .proofed/scenarios
+  github-token:
+    default: ${{ github.token }}
+  kane-version:
+    default: "0.10.3"
+
+runs:
+  using: composite
+  steps:
+    - name: Find the pull request
+      id: pr
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        gh api "repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}" \
+          --jq '"base=\(.base.sha)\nhead_ref=\(.head.ref)"' >> "$GITHUB_OUTPUT"
+
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ steps.pr.outputs.head_ref }}
+        fetch-depth: 0
+        token: ${{ inputs.github-token }}
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+
+    - name: Install Kane CLI, Claude Code and ffmpeg
+      shell: bash
+      run: |
+        npm install -g "@testmuai/kane-cli@${{ inputs.kane-version }}" @anthropic-ai/claude-code >/dev/null
+        command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null)
+        ${{ inputs.install }}
+
+    - name: Fix with Claude, verify with Kane
+      shell: bash
+      env:
+        PROOFED_URL: ${{ inputs.url }}
+        PROOFED_BUILD: ${{ inputs.build }}
+        PROOFED_SERVE: ${{ inputs.serve }}
+        PROOFED_SCENARIOS: ${{ inputs.scenarios }}
+        PROOFED_BASE_SHA: ${{ steps.pr.outputs.base }}
+        PROOFED_HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+        PROOFED_OUT: ${{ runner.temp }}/proofed
+        LT_USERNAME: ${{ inputs.lt-username }}
+        LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: node "$GITHUB_ACTION_PATH/../src/fix.ts"
