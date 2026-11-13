@@ -99,6 +99,15 @@ function clip(links: ClipLinks | undefined, width = 720) {
   return `\n\n<img src="${links.gif}" width="${width}" alt="Kane's run in the browser">${video}`;
 }
 
+// Only a still and no recording: the screenshot of a page that crashed on load (precheck.ts).
+const isScreenshot = (links: ClipLinks | undefined) => !!links?.jpg && !links.gif && !links.mp4;
+const SCREENSHOT_ALT = "What a user sees on opening the page";
+
+function screenshot(links: ClipLinks | undefined, url: string) {
+  if (!isScreenshot(links)) return "";
+  return `\n\n<img src="${links!.jpg}" width="720" alt="${SCREENSHOT_ALT}">\n\n<sub>This is what a user sees on opening ${code(url)}.</sub>`;
+}
+
 // The before/after table needs the video and a picture; the GIF only stands in for a missing still.
 function storedClip(links: ClipLinks | undefined): ClipLinks | undefined {
   if (!links?.mp4 && !links?.jpg && !links?.gif) return undefined;
@@ -108,7 +117,7 @@ function storedClip(links: ClipLinks | undefined): ClipLinks | undefined {
 function still(links: ClipLinks | undefined) {
   const src = links?.jpg ?? links?.gif;
   if (!src) return "";
-  const img = `<img src="${src}" width="360" alt="Kane's run in the browser">`;
+  const img = `<img src="${src}" width="360" alt="${isScreenshot(links) ? SCREENSHOT_ALT : "Kane's run in the browser"}">`;
   return links?.mp4 ? `<a href="${links.mp4}">${img}</a>` : img;
 }
 
@@ -147,8 +156,9 @@ function whatChanged(fix: FixNote) {
 type Repaired = { before: FailureData; after: ScenarioResult };
 
 // The commit, the fixer and what changed are said once, above all the repaired scenarios.
-// A page that crashed on load has no clip, only the browser's error (precheck.ts keeps it as the diagnosis).
-// With a still on one side only, it goes above that side's text instead of in a half-empty row.
+// A page that crashed on load has its screenshot as the still and the browser's error under it
+// (precheck.ts keeps the error as the diagnosis). Reports from before screenshots have only the error;
+// with a still on one side only, it goes above that side's text instead of in a half-empty row.
 function beforeAfter({ before, after }: Repaired, beforeSha: string, sha: string, links: ClipLinks | undefined) {
   const stills = [still(before.clip), still(links)];
   const confirmed = after.end?.summary?.trim() || after.end?.reason?.trim() || "Passes.";
@@ -287,7 +297,7 @@ function compose(
         ? `\n\n**What Kane saw:** ${diagnosis}`
         : "";
     sections.push(
-      `#### ✗ ${r.scenario.name}\n\n${quote(reason)}${clip(clips.get(r.scenario.id))}` +
+      `#### ✗ ${r.scenario.name}\n\n${quote(reason)}${clip(clips.get(r.scenario.id)) || screenshot(clips.get(r.scenario.id), r.scenario.url)}` +
         seen +
         (withSteps ? stepList(r.steps) : "") +
         (r.end?.test_url ? `\n\n[Kane's step-by-step report](${r.end.test_url})` : ""),

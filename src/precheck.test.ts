@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { findCrashes } from "./precheck.ts";
 
@@ -19,7 +22,7 @@ const scripts: Record<string, string> = {
   blank: ``,
 };
 
-test("only a page that threw and stays blank counts as crashed", { timeout: 90_000 }, async () => {
+test("only a page that threw and stays blank counts as crashed, with a screenshot of it", { timeout: 90_000 }, async () => {
   const server = createServer((req, res) => {
     const name = req.url!.slice(1).replace(/\.js$/, "");
     const js = req.url!.endsWith(".js");
@@ -30,8 +33,14 @@ test("only a page that threw and stays blank counts as crashed", { timeout: 90_0
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
     const started = Date.now();
-    const crashes = await findCrashes(Object.keys(scripts).map((name) => `${base}/${name}`));
-    assert.deepEqual([...crashes], [[`${base}/crash`, "TypeError: Cannot read properties of null (reading '1')"]]);
+    const dir = mkdtempSync(join(tmpdir(), "proofed-precheck-"));
+    const crashes = await findCrashes(Object.keys(scripts).map((name) => `${base}/${name}`), dir);
+    assert.deepEqual([...crashes.keys()], [`${base}/crash`]);
+    const crash = crashes.get(`${base}/crash`)!;
+    assert.equal(crash.error, "TypeError: Cannot read properties of null (reading '1')");
+    assert.ok(crash.screenshot?.startsWith(dir));
+    // A JPEG starts with FF D8 FF.
+    assert.deepEqual([...readFileSync(crash.screenshot!).subarray(0, 3)], [0xff, 0xd8, 0xff]);
     assert.ok(Date.now() - started < 30_000, "the check takes seconds, not minutes");
   } finally {
     server.close();

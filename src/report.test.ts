@@ -94,7 +94,7 @@ test("a pass where nothing was checked isn't counted as one", () => {
 
 test("a page that crashed on load shows the browser's error, not Kane's", () => {
   const body = buildReport({
-    sha: "abc1234def", results: [crashResult(failed.scenario, "TypeError: Cannot read properties of null (reading '1')")],
+    sha: "abc1234def", results: [crashResult(failed.scenario, { error: "TypeError: Cannot read properties of null (reading '1')" })],
     skipped: [], clips: new Map(), fixEnabled: true,
   });
   assert.match(body, /> The page is blank: it crashed while loading, before anything could be checked\.\n\n\*\*Browser console error:\*\* `TypeError: Cannot read properties of null \(reading '1'\)`/);
@@ -161,9 +161,9 @@ test("a PR description whose check failed is reported as before", () => {
   assert.equal(readReportData(body)?.failures[0]?.id, "asked-in-description");
 });
 
-test("after a fix of a page that crashed on load, the Before side has the browser's error instead of a blank still", () => {
+test("after a fix of a page that crashed on load before screenshots, the Before side has only the browser's error", () => {
   const raw = "https://github.com/o/r/raw/proofed-clips/pr-1";
-  const crash = crashResult(failed.scenario, "TypeError: Cannot read properties of null (reading '1') | x");
+  const crash = crashResult(failed.scenario, { error: "TypeError: Cannot read properties of null (reading '1') | x" });
   const failing = buildReport({ sha: "1111111aaaa", results: [crash], skipped: [], clips: new Map(), fixEnabled: true });
   const body = buildReport({
     sha: "9f8e7d6c5b", results: [passed], skipped: [], fixEnabled: true, fix, previous: readReportData(failing),
@@ -175,4 +175,29 @@ test("after a fix of a page that crashed on load, the Before side has the browse
     table[0]!,
     /^\| ✗ The page is blank: it crashed while loading, before anything could be checked\.<br><br>`TypeError: Cannot read properties of null \(reading '1'\) \\\| x` \| <a href="[^"]+\/b\/promo\.mp4"><img src="[^"]+\/b\/promo\.jpg" width="360"[^>]*><\/a><br>✓ Passes\. \|$/,
   );
+});
+
+test("a page that crashed on load shows its screenshot, and after a fix the before/after has a picture on both sides", () => {
+  const raw = "https://github.com/o/r/raw/proofed-clips/pr-1";
+  const crash = crashResult(failed.scenario, { error: "TypeError: Cannot read properties of null (reading '1')", screenshot: "/tmp/crash-0.jpg" });
+  assert.deepEqual(crash.clip, { jpg: "/tmp/crash-0.jpg" });
+  const failing = buildReport({
+    sha: "1111111aaaa", results: [crash], skipped: [], fixEnabled: true,
+    clips: new Map([["promo", { jpg: `${raw}/a/promo.jpg` }]]),
+  });
+  assert.match(
+    failing,
+    /> The page is blank[^\n]*\n\n<img src="[^"]+\/a\/promo\.jpg" width="720" alt="What a user sees on opening the page">\n\n<sub>This is what a user sees on opening `\/`\.<\/sub>\n\n\*\*Browser console error:\*\*/,
+  );
+  assert.doesNotMatch(failing, /Watch as video|Kane's run/);
+  assert.deepEqual(readReportData(failing)?.failures[0]?.clip, { jpg: `${raw}/a/promo.jpg` });
+
+  const body = buildReport({
+    sha: "9f8e7d6c5b", results: [passed], skipped: [], fixEnabled: true, fix, previous: readReportData(failing),
+    clips: new Map([["promo", { gif: `${raw}/b/promo.gif`, mp4: `${raw}/b/promo.mp4`, jpg: `${raw}/b/promo.jpg` }]]),
+  });
+  const table = /\| Before[^\n]*\n\|---\|---\|\n((?:\|[^\n]*\n?)+)/.exec(body)?.[1]?.trim().split("\n") ?? [];
+  assert.equal(table.length, 2);
+  assert.match(table[0]!, /^\| <img src="[^"]+\/a\/promo\.jpg" width="360" alt="What a user sees on opening the page"> \| <a href="[^"]+\/b\/promo\.mp4"><img src="[^"]+\/b\/promo\.jpg"/);
+  assert.match(table[1]!, /^\| ✗ The page is blank[^|]*<br><br>`TypeError[^|]*\| ✓ Passes\. \|$/);
 });

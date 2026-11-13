@@ -4,6 +4,8 @@
 // blank well after loading fails at once, without Kane. Anything less certain (blank but
 // no exception, an exception but something on screen, a page that doesn't load) goes to Kane as
 // before: this must never fail a healthy or a slow page.
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { connectCdp, type Cdp, type ExceptionDetails } from "./cdp.ts";
 import { launchChrome } from "./chrome.ts";
@@ -34,10 +36,14 @@ const limit = (ms: number) => delay(ms, undefined, { ref: false });
 const message = (d: ExceptionDetails) =>
   (d.exception?.description ?? (d.exception?.value !== undefined ? String(d.exception.value) : d.text)).split("\n")[0]!.trim();
 
-// The URLs that crashed while loading, each with its first uncaught exception.
-export async function findCrashes(urls: string[]) {
-  const crashes = new Map<string, string>();
+// The first uncaught exception, and a screenshot (JPEG file) of the page when it was judged blank.
+export type Crash = { error: string; screenshot?: string };
+
+// The URLs that crashed while loading. Screenshots go into `dir`.
+export async function findCrashes(urls: string[], dir: string) {
+  const crashes = new Map<string, Crash>();
   if (urls.length === 0) return crashes;
+  mkdirSync(dir, { recursive: true });
   let chrome: Awaited<ReturnType<typeof launchChrome>> | undefined;
   const seconds = (from: number, to = Date.now()) => ((to - from) / 1000).toFixed(1);
   const started = Date.now();
@@ -46,9 +52,11 @@ export async function findCrashes(urls: string[]) {
     const opened = Date.now();
     const cdp = await connectCdp(chrome.endpoint);
     await Promise.all(
-      urls.map(async (url) => {
-        const error = await Promise.race([crashOf(cdp, url), limit(LOAD_TIMEOUT + SETTLE + RECHECK + 5_000)]).catch(() => undefined);
-        if (error) crashes.set(url, error);
+      urls.map(async (url, i) => {
+        const crash = await Promise.race([crashOf(cdp, url, join(dir, `crash-${i}.jpg`)), limit(LOAD_TIMEOUT + SETTLE + RECHECK + 5_000)]).catch(
+          () => undefined,
+        );
+        if (crash) crashes.set(url, crash);
       }),
     );
     cdp.close();
@@ -62,7 +70,7 @@ export async function findCrashes(urls: string[]) {
   return crashes;
 }
 
-async function crashOf(cdp: Cdp, url: string): Promise<string | undefined> {
+async function crashOf(cdp: Cdp, url: string, file: string): Promise<Crash | undefined> {
   const { targetId } = await cdp.send<{ targetId: string }>("Target.createTarget", { url: "about:blank" });
   const { sessionId } = await cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true });
   const page = <T = unknown>(method: string, params: object = {}) => cdp.send<T>(method, params, sessionId);
@@ -94,18 +102,27 @@ async function crashOf(cdp: Cdp, url: string): Promise<string | undefined> {
     rechecking = true;
     until += RECHECK;
   }
-  return blank ? errors[0] : undefined;
+  const error = blank ? errors[0] : undefined;
+  if (!error) return undefined;
+  // Without Kane there is no recording; this is the picture the report shows instead. A failed
+  // screenshot only costs the picture, never the verdict.
+  const screenshot = await page<{ data: string }>("Page.captureScreenshot", { format: "jpeg", quality: 80 }).then(
+    ({ data }) => (writeFileSync(file, Buffer.from(data, "base64")), file),
+    () => undefined,
+  );
+  return { error, screenshot };
 }
 
 // A normal failed result, so the report, the run file, the dashboard and the fixer need nothing new.
-// The verdict is ours, in the shape Kane gives one; there are no steps, credits or clip because Kane never ran.
-export function crashResult(scenario: Scenario, error: string): ScenarioResult {
+// The verdict is ours, in the shape Kane gives one. Kane never ran, so there are no steps or credits,
+// and the clip is only the screenshot.
+export function crashResult(scenario: Scenario, { error, screenshot }: Crash): ScenarioResult {
   return {
     scenario,
     outcome: "failed",
     steps: [],
     end: { type: "run_end", status: "failed", reason: BLANK_PAGE, verdict: { family: "application_issue", root_cause: error } },
-    clip: undefined,
+    clip: screenshot ? { jpg: screenshot } : undefined,
     pageError: error,
   };
 }

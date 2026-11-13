@@ -12,12 +12,16 @@ import type { Scenario } from "./scenarios.ts";
 // Worth showing, not worth blocking a merge over, and never counted as a pass.
 export type Outcome = "passed" | "failed" | "unsure" | "error";
 
+// Files of a run's recording: the video, its GIF and the still it ends on. A page that crashed on
+// load (precheck.ts) has only a screenshot: Kane never ran, so there is nothing to play.
+export type Clip = { mp4: string; gif: string; jpg: string } | { jpg: string; mp4?: undefined; gif?: undefined };
+
 export type ScenarioResult = {
   scenario: Scenario;
   outcome: Outcome;
   steps: Step[];
   end: RunEnd | undefined;
-  clip: { mp4: string; gif: string; jpg: string } | undefined;
+  clip: Clip | undefined;
   error?: string;
   // The uncaught exception that left the page blank, when Proofed failed the scenario before Kane ran (precheck.ts).
   pageError?: string;

@@ -57,7 +57,7 @@ export async function runAll(scenarios: Scenario[], outDir: string, concurrency 
   const baseUrl = env("PROOFED_URL");
   const urlOf = (s: Scenario) => new URL(s.url, baseUrl).href;
   const checking = Date.now();
-  const crashes = await findCrashes([...new Set(scenarios.map(urlOf))]);
+  const crashes = await findCrashes([...new Set(scenarios.map(urlOf))], outDir);
   const checkSeconds = Math.round((Date.now() - checking) / 1000);
   const results: ScenarioResult[] = new Array(scenarios.length);
   let next = 0;
@@ -66,7 +66,7 @@ export async function runAll(scenarios: Scenario[], outDir: string, concurrency 
       const scenario = scenarios[i]!;
       const crash = crashes.get(urlOf(scenario));
       if (crash) {
-        console.log(`✗ ${scenario.name}: ${urlOf(scenario)} crashed while loading (${crash}); Kane not run`);
+        console.log(`✗ ${scenario.name}: ${urlOf(scenario)} crashed while loading (${crash.error}); Kane not run`);
         results[i] = { ...crashResult(scenario, crash), seconds: checkSeconds };
         continue;
       }
@@ -140,15 +140,12 @@ export async function publish(input: PublishInput) {
   let runKey: string | undefined;
   if (repo && pr) {
     const prefix = `pr-${pr}/${sha.slice(0, 7)}-${process.env.GITHUB_RUN_ID ?? "local"}`;
-    const files = results.flatMap((r) =>
-      r.clip
-        ? [
-            { id: r.scenario.id, kind: "gif" as const, path: `${prefix}/${r.scenario.id}.gif`, local: r.clip.gif },
-            { id: r.scenario.id, kind: "mp4" as const, path: `${prefix}/${r.scenario.id}.mp4`, local: r.clip.mp4 },
-            { id: r.scenario.id, kind: "jpg" as const, path: `${prefix}/${r.scenario.id}.jpg`, local: r.clip.jpg },
-          ]
-        : [],
-    );
+    const files = results.flatMap(({ scenario: { id }, clip }) => {
+      if (!clip) return [];
+      const file = (kind: keyof ClipLinks, local: string) => ({ id, kind, path: `${prefix}/${id}.${kind}`, local });
+      // A crash's screenshot comes without a video.
+      return [...(clip.mp4 ? [file("gif", clip.gif), file("mp4", clip.mp4)] : []), file("jpg", clip.jpg)];
+    });
     const urls = await publishClips(repo, files);
     for (const f of files) clips.set(f.id, { ...clips.get(f.id), [f.kind]: urls.get(f.path) });
     // In a commit of its own, after the clips: the file holds their links.

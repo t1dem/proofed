@@ -260,6 +260,7 @@ runs:
         name: proofed-${{ github.run_attempt }}
         path: |
           ${{ runner.temp }}/proofed/**/clip.mp4
+          ${{ runner.temp }}/proofed/**/crash-*.jpg
           ${{ runner.temp }}/proofed/*.json
           ${{ runner.temp }}/proofed/*.md
         if-no-files-found: ignore
