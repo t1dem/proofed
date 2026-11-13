@@ -14,7 +14,7 @@ const HOLD_LAST = 3.5;
 // A screencast frame this much bigger or smaller than the previous one is a visible change
 // (new page, content loaded); a blinking caret stays far below it.
 const CHANGED = 0.015;
-const LEAD = 0.5; // the camera starts moving this long before an action
+const LEAD = 0.75; // the camera starts moving this long before an action
 const LINGER = 1.8; // and pulls back out this long after the last one in a row
 const MAX_ZOOM = 1.8;
 const FOCUS_ZOOM = 2.2;
@@ -23,7 +23,7 @@ const OUT_WIDTH = 1280;
 
 type Point = { x: number; y: number };
 type Shot = Point & { z: number };
-type Beat = Point & { t: number; kind: Action["kind"]; rect: Rect };
+export type Beat = Point & { t: number; kind: Action["kind"]; rect: Rect };
 type Size = { width: number; height: number };
 type Piece = { from: number; to: number; at: number }; // real [from, to] shown from clip time `at`
 
@@ -78,7 +78,7 @@ function fit(shot: Shot, { width, height }: Size): Shot {
 }
 
 // Frames the element with room around it; small targets get the most zoom.
-function shotOf(rect: Rect, maxZoom: number, size: Size, room = 1): Shot {
+export function shotOf(rect: Rect, maxZoom: number, size: Size, room = 1): Shot {
   const u = (room * size.width) / OUT_WIDTH;
   const z = Math.min(
     size.width / (rect.width * (1 + 0.6 * room) + 300 * u),
@@ -87,10 +87,14 @@ function shotOf(rect: Rect, maxZoom: number, size: Size, room = 1): Shot {
   return fit({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, z: Math.min(z, maxZoom) }, size);
 }
 
-// Where the camera wants to be over time. Each action gets a shot just before it happens; a pause
-// pulls back to the part of the page Kane worked in (not the empty margins of a wide screen);
-// the hold at the end settles on what the final check was about.
-function plan(beats: Beat[], focus: Shot | undefined, holdStart: number, size: Size) {
+// The camera's moves. Each action gets a move that lands just before the action happens (and
+// never leaves the previous action before it's done); a pause pulls back to the part of the page
+// Kane worked in (not the empty margins of a wide screen); the hold at the end settles on what the
+// final check was about. Every move is an eased transition with a fixed end time, so the camera
+// is always on the element by the time the cursor clicks it.
+type Move = { start: number; dur: number; shot: Shot };
+
+export function plan(beats: Beat[], focus: Shot | undefined, holdStart: number, size: Size) {
   const rects = beats.map((b) => b.rect);
   const left = Math.min(...rects.map((r) => r.x));
   const top = Math.min(...rects.map((r) => r.y));
@@ -99,56 +103,61 @@ function plan(beats: Beat[], focus: Shot | undefined, holdStart: number, size: S
   const full: Shot = rects.length
     ? shotOf({ x: left, y: top, width: right - left, height: bottom - top }, OVERVIEW_ZOOM, size, 0.5)
     : { x: size.width / 2, y: size.height / 2, z: 1 };
-  const raw: { start: number; shot: Shot }[] = [{ start: 0, shot: full }];
-  const push = (start: number, shot: Shot) => {
-    while (raw.length > 1 && raw.at(-1)!.start >= start) raw.pop();
-    raw.push({ start: Math.max(start, 0), shot });
-  };
-  beats.forEach((b, i) => {
-    push(b.t - LEAD, shotOf(b.rect, MAX_ZOOM, size));
-    const next = beats[i + 1];
-    if (!next || next.t - b.t > LINGER + LEAD) push(b.t + LINGER, full);
-  });
-  push(holdStart + 0.4, focus ?? full);
 
-  // Jumping between two zoomed shots that don't overlap would whip-pan; pull back a little first.
-  const segments: typeof raw = [];
-  for (const seg of raw) {
-    const prev = segments.at(-1)?.shot;
-    const dx = prev ? Math.abs(seg.shot.x - prev.x) : 0;
-    const dy = prev ? Math.abs(seg.shot.y - prev.y) : 0;
-    if (prev && prev.z > 1 && seg.shot.z > 1 && (dx > size.width / (2 * prev.z) || dy > size.height / (2 * prev.z))) {
-      const z = Math.min(size.width / (dx + size.width * 0.45), size.height / (dy + size.height * 0.45), prev.z, seg.shot.z);
-      segments.push({ start: seg.start, shot: fit({ x: (prev.x + seg.shot.x) / 2, y: (prev.y + seg.shot.y) / 2, z }, size) });
-      segments.push({ start: seg.start + 0.45, shot: seg.shot });
+  const moves: Move[] = [{ start: 0, dur: 0, shot: full }];
+  const push = (m: Move) => {
+    while (moves.length > 1 && moves.at(-1)!.start >= m.start) moves.pop();
+    moves.push(m);
+  };
+  // Two zoomed shots that don't overlap would whip-pan: pull back between them.
+  const apart = (a: Shot, b: Shot) =>
+    a.z > 1 && b.z > 1 && (Math.abs(a.x - b.x) > size.width / (2 * a.z) || Math.abs(a.y - b.y) > size.height / (2 * a.z));
+
+  beats.forEach((b, i) => {
+    const shot = shotOf(b.rect, MAX_ZOOM, size);
+    const prev = moves.at(-1)!.shot;
+    const after = i > 0 ? beats[i - 1]!.t + 0.15 : 0;
+    const arrive = b.t - 0.1;
+    if (apart(prev, shot) && arrive - after >= 0.8) {
+      const dx = Math.abs(shot.x - prev.x);
+      const dy = Math.abs(shot.y - prev.y);
+      const z = Math.min(size.width / (dx + size.width * 0.45), size.height / (dy + size.height * 0.45), prev.z, shot.z);
+      const start = Math.max(arrive - LEAD - 0.35, after);
+      const mid = start + (arrive - start) * 0.45;
+      push({ start, dur: mid - start, shot: fit({ x: (prev.x + shot.x) / 2, y: (prev.y + shot.y) / 2, z }, size) });
+      push({ start: mid, dur: arrive - mid, shot });
     } else {
-      segments.push(seg);
+      const start = Math.max(arrive - LEAD, after);
+      push({ start, dur: Math.max(arrive - start, 0.2), shot });
     }
-  }
-  return (t: number) => segments[Math.max(segments.findLastIndex((s) => s.start <= t), 0)]!.shot;
+    const next = beats[i + 1];
+    if (!next || next.t - b.t > LINGER + LEAD + 0.5) push({ start: b.t + LINGER, dur: 0.8, shot: full });
+  });
+  // Head for the result as soon as the last action has had its effect, not once the hold begins.
+  const last = beats.at(-1);
+  push({ start: last ? Math.max(last.t + 0.3, holdStart - 0.6) : holdStart, dur: 1, shot: focus ?? full });
+  return moves;
 }
 
-// A critically damped spring on centre and log-zoom: moves start soft and settle without overshoot.
-function film(target: (t: number) => Shot, frames: number, size: Size) {
-  const w = 6.5;
-  const sub = 4;
-  const dt = 1 / FPS / sub;
-  const first = target(0);
-  const pos = [first.x, first.y, Math.log(first.z)];
-  const vel = [0, 0, 0];
-  const shots: Shot[] = [];
-  for (let n = 0; n < frames; n++) {
-    const t = target(n / FPS);
-    const goal = [t.x, t.y, Math.log(t.z)];
-    for (let s = 0; s < sub; s++) {
-      for (let k = 0; k < 3; k++) {
-        vel[k]! += (w * w * (goal[k]! - pos[k]!) - 2 * w * vel[k]!) * dt;
-        pos[k]! += vel[k]! * dt;
-      }
-    }
-    shots.push(fit({ x: pos[0]!, y: pos[1]!, z: Math.exp(pos[2]!) }, size));
-  }
-  return shots;
+// Plays the moves: each one eases from wherever the camera is when it starts (centre linearly,
+// zoom in log space so it feels even) to its shot.
+export function film(moves: Move[], frames: number, size: Size) {
+  const from: Shot[] = [];
+  const at = (i: number, t: number): Shot => {
+    const m = moves[i]!;
+    const a = from[i]!;
+    const u = m.dur > 0 ? easeInOut(clamp((t - m.start) / m.dur, 0, 1)) : 1;
+    return {
+      x: a.x + (m.shot.x - a.x) * u,
+      y: a.y + (m.shot.y - a.y) * u,
+      z: Math.exp(Math.log(a.z) + (Math.log(m.shot.z) - Math.log(a.z)) * u),
+    };
+  };
+  moves.forEach((m, i) => from.push(i === 0 ? m.shot : at(i - 1, m.start)));
+  return Array.from({ length: frames }, (_, n) => {
+    const t = n / FPS;
+    return fit(at(Math.max(moves.findLastIndex((m) => m.start <= t), 0), t), size);
+  });
 }
 
 // The cursor glides along a slight arc into each action and dips when it clicks.
