@@ -46,9 +46,10 @@ jobs:
       - uses: t1dem/proofed@main
         with:
           url: http://localhost:4173
+          working-directory: site
           install: pnpm install --frozen-lockfile
-          build: true
-          serve: npx --yes serve@14 -l 4173 dist
+          build: pnpm build
+          serve: pnpm preview --port 4173
           cache: pnpm
           lt-username: ${{ secrets.LT_USERNAME }}
           lt-access-key: ${{ secrets.LT_ACCESS_KEY }}

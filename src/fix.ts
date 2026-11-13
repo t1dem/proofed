@@ -24,6 +24,9 @@ if (!prNumber || !event.issue?.pull_request || !data || (!fromCommand && !fixReq
   console.log("No fix requested.");
   process.exit(0);
 }
+// The app's folder when it isn't the repo root. Claude and git work from the root; build and serve run there.
+const appDir = env("PROOFED_DIR", ".");
+const buildCommand = appDir === "." ? env("PROOFED_BUILD") : `cd ${appDir} && ${env("PROOFED_BUILD")}`;
 const fixer: Fixer = {
   model: env("PROOFED_CLAUDE_MODEL", DEFAULT_FIXER.model),
   effort: env("PROOFED_CLAUDE_EFFORT", DEFAULT_FIXER.effort),
@@ -77,7 +80,7 @@ ${diff}
 ${feedback ? `\nA previous fix attempt didn't work:\n${feedback}\n` : ""}
 Find the cause in the application code and fix it with the smallest change that keeps what the PR set out to do.
 Don't edit anything under .proofed/, don't change the scenario expectations, and don't commit.
-You may run \`${env("PROOFED_BUILD")}\` to check that your change builds.
+You may run \`${buildCommand}\` to check that your change builds.
 End your answer with one line in English that starts with "SUMMARY:" and says what was wrong and what you changed.`;
 }
 
@@ -88,7 +91,7 @@ function askClaude(text: string) {
     "claude",
     ["-p", text, "--output-format", "json", "--permission-mode", "acceptEdits", "--max-turns", "40",
       "--model", fixer.model, "--effort", fixer.effort,
-      "--allowedTools", `Read,Edit,Write,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(${env("PROOFED_BUILD")})`],
+      "--allowedTools", `Read,Edit,Write,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(${buildCommand})`],
     { encoding: "utf8", maxBuffer: 50 * 1024 * 1024 },
   );
   let parsed: ClaudeResult = {};
@@ -118,7 +121,7 @@ async function restoreReport(note: string) {
 }
 
 async function serve() {
-  const proc = spawn(env("PROOFED_SERVE"), { shell: true, detached: true, stdio: "ignore" });
+  const proc = spawn(env("PROOFED_SERVE"), { shell: true, detached: true, stdio: "ignore", cwd: appDir });
   // detached + negative pid kills the whole process group, not just the shell.
   const stop = () => {
     try {
@@ -171,7 +174,7 @@ while (!fixed && attempt < MAX_ATTEMPTS) {
     continue;
   }
   try {
-    execSync(env("PROOFED_BUILD"), { stdio: "pipe" });
+    execSync(buildCommand, { stdio: "pipe" });
   } catch (e) {
     const output = e instanceof Error && "stdout" in e && "stderr" in e ? `${e.stdout}${e.stderr}` : String(e);
     feedback = `Your change didn't build:\n${output.slice(-3000)}`;

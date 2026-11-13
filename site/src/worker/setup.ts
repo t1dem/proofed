@@ -4,7 +4,7 @@
 import { gh, GitHubError } from "./github";
 
 type Repo = { full_name: string; default_branch?: string };
-export type Commands = { setup: string; cache: string; install: string; build: string; serve: string; url: string; notes: string[] };
+export type Commands = { setup: string; cache: string; dir: string; install: string; build: string; serve: string; url: string; notes: string[] };
 
 const BRANCH = "proofed-setup";
 
@@ -18,12 +18,41 @@ async function readFile(token: string, repo: string, path: string) {
   }
 }
 
-async function guessCommands(token: string, repo: string): Promise<Commands> {
-  const pkgText = await readFile(token, repo, "package.json");
-  if (!pkgText) {
+type Pkg = { scripts?: Record<string, string>; packageManager?: string };
+const join = (dir: string, file: string) => (dir === "." ? file : `${dir}/${file}`);
+const readPkg = async (token: string, repo: string, dir: string) => {
+  const text = await readFile(token, repo, join(dir, "package.json"));
+  return text ? (JSON.parse(text) as Pkg) : undefined;
+};
+// A package.json that can put an app on a port, as opposed to a library's or a monorepo root's.
+const servable = (pkg: Pkg | undefined) => !!pkg?.scripts && ["preview", "start", "dev"].some((s) => s in pkg.scripts!);
+
+// Where the app lives. The root when it has an app's scripts; otherwise the shallowest folder that
+// does (site/, apps/web/…), since a root package.json is often only tooling around the app.
+async function findApp(token: string, repo: string, ref: string): Promise<{ dir: string; pkg: Pkg | undefined; root: Pkg | undefined }> {
+  const root = await readPkg(token, repo, ".");
+  if (servable(root)) return { dir: ".", pkg: root, root };
+  const { tree } = await gh<{ tree: { path: string; type: string }[] }>(token, "GET", `/repos/${repo}/git/trees/${ref}?recursive=1`);
+  const depth = (path: string) => path.split("/").length;
+  const dirs = tree
+    .filter((f) => f.type === "blob" && f.path.endsWith("/package.json") && !f.path.includes("node_modules/") && depth(f.path) <= 4)
+    .map((f) => f.path.slice(0, -"/package.json".length))
+    .sort((a, b) => depth(a) - depth(b) || a.localeCompare(b))
+    .slice(0, 8);
+  for (const dir of dirs) {
+    const pkg = await readPkg(token, repo, dir);
+    if (servable(pkg)) return { dir, pkg, root };
+  }
+  return { dir: ".", pkg: root, root };
+}
+
+async function guessCommands(token: string, repo: string, ref: string): Promise<Commands> {
+  const { dir, pkg, root } = await findApp(token, repo, ref);
+  if (!pkg) {
     return {
       setup: "",
       cache: "",
+      dir,
       install: "true",
       build: "true",
       serve: "npx --yes serve@14 -l 4173 .",
@@ -32,15 +61,18 @@ async function guessCommands(token: string, repo: string): Promise<Commands> {
     };
   }
 
-  const pkg = JSON.parse(pkgText) as { scripts?: Record<string, string>; packageManager?: string };
   const scripts = pkg.scripts ?? {};
-  const pinned = /^pnpm@([\d.]+)/.exec(pkg.packageManager ?? "")?.[1];
-  const [pnpm, yarn, npmLock] = await Promise.all(
-    ["pnpm-lock.yaml", "yarn.lock", "package-lock.json"].map((f) => readFile(token, repo, f).then(Boolean)),
-  );
+  // A workspace keeps its lockfile at the root; a folder with its own project keeps it next to package.json.
+  const lock = async (file: string) =>
+    (await readFile(token, repo, join(dir, file))) !== undefined ? dir : dir !== "." && (await readFile(token, repo, file)) !== undefined ? "." : undefined;
+  const [pnpm, yarn, npmLock] = await Promise.all(["pnpm-lock.yaml", "yarn.lock", "package-lock.json"].map(lock));
   const pm = pnpm ? "pnpm" : yarn ? "yarn" : "npm";
+  const lockDir = pnpm ?? yarn ?? npmLock;
+  const pinned = /^pnpm@([\d.]+)/.exec(pkg.packageManager ?? root?.packageManager ?? "")?.[1];
   const run = (script: string) => (pm === "npm" ? `npm run ${script}` : `${pm} ${script}`);
-  const notes: string[] = [`Package manager: ${pm}, from the lockfile.`];
+  const notes: string[] = [];
+  if (dir !== ".") notes.push(`The app is in \`${dir}/\`: the root has no script that serves one. Commands run there.`);
+  notes.push(`Package manager: ${pm}, from the lockfile.`);
 
   const install = pm === "pnpm" ? "pnpm install --frozen-lockfile" : pm === "yarn" ? "yarn install --frozen-lockfile" : npmLock ? "npm ci" : "npm install";
   const build = scripts.build ? run("build") : "true";
@@ -65,7 +97,9 @@ async function guessCommands(token: string, repo: string): Promise<Commands> {
   return {
     // pnpm is set up before the action checks the repo out, so it can't read packageManager itself.
     setup: pm === "pnpm" ? `      - uses: pnpm/action-setup@v4\n        with:\n          version: ${pinned ?? "10"}\n` : "",
-    cache: pm === "npm" ? "npm" : pm,
+    // setup-node only finds a lockfile at the repo root.
+    cache: lockDir === "." ? pm : "",
+    dir,
     install,
     build,
     serve,
@@ -122,7 +156,7 @@ jobs:
 ${c.setup}      - uses: t1dem/proofed@main
         with:
           url: ${c.url}
-          install: ${c.install}
+${c.dir === "." ? "" : `          working-directory: ${c.dir}\n`}          install: ${c.install}
           build: ${c.build}
           serve: ${c.serve}
 ${c.cache ? `          cache: ${c.cache}\n` : ""}          lt-username: \${{ secrets.LT_USERNAME }}
@@ -152,6 +186,8 @@ This PR adds:
 ${c.notes.map((n) => `- ${n}`).join("\n")}
 - Install: \`${c.install}\` · Build: \`${c.build}\` · Serve: \`${c.serve}\` at ${c.url}
 
+Proofed checks this pull request with those commands too. If one of them is wrong, its comment below says which failed and what it printed.
+
 Docs: https://github.com/t1dem/proofed
 `;
 
@@ -166,7 +202,7 @@ export async function openSetupPr(token: string, repo: Repo) {
   });
   if (!head) return { skipped: "empty repository" };
 
-  const commands = await guessCommands(token, name);
+  const commands = await guessCommands(token, name, head.object.sha);
   const baseCommit = await gh<{ tree: { sha: string } }>(token, "GET", `/repos/${name}/git/commits/${head.object.sha}`);
   const tree = await gh<{ sha: string }>(token, "POST", `/repos/${name}/git/trees`, {
     base_tree: baseCommit.tree.sha,

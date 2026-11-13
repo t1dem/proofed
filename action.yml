@@ -21,6 +21,9 @@ inputs:
   serve:
     description: Command that serves the built app on `url`. Setting it makes this action do the whole job.
     default: ""
+  working-directory:
+    description: Folder the app lives in, when it isn't the repo root (e.g. site). install, build and serve run there.
+    default: "."
   cache:
     description: Package manager whose cache setup-node keeps (npm, pnpm, yarn), or empty
     default: ""
@@ -97,18 +100,48 @@ runs:
         command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null)
         kane-cli --version
 
+    # Each stage leaves its name and output behind, so a failure before Kane can be reported on the PR.
     - name: Install the app's dependencies
+      id: deps
       if: steps.mode.outputs.mode == 'check' || steps.mode.outputs.mode == 'fix'
       shell: bash
-      run: ${{ inputs.install }}
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PROOFED_INSTALL: ${{ inputs.install }}
+      run: |
+        echo install > "$RUNNER_TEMP/proofed-stage"
+        bash -e -o pipefail -c "$PROOFED_INSTALL" 2>&1 | tee "$RUNNER_TEMP/proofed-app.log"
 
     - name: Build and serve the app
+      id: app
       if: steps.mode.outputs.mode == 'check'
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PROOFED_BUILD: ${{ inputs.build }}
+        PROOFED_SERVE: ${{ inputs.serve }}
+        PROOFED_URL: ${{ inputs.url }}
       run: |
-        ${{ inputs.build }}
-        (${{ inputs.serve }} > "$RUNNER_TEMP/proofed-serve.log" 2>&1 &)
-        npx --yes wait-on@8 -t 60000 "${{ inputs.url }}"
+        echo build > "$RUNNER_TEMP/proofed-stage"
+        bash -e -o pipefail -c "$PROOFED_BUILD" 2>&1 | tee "$RUNNER_TEMP/proofed-app.log"
+        echo serve > "$RUNNER_TEMP/proofed-stage"
+        (bash -c "$PROOFED_SERVE" > "$RUNNER_TEMP/proofed-app.log" 2>&1 &)
+        npx --yes wait-on@8 -t 60000 "$PROOFED_URL"
+
+    # Without this the PR gets a red cross and no word on why: Kane never ran, so no report was written.
+    - name: Say on the PR that the app didn't start
+      if: failure() && steps.mode.outputs.mode == 'check' && (steps.deps.outcome == 'failure' || steps.app.outcome == 'failure')
+      shell: bash
+      env:
+        PROOFED_INSTALL: ${{ inputs.install }}
+        PROOFED_BUILD: ${{ inputs.build }}
+        PROOFED_SERVE: ${{ inputs.serve }}
+        PROOFED_URL: ${{ inputs.url }}
+        PROOFED_DIR: ${{ inputs.working-directory }}
+        PROOFED_NUMBER: ${{ steps.mode.outputs.number }}
+        PROOFED_SHA: ${{ steps.mode.outputs.head_sha }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: node "$GITHUB_ACTION_PATH/src/blocked.ts"
 
     - name: Log Kane in
       if: steps.mode.outputs.mode != 'none'
@@ -148,6 +181,7 @@ runs:
         PROOFED_URL: ${{ inputs.url }}
         PROOFED_BUILD: ${{ inputs.build }}
         PROOFED_SERVE: ${{ inputs.serve }}
+        PROOFED_DIR: ${{ inputs.working-directory }}
         PROOFED_SCENARIOS: ${{ inputs.scenarios }}
         PROOFED_BASE_SHA: ${{ steps.mode.outputs.base_sha }}
         PROOFED_HEAD_REF: ${{ steps.mode.outputs.head_ref }}
