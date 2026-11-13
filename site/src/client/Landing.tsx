@@ -14,7 +14,7 @@ Press + next to Paper Filters once.
 Check that shipping is now Free and the total is €51.00.`;
 
 // How many lines the example scenario has, shown next to its file name.
-const scenarioSteps = scenario.split("---")[3]!.trim().split("\n").length;
+const scenarioSteps = scenario.split("---")[2]!.trim().split("\n").length;
 
 function Header() {
   return (
