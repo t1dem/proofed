@@ -14,7 +14,7 @@ Press + next to Paper Filters once.
 Check that shipping is now Free and the total is €51.00.`;
 
 // The scenario's own name, shown as a label above the file.
-const scenarioName = scenario.match(/^title: (.+)$/m)![1];
+const scenarioName = scenario.match(/^name: (.+)$/m)![1];
 
 function Header() {
   return (
