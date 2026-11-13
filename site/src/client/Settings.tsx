@@ -1,9 +1,9 @@
-import { Check, Pause, Play } from "lucide-react";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Check, ChevronDown, Pause, Play, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { MeView, RepoView } from "../worker/api";
 import { EFFORTS, modelLabel, MODELS, type Fixer } from "../worker/models";
 import { api, message, useLoad } from "./lib";
-import { field, link, outline, PageTitle, Segmented, solid } from "./ui";
+import { field, focus, link, outline, PageTitle, popover, Segmented, solid, useDismiss } from "./ui";
 
 // `cancel` is there only when a key is already saved: then closing the form keeps the old one.
 type KeyBlockProps = { title: string; connected: string | null; hint: ReactNode; children: (done: () => void, cancel?: ReactNode) => ReactNode };
@@ -134,33 +134,29 @@ function Keys({ me, onSaved }: { me: MeView; onSaved: (message: string) => void 
   );
 }
 
-const OTHER = "other";
-const modelOptions = [...MODELS.map((m) => ({ value: m.id as string, label: modelLabel(m.id) })), { value: OTHER, label: "Other…" }];
 const effortOptions = EFFORTS.map((e) => ({ value: e as string, label: e }));
+const menuItem = `flex h-8 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-hover ${focus}`;
 
-const Labelled = ({ label, children }: { label: string; children: ReactNode }) => (
-  <div className="grid gap-1.5 sm:grid-cols-[96px_minmax(0,1fr)] sm:items-center sm:gap-3">
-    <span className="text-[13px] text-dim">{label}</span>
-    <div className="flex flex-wrap items-center gap-2">{children}</div>
-  </div>
-);
-
-// Which Claude model (and effort) "Fix with Claude" uses in this repo. Saved as Actions variables.
-function FixerChoice({ repo }: { repo: RepoView }) {
+// Which Claude model (and effort) "Fix with Claude" uses in this repo, saved as Actions variables.
+// One button in the repo's row; the choices open under it.
+function FixerMenu({ repo }: { repo: RepoView }) {
   const [fixer, setFixer] = useState(repo.fixer);
   const [state, setState] = useState<ReactNode>();
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useDismiss(open, useCallback(() => setOpen(false), []), box);
   // A model that isn't in the list was typed in as a full ID; show it in the field.
   const [other, setOther] = useState(() => !!repo.fixer && !MODELS.some((m) => m.id === repo.fixer?.model));
 
   if (!fixer) {
     return (
-      <p className="text-[13px] text-dim">
-        To choose the model Claude fixes with,{" "}
-        <a href={`https://github.com/settings/installations/${repo.installationId}`} className={`${link} text-fg`}>
-          accept Proofed's new permission on GitHub
-        </a>
-        .
-      </p>
+      <a
+        href={`https://github.com/settings/installations/${repo.installationId}`}
+        className={outline}
+        title="Proofed needs a new permission on GitHub to set the model Claude fixes with"
+      >
+        Allow model choice
+      </a>
     );
   }
 
@@ -176,12 +172,6 @@ function FixerChoice({ repo }: { repo: RepoView }) {
       setState(<span className="text-bad">{message(e)}</span>);
     }
   };
-
-  const pickModel = (value: string) => {
-    if (value === OTHER) return setOther(true);
-    setOther(false);
-    void save({ ...fixer, model: value });
-  };
   const saveOther = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const model = String(new FormData(e.currentTarget).get("model") ?? "").trim();
@@ -189,31 +179,56 @@ function FixerChoice({ repo }: { repo: RepoView }) {
   };
 
   return (
-    <div className="space-y-2.5">
-      <Labelled label="Claude model">
-        <Segmented label="Model" value={other ? OTHER : fixer.model} options={modelOptions} onChange={pickModel} />
-        {state && <span className="text-[13px] text-faint">{state}</span>}
-      </Labelled>
-      {other && (
-        <Labelled label="Model ID">
-          <form onSubmit={saveOther} className="flex items-center gap-2">
-            <input
-              name="model"
-              aria-label="Model ID"
-              defaultValue={MODELS.some((m) => m.id === fixer.model) ? "" : fixer.model}
-              placeholder="claude-opus-5-1"
-              className={`${field} h-8 w-52`}
-              autoComplete="off"
-              spellCheck={false}
-              required
-            />
-            <button className={outline}>Save</button>
-          </form>
-        </Labelled>
+    <div ref={box} className="relative">
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} title="The model Claude fixes with in this repository" className={outline}>
+        <Sparkles size={14} className="text-dim" />
+        {modelLabel(fixer.model)} <span className="font-normal text-dim">· {fixer.effort}</span>
+        <ChevronDown size={14} className="text-dim" />
+      </button>
+      {open && (
+        <div className={`${popover} w-[min(300px,calc(100vw-32px))] p-1.5 max-sm:left-0 max-sm:right-auto`}>
+          <p className="px-2 pb-1 pt-1.5 text-[12px] font-medium text-faint">Claude fixes with</p>
+          {MODELS.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              className={menuItem}
+              onClick={() => {
+                setOther(false);
+                if (m.id !== fixer.model) void save({ ...fixer, model: m.id });
+              }}
+            >
+              <span className="flex-1">{modelLabel(m.id)}</span>
+              {!other && fixer.model === m.id && <Check size={15} />}
+            </button>
+          ))}
+          <button type="button" className={menuItem} onClick={() => setOther(true)}>
+            <span className="flex-1 text-dim">Other model ID…</span>
+            {other && <Check size={15} />}
+          </button>
+          {other && (
+            <form onSubmit={saveOther} className="flex items-center gap-2 px-2 pb-1 pt-1">
+              <input
+                name="model"
+                aria-label="Model ID"
+                defaultValue={MODELS.some((m) => m.id === fixer.model) ? "" : fixer.model}
+                placeholder="claude-opus-5-1"
+                className={`${field} h-8 min-w-0 flex-1`}
+                autoComplete="off"
+                spellCheck={false}
+                autoFocus
+                required
+              />
+              <button className={outline}>Save</button>
+            </form>
+          )}
+          <div className="mt-1.5 border-t border-edge px-2 pb-1.5 pt-2.5">
+            <p className="mb-2 text-[12px] font-medium text-faint">Effort</p>
+            <Segmented label="Effort" value={fixer.effort} options={effortOptions} onChange={(effort) => save({ ...fixer, effort })} />
+          </div>
+          {state && <p className="px-2 pb-1.5 text-[13px] text-faint">{state}</p>}
+        </div>
       )}
-      <Labelled label="Effort">
-        <Segmented label="Effort" value={fixer.effort} options={effortOptions} onChange={(effort) => save({ ...fixer, effort })} />
-      </Labelled>
     </div>
   );
 }
@@ -303,7 +318,7 @@ function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange:
   }
 
   return (
-    <li className="space-y-4 p-4">
+    <li className="space-y-2 p-4">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="mr-auto min-w-0">
           <a href={repo.url} className="font-medium hover:underline">
@@ -317,7 +332,8 @@ function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange:
             </span>
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <FixerMenu repo={repo} />
           {action}
           {repo.setup === "active" && (
             <button
@@ -333,7 +349,6 @@ function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange:
           )}
         </div>
       </div>
-      <FixerChoice repo={repo} />
       {note && <p className="text-[13px]">{note}</p>}
     </li>
   );

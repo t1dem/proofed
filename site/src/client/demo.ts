@@ -149,8 +149,10 @@ export async function demo(path: string, init?: RequestInit): Promise<unknown> {
   const list = fixed
     ? [{ ...shipping, state: "passing" as const, scenarios: shipping.scenarios.map((s) => ({ name: s.name, outcome: "passed" as const })), fix: { status: "fixed" as const, model: "claude-opus-5-5", effort: "high", commit: "84514dbd", attempts: 2 } }, ...pulls.slice(1)]
     : pulls;
-  if (path === "/api/pulls") return list;
-  const pull = list.find((p) => path === `/api/pulls/${p.repo}/${p.pr}`);
+  // Pausing a repo in Settings shows on its pull requests, as it does in production.
+  const withPause = list.map((p) => ({ ...p, paused: repos.some((r) => r.name === p.repo && r.paused) }));
+  if (path === "/api/pulls") return withPause;
+  const pull = withPause.find((p) => path === `/api/pulls/${p.repo}/${p.pr}`);
   if (!pull) throw new Error("Proofed hasn't reported on that pull request.");
   const runs = pull.pr === 2 && pull.repo === store ? (fixed ? shippingRuns : failingShipping) : [];
   return { pull, runs } satisfies PullDetail;

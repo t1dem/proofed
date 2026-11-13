@@ -1,5 +1,5 @@
 import { CircleCheck, CircleExclamationPoint, CircleMinus, CircleQuestionMark, CircleX, LoaderCircle, type LucideIcon } from "lucide-react";
-import type { MouseEvent, ReactNode } from "react";
+import { useEffect, type MouseEvent, type ReactNode, type RefObject } from "react";
 import type { Outcome, PullView } from "../worker/runs";
 import { pathOf, type Route } from "./lib";
 
@@ -15,10 +15,12 @@ type Go = (route: Route) => void;
 
 // A real link (so ⌘-click opens a tab) that otherwise navigates without a page load.
 export function Link({ to, go, className, title, children }: { to: Route; go: Go; className?: string; title?: string; children: ReactNode }) {
-  const onClick = (e: MouseEvent) => {
+  const onClick = (e: MouseEvent<HTMLAnchorElement>) => {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
     e.preventDefault();
     go(to);
+    // A mouse click shouldn't leave the keyboard focus ring on the link; Enter (detail 0) keeps it.
+    if (e.detail > 0) e.currentTarget.blur();
   };
   return (
     <a href={pathOf(to)} onClick={onClick} title={title} className={`${focus} ${className ?? ""}`}>
@@ -96,11 +98,33 @@ export function Segmented<T extends string>({ label, value, options, onChange }:
   );
 }
 
+// A menu or panel that closes on a click outside `box` or on Escape.
+export function useDismiss(open: boolean, close: () => void, box: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    if (!open) return;
+    const onEvent = (e: Event) => {
+      if (e instanceof KeyboardEvent ? e.key === "Escape" : !box.current?.contains(e.target as Node)) close();
+    };
+    addEventListener("pointerdown", onEvent);
+    addEventListener("keydown", onEvent);
+    return () => {
+      removeEventListener("pointerdown", onEvent);
+      removeEventListener("keydown", onEvent);
+    };
+  }, [open, close, box]);
+}
+
+export const popover = "absolute right-0 top-full z-20 mt-1.5 rounded-lg border border-edge bg-panel shadow-xl shadow-black/30";
+
 // The page's own title, above its content; no bar around it.
-export function PageTitle({ children, aside }: { children: ReactNode; aside?: ReactNode }) {
+// `sub` is a quiet line under the title that stays with it when the actions wrap below on a phone.
+export function PageTitle({ children, aside, sub }: { children: ReactNode; aside?: ReactNode; sub?: ReactNode }) {
   return (
     <header className="flex min-h-9 flex-wrap items-center gap-x-4 gap-y-3">
-      <h1 className="min-w-0 flex-1 basis-72 text-xl font-semibold tracking-[-0.01em]">{children}</h1>
+      <div className="min-w-0 flex-1 basis-72">
+        <h1 className="text-xl font-semibold tracking-[-0.01em]">{children}</h1>
+        {sub}
+      </div>
       {aside}
     </header>
   );

@@ -122,8 +122,14 @@ function Proof({ now, before }: { now: Seen; before: Seen | undefined }) {
   );
 }
 
-const Heading = ({ children }: { children: ReactNode }) => <h2 className="mb-2.5 mt-8 font-semibold">{children}</h2>;
+const Heading = ({ children }: { children: ReactNode }) => <h2 className="mb-2.5 mt-8 font-semibold first:mt-0">{children}</h2>;
 const SideHeading = ({ children }: { children: ReactNode }) => <h2 className="mb-2 mt-7 text-[13px] font-medium text-faint first:mt-0">{children}</h2>;
+
+// Kane starts each remark with the kind of step ("click: Clicking Pause"); the words alone say it.
+const plain = (remark: string) => {
+  const text = remark.replace(/^[a-z_]+:\s+/, "");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
 
 function Steps({ scenario }: { scenario: RunScenario }) {
   if (!scenario.steps?.length) return null;
@@ -134,7 +140,7 @@ function Steps({ scenario }: { scenario: RunScenario }) {
           <span className="flex w-5 shrink-0 justify-end pt-0.5">
             {step.failed ? <Mark kind="failed" /> : <span className="font-mono text-[12px] tabular-nums text-faint">{i + 1}</span>}
           </span>
-          <span className="min-w-0">{step.remark}</span>
+          <span className="min-w-0">{plain(step.remark)}</span>
         </li>
       ))}
     </ol>
@@ -155,18 +161,20 @@ const runDot = (run: Run) =>
 
 const duration = (seconds: number) => (seconds >= 60 ? `${Math.floor(seconds / 60)} min ${seconds % 60} s` : `${seconds} s`);
 
-function Aside({ runs }: { runs: Run[] }) {
-  const [latest] = runs;
-  if (!latest) return null;
-  const sum = (pick: (s: RunScenario) => number | undefined) => latest.scenarios.reduce((total, s) => total + (pick(s) ?? 0), 0);
+// What one run cost and took, for the line under the title.
+function runCost(run: Run) {
+  const sum = (pick: (s: RunScenario) => number | undefined) => run.scenarios.reduce((total, s) => total + (pick(s) ?? 0), 0);
   const seconds = Math.round(sum((s) => s.seconds));
   const credits = Math.round(sum((s) => s.credits));
-  const cost = [seconds > 0 && duration(seconds), credits > 0 && `${credits} Kane credits`].filter(Boolean).join(" · ");
+  return [seconds > 0 && duration(seconds), credits > 0 && `${credits} Kane credits`].filter(Boolean).join(" · ");
+}
+
+function Aside({ runs }: { runs: Run[] }) {
   // The fix belongs to the run that published it; it stays on show while later runs still pass.
   const fix = runs.find((r) => r.fix)?.fix;
 
   return (
-    <aside className="mt-10 border-t border-edge pt-6 xl:mt-0 xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0">
+    <aside className="mt-8 lg:mt-0">
       <SideHeading>Runs</SideHeading>
       <ol className="-mx-2">
         {runs.map((run) => (
@@ -178,18 +186,6 @@ function Aside({ runs }: { runs: Run[] }) {
           </li>
         ))}
       </ol>
-      {(cost || latest.runUrl) && (
-        <p className="mt-2 text-[13px] text-faint">
-          {cost}
-          {cost && latest.runUrl && " · "}
-          {latest.runUrl && (
-            <a href={latest.runUrl} className={link}>
-              Workflow logs
-            </a>
-          )}
-        </p>
-      )}
-
       {fix && (
         <>
           <SideHeading>{fix.status === "fixed" ? "Fix" : "Claude couldn't fix it"}</SideHeading>
@@ -250,6 +246,8 @@ function Scenarios({ runs }: { runs: Run[] }) {
 
       <Proof key={current.id} now={now} before={before} />
 
+      <div className="mt-8 lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-12">
+        <div className="min-w-0">
       {now.scenario.outcome !== "passed" && now.scenario.diagnosis && now.scenario.diagnosis !== now.scenario.reason && (
         <>
           <Heading>What Kane saw</Heading>
@@ -279,7 +277,9 @@ function Scenarios({ runs }: { runs: Run[] }) {
           </ul>
         </>
       )}
-
+        </div>
+        <Aside runs={runs} />
+      </div>
     </>
   );
 }
@@ -289,6 +289,24 @@ const GitHubMark = () => (
     <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
   </svg>
 );
+
+function RunLine({ run }: { run: Run }) {
+  const cost = runCost(run);
+  return (
+    <p className="mt-1.5 pl-7 text-[13px] text-faint">
+      Checked {ago(run.at) === "now" ? "just now" : `${ago(run.at)} ago`} on <span className="font-mono text-[12px]">{sha7(run.sha)}</span>
+      {cost && ` · ${cost}`}
+      {run.runUrl && (
+        <>
+          {" · "}
+          <a href={run.runUrl} className={`${link} hover:text-fg`}>
+            Workflow logs
+          </a>
+        </>
+      )}
+    </p>
+  );
+}
 
 type PullProps = { repo: string; pr: number; go: (route: Route) => void; asked: ReturnType<typeof useAsk>[0]; ask: Ask };
 
@@ -309,17 +327,18 @@ export function Pull({ repo, pr, go, asked, ask }: PullProps) {
         <span>{repo.split("/")[1]}</span>
       </nav>
       <PageTitle
+        sub={detail.status === "ok" && detail.data.runs[0] && <RunLine run={detail.data.runs[0]} />}
         aside={
           pull && (
             <div className="flex items-center gap-2">
               {typeof state === "object" && <span className="text-[13px] text-bad">{state.error}</span>}
               {state === "sent" && <span className="text-[13px] text-dim">Asked on the PR</span>}
-              {!state && canFix && (
+              {!state && canFix && !pull.paused && (
                 <button type="button" className={solid} onClick={() => ask(pull, "fix")}>
                   Fix with Claude
                 </button>
               )}
-              {!state && pull.state !== "fixing" && (
+              {!state && pull.state !== "fixing" && !pull.paused && (
                 <button type="button" className={outline} onClick={() => ask(pull, "rerun")}>
                   <RotateCw size={14} /> Run again
                 </button>
@@ -346,8 +365,7 @@ export function Pull({ repo, pr, go, asked, ask }: PullProps) {
       {detail.status === "loading" && <p className="mt-6 text-faint">Loading…</p>}
       {detail.status === "error" && <p className="mt-6 text-bad">{detail.message}</p>}
       {detail.status === "ok" && (
-        <div className="mt-6 xl:grid xl:grid-cols-[minmax(0,1fr)_280px] xl:gap-8">
-          <section className="min-w-0">
+        <section className="mt-6">
             {detail.data.runs.length > 0 ? (
               <Scenarios runs={detail.data.runs} />
             ) : (
@@ -362,9 +380,7 @@ export function Pull({ repo, pr, go, asked, ask }: PullProps) {
                 </p>
               </div>
             )}
-          </section>
-          <Aside runs={detail.data.runs} />
-        </div>
+        </section>
       )}
     </main>
   );

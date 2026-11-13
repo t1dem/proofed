@@ -34,6 +34,7 @@ export type MeView = {
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 
 const WORKFLOW = "proofed.yml";
+const CLIP_TYPES = { mp4: "video/mp4", gif: "image/gif", jpg: "image/jpeg" };
 
 type Installation = { id: number; account: { login: string } };
 type InstallationRepo = { id: number; full_name: string; html_url: string; private: boolean };
@@ -102,6 +103,21 @@ async function describeRepo(env: Env, repo: InstallationRepo & { installationId:
       ? { state: report.state, headline: report.headline, url: report.url, pr: report.pr, updatedAt: report.updated_at }
       : undefined,
   };
+}
+
+// Repos whose Proofed workflow is switched off on GitHub, one installation token per installation.
+async function pausedRepos(env: Env, repos: (InstallationRepo & { installationId: number })[]) {
+  const tokens = new Map<number, Promise<string>>();
+  const tokenFor = (id: number) => tokens.get(id) ?? tokens.set(id, installationToken(env, id)).get(id)!;
+  const paused = await Promise.all(
+    repos.map(async (r) => {
+      const workflow = await gh<{ state: string }>(await tokenFor(r.installationId), "GET", `/repos/${r.full_name}/actions/workflows/${WORKFLOW}`).catch(
+        () => undefined,
+      );
+      return workflow?.state === "disabled_manually" ? [r.full_name] : [];
+    }),
+  );
+  return new Set(paused.flat());
 }
 
 // Puts the user's keys into one repo's Actions secrets, sealed with that repo's public key.
@@ -208,18 +224,44 @@ export async function handleApi(request: Request, env: Env, path: string) {
 
   if (path === "/api/pulls" && request.method === "GET") {
     const repos = await listRepos(env, token);
-    return json(await listPulls(env, repos.map((r) => r.full_name)));
+    const pulls = await listPulls(env, repos.map((r) => r.full_name));
+    const paused = await pausedRepos(env, repos.filter((r) => pulls.some((p) => p.repo === r.full_name)));
+    return json(pulls.map((p) => ({ ...p, paused: paused.has(p.repo) })));
+  }
+
+  const clip = /^\/api\/clip\/([^/]+\/[^/]+)\/(pr-\d+\/[\w.-]+\/[\w.-]+\.(mp4|gif|jpg))$/.exec(path);
+  if (clip && request.method === "GET") {
+    const [, repoName = "", file = "", ext = ""] = clip;
+    const repo = (await listRepos(env, token)).find((r) => r.full_name === repoName);
+    if (!repo) return json({ error: "Proofed isn't installed on that repository." }, 404);
+    // raw.githubusercontent.com takes the app's token and answers Range requests, which video seeking needs.
+    const range = request.headers.get("range");
+    const res = await fetch(`https://raw.githubusercontent.com/${repoName}/proofed-clips/${file}`, {
+      headers: { authorization: `token ${await installationToken(env, repo.installationId)}`, ...(range && { range }) },
+    });
+    if (!res.ok) return json({ error: "That clip isn't on the proofed-clips branch." }, res.status === 404 ? 404 : 502);
+    const headers = new Headers({
+      "content-type": CLIP_TYPES[ext as keyof typeof CLIP_TYPES],
+      "accept-ranges": "bytes",
+      // A clip's folder is named after its commit and run, so its bytes never change.
+      "cache-control": "private, max-age=31536000, immutable",
+    });
+    for (const name of ["content-length", "content-range"]) {
+      const value = res.headers.get(name);
+      if (value) headers.set(name, value);
+    }
+    return new Response(res.body, { status: res.status, headers });
   }
 
   const pull = /^\/api\/pulls\/([^/]+\/[^/]+)\/(\d+)(?:\/(fix|rerun))?$/.exec(path);
   if (pull) {
     const [, repoName = "", number, action] = pull;
-    if (!(await listRepos(env, token)).some((r) => r.full_name === repoName)) {
-      return json({ error: "Proofed isn't installed on that repository." }, 404);
-    }
+    const repo = (await listRepos(env, token)).find((r) => r.full_name === repoName);
+    if (!repo) return json({ error: "Proofed isn't installed on that repository." }, 404);
     if (!action && request.method === "GET") {
-      const detail = await getPull(env, repoName, Number(number));
-      return detail ? json(detail) : json({ error: "Proofed hasn't reported on that pull request." }, 404);
+      const [detail, paused] = await Promise.all([getPull(env, repoName, Number(number)), pausedRepos(env, [repo])]);
+      if (!detail) return json({ error: "Proofed hasn't reported on that pull request." }, 404);
+      return json({ ...detail, pull: { ...detail.pull, paused: paused.has(repoName) } });
     }
     if (action && request.method === "POST") {
       // The workflow listens for these comments, and only from people with write access:

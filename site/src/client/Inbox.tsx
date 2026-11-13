@@ -63,7 +63,7 @@ function Why({ pull }: { pull: PullView }): ReactNode {
 function Action({ pull, asked, ask }: { pull: PullView; asked: AskedOf; ask: Ask }) {
   const kind = kindOf(pull);
   const state = asked(pull);
-  if (kind !== "failed" && kind !== "error") return null;
+  if (pull.paused || (kind !== "failed" && kind !== "error")) return null;
   if (state === "sent") return <span className="text-[13px] text-dim">Asked on the PR</span>;
   if (typeof state === "object") return <span className="text-[13px] text-bad" title={state.error}>Couldn't ask</span>;
   const gaveUp = pull.fix?.status === "gave-up";
@@ -186,8 +186,8 @@ export function Inbox({ pulls, repo, onRepo, go, asked, ask }: InboxProps) {
     else if (e.key === "j" || e.key === "ArrowDown") move(1);
     else if (e.key === "k" || e.key === "ArrowUp") move(-1);
     else if (e.key === "Enter") go({ page: "pull", repo: selected.repo, pr: selected.pr });
-    else if (e.key === "f" && kindOf(selected) === "failed" && !asked(selected)) ask(selected, "fix");
-    else if (e.key === "r" && !asked(selected)) ask(selected, "rerun");
+    else if (e.key === "f" && kindOf(selected) === "failed" && !selected.paused && !asked(selected)) ask(selected, "fix");
+    else if (e.key === "r" && !selected.paused && !asked(selected)) ask(selected, "rerun");
     else return;
     e.preventDefault();
   };

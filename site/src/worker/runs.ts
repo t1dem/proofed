@@ -22,6 +22,8 @@ export type PullView = {
   // From the latest run; empty for reports posted before run files existed.
   scenarios: Pick<RunScenario, "name" | "outcome" | "reason">[];
   fix?: Pick<RunFix, "status" | "model" | "effort" | "commit"> & { attempts: number };
+  // The repo's workflow is switched off: nothing would answer "Fix with Claude" or "Run again". Set by the API.
+  paused?: boolean;
 };
 
 const CLIPS_BRANCH = "proofed-clips";
@@ -59,7 +61,21 @@ export async function saveRun(env: Env, token: string, repo: string, pr: number,
 type ReportRow = { repo: string; pr: number; title: string | null; state: PullState; headline: string; url: string; updated_at: number };
 type RunRow = { repo: string; pr: number; key: string; data: string; created_at: number };
 
-const toRun = (row: RunRow): Run => ({ ...(JSON.parse(row.data) as RunFile), key: row.key, at: row.created_at });
+// Clip links point at github.com, which a private repo only serves to someone signed in there; the
+// dashboard can't send those cookies, so it asks the Worker for the clip instead (see /api/clip).
+const viaWorker = (url: string | undefined) => {
+  const match = url && /^https:\/\/github\.com\/([^/]+\/[^/]+)\/raw\/proofed-clips\/(.+)$/.exec(url);
+  return match ? `/api/clip/${match[1]}/${match[2]}` : url;
+};
+
+function toRun(row: RunRow): Run {
+  const file = JSON.parse(row.data) as RunFile;
+  const scenarios = file.scenarios.map((s) => ({
+    ...s,
+    clip: s.clip && { mp4: viaWorker(s.clip.mp4), gif: viaWorker(s.clip.gif), jpg: viaWorker(s.clip.jpg) },
+  }));
+  return { ...file, scenarios, key: row.key, at: row.created_at };
+}
 
 function toPull(report: ReportRow, latest: Run | undefined): PullView {
   return {

@@ -1,12 +1,12 @@
 import { Inbox as InboxIcon, LogOut, Moon, Settings as SettingsIcon, Sun } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { MeView } from "../worker/api";
 import type { PullView } from "../worker/runs";
 import { Inbox, needsYou } from "./Inbox";
 import { useAsk, useLoad, useRoute, type Route } from "./lib";
 import { Pull } from "./Pull";
 import { Settings } from "./Settings";
-import { focus, iconButton, kindOf, Link, marks, solid, type Kind } from "./ui";
+import { focus, iconButton, kindOf, Link, marks, solid, useDismiss, type Kind } from "./ui";
 
 type Theme = "dark" | "light";
 const THEME_KEY = "proofed-theme";
@@ -67,18 +67,7 @@ function Avatar({ me }: { me: MeView }) {
 function Account({ me }: { me: MeView }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: Event) => {
-      if (e instanceof KeyboardEvent ? e.key === "Escape" : !box.current?.contains(e.target as Node)) setOpen(false);
-    };
-    addEventListener("pointerdown", close);
-    addEventListener("keydown", close);
-    return () => {
-      removeEventListener("pointerdown", close);
-      removeEventListener("keydown", close);
-    };
-  }, [open]);
+  useDismiss(open, useCallback(() => setOpen(false), []), box);
   return (
     <div ref={box} className="relative min-w-0 md:flex-1">
       <button
@@ -186,6 +175,13 @@ export function App() {
   const [pulls, reloadPulls] = useLoad<PullView[]>("/api/pulls", 20_000);
   const [repo, setRepo] = useState<string>();
   const [asked, ask] = useAsk(reloadPulls);
+
+  // Coming back to the inbox, read it again: a repo paused in Settings shows right away, not on the next tick.
+  const opened = useRef(false);
+  useEffect(() => {
+    if (opened.current && route.page === "inbox") reloadPulls();
+    opened.current = true;
+  }, [route.page, reloadPulls]);
 
   if (me.status === "loading") return null;
   if (me.status === "signed-out") return <SignIn />;
