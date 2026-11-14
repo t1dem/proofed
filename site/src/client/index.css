@@ -49,22 +49,96 @@ html[data-app] body {
   font-size: 14px;
   line-height: 1.45;
 }
+/* A phone: taps without the grey flash or the double-tap zoom delay, and the height of the top bar
+   (under the status bar when installed, which is what env(safe-area-inset-top) is then). */
+html[data-app] {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  --bar: calc(3rem + env(safe-area-inset-top));
+}
+html[data-app] body {
+  touch-action: manipulation;
+}
+@media (width < 48rem) {
+  html[data-app] body {
+    font-size: 15px;
+  }
+  /* iOS zooms the page into a field whose text is under 16px. */
+  html[data-app] :is(input, select, textarea) {
+    font-size: 16px !important;
+  }
+}
+/* Installed: the page doesn't bounce or reload when pulled; the inbox has its own pull to refresh. */
+@media (display-mode: standalone) {
+  html[data-app],
+  html[data-app] body {
+    overscroll-behavior-y: none;
+  }
+}
+/* The installed app's status bar text is white: on the light theme it gets a dark strip to sit on. */
+html[data-app][data-theme="light"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto;
+  height: env(safe-area-inset-top);
+  background: #16140f;
+  z-index: 60;
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The landing's paper and ink, so the app and the site read as one thing. */
 html[data-app][data-theme="light"] {
   color-scheme: light;
-  --color-bg: #fbfaf7;
-  --color-side: #f3f1eb;
-  --color-panel: #ffffff;
-  --color-hover: #eceae3;
-  --color-edge: #dfdbd1;
-  --color-fg: #1a1814;
-  --color-dim: #4f4b43;
-  --color-faint: #777267;
+  --color-bg: #f4f1ea;
+  --color-side: #ece8df;
+  --color-panel: #fbf9f4;
+  --color-hover: #e6e1d6;
+  --color-edge: #dcd6ca;
+  --color-fg: #16140f;
+  --color-dim: #4f4a40;
+  --color-faint: #6b6559;
   --color-ok: #1f7a3d;
   --color-bad: #c2362b;
   --color-busy: #8a5d00;
   --color-work: #3a56c9;
   --color-ok-bg: #e5f3e8;
   --color-bad-bg: #fbe9e6;
+}
+
+/* Page changes (lib.ts transition): the page crossfades, a pull request's title moves and grows
+   from its inbox row into the page heading, scaled by its height so the text keeps its shape. */
+::view-transition-group(*) {
+  animation-duration: 340ms;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 160ms;
+}
+.pr-title {
+  view-transition-class: pr-title;
+}
+::view-transition-old(.pr-title),
+::view-transition-new(.pr-title) {
+  width: auto;
+  height: 100%;
+  object-fit: fill;
+}
+/* Every inbox row's title has a name, but only the opened one is on the other page: the rest leave
+   with the page instead of hanging over the new one for the length of the move. */
+::view-transition-old(.pr-title):only-child,
+::view-transition-new(.pr-title):only-child {
+  animation-duration: 160ms;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -149,6 +149,20 @@ export async function startRecorder(endpoint: string, outDir: string) {
         .catch(() => ({ result: {} as { value?: string | null } }));
       return result.value ? (JSON.parse(result.value) as Rect) : undefined;
     },
+    // A small still of what the page shows now, for the dashboard while the run is going (live.ts).
+    // Its own screenshot, not a screencast frame: those are full size, for the clip.
+    async snapshot(width = 800): Promise<Uint8Array | undefined> {
+      if (!lastSession) return undefined;
+      try {
+        type Viewport = { cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number } };
+        const { cssVisualViewport: v } = await cdp.send<Viewport>("Page.getLayoutMetrics", {}, lastSession);
+        const clip = { x: v.pageX, y: v.pageY, width: v.clientWidth, height: v.clientHeight, scale: Math.min(1, width / v.clientWidth) };
+        const { data } = await cdp.send<{ data: string }>("Page.captureScreenshot", { format: "jpeg", quality: 60, clip }, lastSession);
+        return Buffer.from(data, "base64");
+      } catch {
+        return undefined; // The page is navigating or closed; the next one will do.
+      }
+    },
     stop() {
       cdp.close();
       return { frames, actions };

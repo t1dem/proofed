@@ -3,8 +3,10 @@
 // scenarios expect. PR #2 of the demo store and PRs #3, #10 and #13 of Proofed itself are real
 // runs, clips included; the rest is made up to fill the screens. The screenshot of the landing page
 // that crashed on load is from PR #14, which re-ran PR #13's crash once screenshots existed.
+import { summarize, type Live, type LiveFix, type LiveStatus } from "../../../src/livefile";
 import { BLANK_PAGE, NOTHING_CHECKED } from "../../../src/runfile";
 import type { MeView, RepoView } from "../worker/api";
+import type { LiveView } from "../worker/live";
 import type { Fixer } from "../worker/models";
 import type { PullDetail, PullView, Run } from "../worker/runs";
 
@@ -17,12 +19,13 @@ const clips = "https://github.com/t1dem/proofed/raw/proofed-clips";
 
 const me: MeView = { login: "t1dem", avatar: null, testmu: "t1dem", claude: true, installUrl: "#" };
 
+// `at` is where each step starts in /clips/fail.mp4.
 const shippingSteps = [
-  { remark: "Opened the store" },
-  { remark: "Added House Espresso to the bag" },
-  { remark: "Added Paper Filters to the bag" },
-  { remark: "Opened the bag: shipping €4.90, total €49.40" },
-  { remark: "Checked the free shipping note. It reads “from €0.50”, the threshold is €50.00", failed: true },
+  { remark: "Opened the store", at: 0 },
+  { remark: "Added House Espresso to the bag", at: 0.8 },
+  { remark: "Added Paper Filters to the bag", at: 2.6 },
+  { remark: "Opened the bag: shipping €4.90, total €49.40", at: 3.8 },
+  { remark: "Checked the free shipping note. It reads “from €0.50”, the threshold is €50.00", failed: true, at: 5.5 },
 ];
 
 const shippingRuns: Run[] = [
@@ -236,21 +239,150 @@ const repos: RepoView[] = [
   { name: "t1dem/braatens-site", url: "#", private: true, installationId: 1, setup: "none", paused: false, secrets: [], fixer: null },
 ];
 
-// /app?demo=fixed shows PR #2 after Claude's fix; plain ?demo shows it still broken.
-const fixed = new URLSearchParams(location.search).get("demo") === "fixed";
+// /app?demo=fixed shows PR #2 after Claude's fix; plain ?demo shows it still broken, until a
+// "Fix with Claude" on it has played out.
+let fixed = new URLSearchParams(location.search).get("demo") === "fixed";
 
-// "Run again" and "Fix with Claude" show as on their way for a while, as markAsked does in production;
-// long enough for someone (or Kane) to look around the inbox before the row goes back.
-const asked = new Map<string, { action: string; at: number }>();
-const DEMO_RUN_MS = 5 * min;
+// A run as the action reports it while it goes (src/live.ts), played out on the sample data after
+// "Run again", "Fix with Claude" or a question to Kane, so the live view shows without a real run.
+// The pull request is busy for as long as its run plays, then shows how it ended.
+const STEP_MS = 3000;
+const CHROME_MS = 2500; // Chrome and Kane starting
+const POST_MS = 3000; // the clips and the report going up
+const WRITE_MS = 10_000;
+const BUILD_MS = 3000;
+const PUSH_MS = 3000;
+const AT_ONCE = 3;
+
+type Script = { remarks: string[]; frames: string[]; failed?: string };
+const frames = (kind: "fail" | "fixed") => [0, 1, 2, 3, 4].map((i) => `/clips/live/${kind}-${i}.jpg`);
+const passing: Record<string, string[]> = {
+  "Free shipping from €50": ["Opened the store", "Added House Espresso to the bag", "Added Paper Filters to the bag", "Opened the bag: shipping €4.90 at €49.40", "Added another House Espresso: shipping Free at €55.90"],
+  "Promo code total": ["Opened the store", "Added Ethiopia Guji to the bag twice", "Added the Hand Grinder", "Opened the bag and applied welcome10", "Checked the total: −€9.10, shipping Free, €81.90"],
+  "Place an order": ["Opened the store", "Added Colombia Huila to the bag", "Opened the bag and pressed Checkout", "Filled in the address and paid", "Checked the confirmation: €17.90 was charged"],
+  "Sign in": ["Opened the store", "Pressed Sign in", "Typed the email and the password", "Checked the account page: it greets the customer"],
+  "Product notes": ["Opened the store", "Opened Ethiopia Guji", "Read the tasting notes", "Checked the notes for “V60”"],
+};
+
+// The steps Kane takes on a scenario; a broken one ends on the step that failed (`reason`).
+function script(name: string, outcome: string, reason?: string): Script {
+  if (name === "Free shipping from €50" && outcome === "failed" && !reason) {
+    return { remarks: shippingSteps.slice(0, -1).map((s) => s.remark), frames: frames("fail"), failed: shippingSteps.at(-1)?.remark };
+  }
+  const remarks = passing[name] ?? ["Opened the page", "Found what the scenario is about", "Checked it"];
+  if (outcome !== "failed") return { remarks, frames: frames("fixed") };
+  return { remarks: remarks.slice(0, -1), frames: frames("fixed"), failed: reason ?? "Checked it: not what the scenario expects" };
+}
+
+type Played = { id: string; name: string; script: Script; outcome: LiveStatus; start: number };
+
+// The scenarios side by side, three at a time, each from when a Chrome frees up.
+function schedule(list: { name: string; script: Script; outcome: LiveStatus }[], from: number) {
+  const free = Array.from({ length: AT_ONCE }, () => from + CHROME_MS);
+  const played = list.map((s, i): Played => {
+    const slot = free.indexOf(Math.min(...free));
+    const start = free[slot]!;
+    free[slot] = start + (s.script.remarks.length + (s.script.failed ? 1 : 0)) * STEP_MS + 1000;
+    return { id: `s${i}`, ...s, start };
+  });
+  return { played, end: Math.max(...free) };
+}
+
+function sceneAt(p: Played, t: number, base: number) {
+  const remarks = [...p.script.remarks, ...(p.script.failed ? [p.script.failed] : [])];
+  if (t < p.start) return { scenario: { id: p.id, name: p.name, status: "waiting" as const, steps: [] } };
+  const k = Math.floor((t - p.start) / STEP_MS);
+  const over = k >= remarks.length;
+  const steps = remarks.slice(0, Math.min(k + 1, remarks.length)).map((remark, i) => ({
+    n: i + 1,
+    remark,
+    status: i < k ? (p.script.failed && i === remarks.length - 1 ? ("failed" as const) : ("done" as const)) : ("running" as const),
+  }));
+  const shot = Math.min(k, p.script.frames.length - 1);
+  return {
+    scenario: { id: p.id, name: p.name, status: over ? p.outcome : ("running" as const), steps, startedAt: base + p.start },
+    frame: p.script.frames[shot] && { url: p.script.frames[shot]!, at: base + p.start + shot * STEP_MS },
+  };
+}
+
+type Ask = { action: string; at: number; what?: string };
+
+// Where the run asked for on `pull` is `t` ms after the ask, or undefined once it's over.
+function play(pull: PullView, ask: Ask, t: number): { live: Live; frames: LiveView["frames"] } | undefined {
+  const base = ask.at;
+  const live: Live = { run: `demo-${ask.at}`, pr: pull.pr, sha: "9f3e1a2c07d5e84be21c7a1f0d3b5e6f7a8b9c0d", kind: ask.action === "fix" ? "fix" : "check", startedAt: base, runUrl: "https://github.com/t1dem/proofed-demo-store/actions", scenarios: [] };
+  const shots: LiveView["frames"] = {};
+  const show = (played: Played[], at: number) => {
+    live.scenarios = played.map((p) => {
+      const { scenario, frame } = sceneAt(p, at, base);
+      if (frame) shots[p.id] = frame;
+      return scenario;
+    });
+  };
+  const of = (outcome: string): LiveStatus => (outcome === "skipped" ? "passed" : (outcome as LiveStatus));
+
+  if (ask.action !== "fix") {
+    const list =
+      ask.action === "check"
+        ? [{ name: `“${ask.what ?? "What you asked"}”`, script: { remarks: ["Opened the store", "Found what you asked about", "Checked it: it reads as you said"], frames: frames("fixed") }, outcome: "passed" as const }]
+        : pull.scenarios.map((s) => ({ name: s.name, script: script(s.name, s.outcome, s.reason), outcome: of(s.outcome) }));
+    const { played, end } = schedule(list, 0);
+    if (t > end + POST_MS) return undefined;
+    show(played, t);
+    return { live, frames: shots };
+  }
+
+  // The fixer: Claude writes a change, the app is built, Kane re-runs what broke. On PR #2 the first
+  // attempt doesn't do it, as in the real run.
+  const broken = pull.scenarios.filter((s) => s.outcome === "failed");
+  const twice = pull.repo === store && pull.pr === 2;
+  const attempts = twice ? 2 : 1;
+  const fixer = repos.find((r) => r.name === pull.repo)?.fixer ?? { model: "claude-haiku-5-5", effort: "xhigh" };
+  const tries = [{ summary: "Changed the label text only.", result: "Kane: €55.90 still charged shipping." }];
+  let at = 0;
+  const phases: { from: number; attempt: number; doing: LiveFix["doing"]; played?: Played[] }[] = [];
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    phases.push({ from: at, attempt, doing: "writing" });
+    at += WRITE_MS;
+    phases.push({ from: at, attempt, doing: "building" });
+    at += BUILD_MS;
+    const last = attempt === attempts;
+    const { played, end } = schedule(
+      broken.map((s) => ({ name: s.name, script: script(s.name, last ? "passed" : "failed", "Added another House Espresso: €55.90 still charged shipping"), outcome: last ? ("passed" as const) : ("failed" as const) })),
+      at,
+    );
+    phases.push({ from: at, attempt, doing: "checking", played });
+    at = end;
+  }
+  phases.push({ from: at, attempt: attempts, doing: "pushing" });
+  const total = at + PUSH_MS + POST_MS;
+  if (t > total) return undefined;
+  const phase = phases.findLast((p) => p.from <= t) ?? phases[0]!;
+  const checked = phases.findLast((p) => p.from <= t && p.played);
+  show(checked?.played ?? broken.map((s, i) => ({ id: `s${i}`, name: s.name, script: script(s.name, "failed", s.reason), outcome: "failed" as const, start: Infinity })), t);
+  // Before Kane's first re-check the scenarios are as the report left them: broken.
+  if (!checked) live.scenarios = live.scenarios.map((s) => ({ ...s, status: "failed" }));
+  live.fix = { attempt: phase.attempt, of: 3, doing: phase.doing, ...fixer, tries: phase.attempt > 1 || phase.doing === "pushing" ? tries.slice(0, phase.attempt - 1) : [] };
+  return { live, frames: shots };
+}
+
+// "Run again", "Fix with Claude" and questions to Kane, by pull request. Two sample pull requests
+// are always at work: their runs start over each time they end.
+const asked = new Map<string, Ask>([
+  ["t1dem/tostado-web/47", { action: "rerun", at: now - 4000 }],
+  ["t1dem/tostado-web/41", { action: "fix", at: now - 6000 }],
+]);
+const looping = new Set(asked.keys());
 
 // Answers what the API would, from the data above. Changes (the model, a pause, an ask) live in
 // this page's memory only.
 export async function demo(path: string, init?: RequestInit): Promise<unknown> {
   await new Promise((done) => setTimeout(done, 150));
-  const ask = /^\/api\/pulls\/(.+\/\d+)\/(fix|rerun)$/.exec(path);
+  const ask = /^\/api\/pulls\/(.+\/\d+)\/(fix|rerun|check)$/.exec(path);
   if (ask && init?.method === "POST") {
-    asked.set(ask[1]!, { action: ask[2]!, at: Date.now() });
+    const { what } = init.body ? (JSON.parse(String(init.body)) as { what?: string }) : {};
+    asked.set(ask[1]!, { action: ask[2]!, at: Date.now(), what });
+    looping.delete(ask[1]!);
     return { ok: true };
   }
   const repoAction = /^\/api\/repos\/(.+)\/(pause|resume|fixer|setup)$/.exec(path);
@@ -269,19 +401,39 @@ export async function demo(path: string, init?: RequestInit): Promise<unknown> {
   if (init?.method === "POST") return { ok: true };
   if (path === "/api/me") return me;
   if (path === "/api/repos") return repos.map((r) => ({ ...r }));
+
+  // Each ask's run as it stands now; one that has played out is over, and a fix of PR #2 leaves it fixed.
+  const runs = new Map<string, ReturnType<typeof play>>();
+  for (const [key, a] of asked) {
+    const pull = pulls.find((p) => `${p.repo}/${p.pr}` === key);
+    if (pull && looping.has(key) && !play(pull, a, Date.now() - a.at)) a.at = Date.now();
+    const going = pull && play(pull, a, Date.now() - a.at);
+    if (going) runs.set(key, going);
+    else {
+      asked.delete(key);
+      if (a.action === "fix" && key === `${store}/2`) fixed = true;
+    }
+  }
+
   const shipping = pulls[0]!;
   const list = fixed
     ? [{ ...shipping, state: "passing" as const, scenarios: shipping.scenarios.map((s) => ({ name: s.name, outcome: "passed" as const })), fix: { status: "fixed" as const, model: "claude-opus-5-5", effort: "high", commit: "84514dbd", attempts: 2 } }, ...pulls.slice(1)]
     : pulls;
   // Pausing a repo in Settings shows on its pull requests, as it does in production.
   const withPause = list.map((p) => {
-    const ask = asked.get(`${p.repo}/${p.pr}`);
-    const state = ask && Date.now() - ask.at < DEMO_RUN_MS ? (ask.action === "fix" ? ("fixing" as const) : ("running" as const)) : p.state;
-    return { ...p, state, paused: repos.some((r) => r.name === p.repo && r.paused) };
+    const key = `${p.repo}/${p.pr}`;
+    const going = runs.get(key);
+    const state = going ? (going.live.kind === "fix" ? ("fixing" as const) : ("running" as const)) : p.state;
+    return { ...p, state, ...(going && { live: summarize(going.live) }), paused: repos.some((r) => r.name === p.repo && r.paused) };
   });
   if (path === "/api/pulls") return withPause;
+  const live = /^\/api\/pulls\/(.+\/\d+)\/live$/.exec(path);
+  if (live) {
+    const going = runs.get(live[1]!);
+    return (going ? { live: { ...going.live, at: Date.now() }, frames: going.frames } : { live: null, frames: {} }) satisfies LiveView;
+  }
   const pull = withPause.find((p) => path === `/api/pulls/${p.repo}/${p.pr}`);
   if (!pull) throw new Error("Proofed hasn't reported on that pull request.");
-  const runs = pull.pr === 2 && pull.repo === store ? (fixed ? shippingRuns : failingShipping) : (runsOf[`${pull.repo}#${pull.pr}`] ?? []);
-  return { pull, runs } satisfies PullDetail;
+  const history = pull.pr === 2 && pull.repo === store ? (fixed ? shippingRuns : failingShipping) : (runsOf[`${pull.repo}#${pull.pr}`] ?? []);
+  return { pull, runs: history } satisfies PullDetail;
 }

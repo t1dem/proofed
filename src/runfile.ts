@@ -8,7 +8,8 @@ export type RunScenario = {
   reason?: string;
   diagnosis?: string;
   suggestion?: string;
-  steps?: { remark: string; failed?: boolean }[];
+  // `at`: seconds into the clip where the step starts (runs from before it was kept have none).
+  steps?: { remark: string; failed?: boolean; at?: number }[];
   clip?: { mp4?: string; gif?: string; jpg?: string };
   credits?: number;
   seconds?: number;

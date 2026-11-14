@@ -4,6 +4,7 @@ import { gh, GitHubError, installationToken } from "./github";
 import type { Env } from "./index";
 import { forget, memo } from "./memo";
 import { DEFAULT_FIXER, isEffort, isModelId, MODELS, type Fixer } from "./models";
+import { getLive, liveFrame } from "./live";
 import { getPull, listPulls, markAsked } from "./runs";
 import { openSetupPr } from "./setup";
 
@@ -255,7 +256,16 @@ export async function handleApi(request: Request, env: Env, path: string) {
     return new Response(res.body, { status: res.status, headers });
   }
 
-  const pull = /^\/api\/pulls\/([^/]+\/[^/]+)\/(\d+)(?:\/(fix|rerun))?$/.exec(path);
+  // A run as it goes, while the pull request is busy: its state, and each scenario's latest frame.
+  const live = /^\/api\/pulls\/([^/]+\/[^/]+)\/(\d+)\/live(?:\/([^/]+)\.jpg)?$/.exec(path);
+  if (live && request.method === "GET") {
+    const [, repoName = "", number, scenario] = live;
+    if (!(await listRepos(env, token)).some((r) => r.full_name === repoName)) return json({ error: "Proofed isn't installed on that repository." }, 404);
+    if (scenario) return liveFrame(env, repoName, Number(number), decodeURIComponent(scenario));
+    return json(await getLive(env, repoName, Number(number)));
+  }
+
+  const pull = /^\/api\/pulls\/([^/]+\/[^/]+)\/(\d+)(?:\/(fix|rerun|check))?$/.exec(path);
   if (pull) {
     const [, repoName = "", number, action] = pull;
     const repo = (await listRepos(env, token)).find((r) => r.full_name === repoName);
@@ -266,10 +276,19 @@ export async function handleApi(request: Request, env: Env, path: string) {
       return json({ ...detail, pull: { ...detail.pull, paused: paused.has(repoName) } });
     }
     if (action && request.method === "POST") {
+      let command = action === "fix" ? "/proofed fix" : "/proofed";
+      if (action === "check") {
+        // "/proofed <what to check>": one line, as the workflow reads it. "fix …" would start a fix instead.
+        const { what } = (await request.json().catch(() => ({}))) as { what?: unknown };
+        const text = typeof what === "string" ? what.replace(/\s+/g, " ").trim().slice(0, 300) : "";
+        if (!text) return json({ error: "Say what Kane should check." }, 400);
+        if (/^fix\b/i.test(text)) return json({ error: "That would start a fix. Use Fix with Claude for that." }, 400);
+        command = `/proofed ${text}`;
+      }
       // The workflow listens for these comments, and only from people with write access:
       // posted with the user's own token, the comment is theirs.
       try {
-        await gh(token, "POST", `/repos/${repoName}/issues/${number}/comments`, { body: action === "fix" ? "/proofed fix" : "/proofed" });
+        await gh(token, "POST", `/repos/${repoName}/issues/${number}/comments`, { body: command });
       } catch (e) {
         if (e instanceof GitHubError && (e.status === 403 || e.status === 404)) {
           return json({ error: "GitHub didn't let Proofed comment on this pull request for you. Comment /proofed there yourself." }, 403);

@@ -228,9 +228,11 @@ type ClipInput = {
   focus?: Rect;
   // A Chrome to render in; the clip is drawn as HTML and screenshotted frame by frame.
   endpoint: string;
+  // Moments in real time (Kane's steps) to find in the clip, so the dashboard can jump to them.
+  marks?: number[];
 };
 
-export async function makeClip({ frames, actions, focus, endpoint }: ClipInput, base: string) {
+export async function makeClip({ frames, actions, focus, endpoint, marks = [] }: ClipInput, base: string) {
   const last = frames.at(-1);
   if (!last) return undefined;
   const size = { width: last.width, height: last.height };
@@ -302,8 +304,10 @@ export async function makeClip({ frames, actions, focus, endpoint }: ClipInput, 
     "-vf", "fps=10,scale=720:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle",
     gif,
   );
-  // The still for the before/after table after a fix: the last frame, settled on what the check was about.
+  // The still: the last frame, settled on what the check was about. The before/after table after a
+  // fix shows it, and so does the dashboard at full column width, so it keeps the clip's resolution.
   const jpg = `${base}.jpg`;
-  ffmpeg("-i", join(dir, `${String(count - 1).padStart(5, "0")}.jpg`), "-vf", "scale=720:-1:flags=lanczos", "-frames:v", "1", "-q:v", "3", jpg);
-  return { mp4, gif, jpg };
+  ffmpeg("-i", join(dir, `${String(count - 1).padStart(5, "0")}.jpg`), "-frames:v", "1", "-q:v", "3", jpg);
+  const at = marks.map((t) => (Number.isFinite(t) ? Math.round(time.toClip(t) * 10) / 10 : undefined));
+  return { mp4, gif, jpg, marks: at };
 }

@@ -12,7 +12,7 @@ type Payload = {
   sender?: { id: number };
   repositories?: Repo[];
   repositories_added?: Repo[];
-  issue?: { number: number; title?: string; pull_request?: object };
+  issue?: { number: number; title?: string; state?: string; pull_request?: object };
   pull_request?: { number: number; title?: string; html_url?: string; head?: { sha: string } };
   comment?: { body: string; html_url: string };
   repository?: { full_name: string };
@@ -72,11 +72,13 @@ export async function handleWebhook(request: Request, env: Env, ctx: ExecutionCo
   if (event === "issue_comment" && payload.issue?.pull_request && payload.comment?.body.includes(MARKER) && payload.repository) {
     const { state, headline } = readReport(payload.comment.body);
     const repo = payload.repository.full_name;
+    // A report can land after the pull request was merged or closed (the run was still going), and
+    // the close event found no row to mark then; the comment's issue says whether it's still open.
     await env.DB.prepare(
-      `INSERT INTO reports (repo, pr, state, headline, url, updated_at, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-       ON CONFLICT(repo, pr) DO UPDATE SET state = ?3, headline = ?4, url = ?5, updated_at = ?6, title = ?7`,
+      `INSERT INTO reports (repo, pr, state, headline, url, updated_at, title, closed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+       ON CONFLICT(repo, pr) DO UPDATE SET state = ?3, headline = ?4, url = ?5, updated_at = ?6, title = ?7, closed = ?8`,
     )
-      .bind(repo, payload.issue.number, state, headline, payload.comment.html_url, Date.now(), payload.issue.title ?? null)
+      .bind(repo, payload.issue.number, state, headline, payload.comment.html_url, Date.now(), payload.issue.title ?? null, payload.issue.state === "closed" ? 1 : 0)
       .run();
     if (payload.installation) {
       const { id } = payload.installation;
