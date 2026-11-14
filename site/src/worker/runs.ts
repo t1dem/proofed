@@ -28,6 +28,8 @@ export type PullView = {
   paused?: boolean;
   // Where the run is now, while Kane or Claude is at work and the action reports it (src/live.ts).
   live?: LiveSummary;
+  // The commit Kane or Claude is at work on, before its run reports.
+  checking?: { sha: string; at: number };
 };
 
 const CLIPS_BRANCH = "proofed-clips";
@@ -72,6 +74,7 @@ type ReportRow = {
   updated_at: number;
   asked: "fix" | "rerun" | null;
   asked_at: number | null;
+  head_sha: string | null;
 };
 
 // A run that never reports (the job failed before Kane started) stops showing as on its way after this.
@@ -110,12 +113,16 @@ function toRun(row: RunRow): Run {
 
 function toPull(report: ReportRow, latest: Run | undefined, live?: Live): PullView {
   const state = stateOf(report);
+  // A rerun or a fix starts on the commit the last run checked; a push, on the one the webhook saw.
+  const sha = live?.sha ?? report.head_sha ?? latest?.sha;
+  const busy = state === "running" || state === "fixing";
   return {
     repo: report.repo,
     pr: report.pr,
     title: report.title,
     state,
-    ...(live && (state === "running" || state === "fixing") && { live: summarize(live) }),
+    ...(live && busy && { live: summarize(live) }),
+    ...(sha && busy && { checking: { sha, at: report.asked_at ?? report.updated_at } }),
     headline: report.headline,
     url: report.url,
     updatedAt: report.updated_at,

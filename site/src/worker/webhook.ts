@@ -105,11 +105,11 @@ export async function handleWebhook(request: Request, env: Env, ctx: ExecutionCo
         await gh(token, "GET", `/repos/${repo}/contents/.github/workflows/proofed.yml?ref=${head.sha}`);
         // The row's own state is what's left if the run never reports (see stateOf in runs.ts).
         await env.DB.prepare(
-          `INSERT INTO reports (repo, pr, state, headline, url, updated_at, title, asked, asked_at)
-           VALUES (?1, ?2, 'blocked', 'Proofed didn''t report on this pull request.', ?3, ?4, ?5, 'rerun', ?4)
-           ON CONFLICT(repo, pr) DO UPDATE SET asked = 'rerun', asked_at = ?4, title = ?5`,
+          `INSERT INTO reports (repo, pr, state, headline, url, updated_at, title, asked, asked_at, head_sha)
+           VALUES (?1, ?2, 'blocked', 'Proofed didn''t report on this pull request.', ?3, ?4, ?5, 'rerun', ?4, ?6)
+           ON CONFLICT(repo, pr) DO UPDATE SET asked = 'rerun', asked_at = ?4, title = ?5, head_sha = ?6`,
         )
-          .bind(repo, number, html_url ?? `https://github.com/${repo}/pull/${number}`, Date.now(), title ?? null)
+          .bind(repo, number, html_url ?? `https://github.com/${repo}/pull/${number}`, Date.now(), title ?? null, head.sha)
           .run();
       })().catch((e: unknown) => console.log("checking", repo, number, String(e))),
     );
