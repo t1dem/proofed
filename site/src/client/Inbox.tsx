@@ -2,7 +2,7 @@ import { Check, CircleCheck, CircleDashed, CircleX, Inbox as InboxIcon, ListFilt
 import { Component, createRef, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { NOTHING_CHECKED } from "../../../src/runfile";
 import type { PullView } from "../worker/runs";
-import { ago, installed, plural, prefetch, titleName, type Ask, type Load, type Route, type useAsk } from "./lib";
+import { ago, installed, movingName, plural, prefetch, titleName, type Ask, type Load, type Route, type useAsk } from "./lib";
 import { Backdrop, bone, focus, iconButton, kindOf, Link, Mark, outline, PageTitle, Pips, plain, popover, sha7, soft, solid, useDismiss, useSheetDrag } from "./ui";
 
 type AskedOf = ReturnType<typeof useAsk>[0];
@@ -256,7 +256,7 @@ function Row({ pull, selected, go, asked, ask, showRepo }: RowProps) {
           {/* The link's ::after covers the row, so the whole row opens the pull request. */}
           <Link to={{ page: "pull", repo: pull.repo, pr: pull.pr }} go={go} className="block font-medium after:absolute after:inset-0 after:rounded-lg max-md:after:rounded-none">
             {/* A block of its own: the title that moves into the pull request's page (lib.ts transition). */}
-            <span className="pr-title line-clamp-2 lg:line-clamp-1" style={{ viewTransitionName: titleName(pull) }}>
+            <span className="pr-title line-clamp-2 lg:line-clamp-1" data-title={titleName(pull)} style={{ viewTransitionName: movingName(pull) }}>
               {pull.title ?? pull.headline} <span className="font-normal text-faint">#{pull.pr}</span>
             </span>
           </Link>

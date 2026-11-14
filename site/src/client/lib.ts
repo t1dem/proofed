@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { PullDetail, PullView } from "../worker/runs";
 
@@ -154,30 +154,54 @@ export const pathOf = (route: Route) =>
   location.search +
   (route.page === "pull" && route.scenario ? `#${encodeURIComponent(route.scenario)}` : "");
 
-// The page change as a view transition where the browser has them: what both pages show (a pull
-// request's title) moves from one place to the other instead of blinking.
-export function transition(change: () => void) {
-  if (!document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) return change();
-  document.startViewTransition(() => flushSync(change));
-}
-
 // The name that pairs a pull request's title in the inbox with the one on its page.
 export const titleName = (pull: { repo: string; pr: number }) => `pr-${pull.repo}-${pull.pr}`.replace(/[^\w-]/g, "-");
 
+// Only the title that moves has a view-transition name, and only while it moves: the browser lifts every
+// named element over the whole page for the length of a transition, so a name on each inbox row put them
+// all over the sidebar, the bars and any open sheet. Titles carry `data-title` so the leaving one is found.
+let moving: string | undefined;
+export const movingName = (pull: { repo: string; pr: number }) => (titleName(pull) === moving ? moving : undefined);
+
+// The page change as a view transition where the browser has them: `pull`'s title, on both pages,
+// moves from one place to the other instead of blinking; the rest crossfades.
+export function transition(change: () => void, pull?: { repo: string; pr: number }) {
+  if (!document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) return change();
+  moving = pull && titleName(pull);
+  // The page being left is captured as it is now, before React draws the change: its title is named here.
+  const leaving = moving ? document.querySelector<HTMLElement>(`[data-title="${moving}"]`) : null;
+  if (leaving && moving) leaving.style.viewTransitionName = moving;
+  void document.startViewTransition(() => flushSync(change)).finished.finally(() => {
+    moving = undefined;
+    for (const el of document.querySelectorAll<HTMLElement>("[data-title]")) el.style.viewTransitionName = "";
+  });
+}
+
+const pullOf = (route: Route) => (route.page === "pull" ? route : undefined);
+
 export function useRoute() {
   const [route, setRoute] = useState(() => parseRoute(location));
+  // The page on screen, to know which pull request's title moves when leaving it.
+  const shown = useRef(route);
   useEffect(() => {
-    const onPop = () => transition(() => setRoute(parseRoute(location)));
+    const onPop = () => {
+      const next = parseRoute(location);
+      const pull = pullOf(next) ?? pullOf(shown.current);
+      shown.current = next;
+      transition(() => setRoute(next), pull);
+    };
     addEventListener("popstate", onPop);
     return () => removeEventListener("popstate", onPop);
   }, []);
   const go = useCallback((next: Route) => {
     history.pushState(null, "", pathOf(next));
+    const pull = pullOf(next) ?? pullOf(shown.current);
+    shown.current = next;
     transition(() => {
       setRoute(next);
       // At once: the page's smooth scrolling (index.css) would roll the new page up after it appears.
       scrollTo({ top: 0, behavior: "instant" });
-    });
+    }, pull);
   }, []);
   return [route, go] as const;
 }

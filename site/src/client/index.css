@@ -151,8 +151,8 @@ html[data-app][data-theme="light"] {
   height: 100%;
   object-fit: fill;
 }
-/* Every inbox row's title has a name, but only the opened one is on the other page: the rest leave
-   with the page instead of hanging over the new one for the length of the move. */
+/* The moving title isn't always on the other page (a filtered inbox, a pull request that left it):
+   then it leaves or arrives with the page instead of hanging over it for the length of the move. */
 ::view-transition-old(.pr-title):only-child,
 ::view-transition-new(.pr-title):only-child {
   animation-duration: 160ms;
