@@ -41,8 +41,8 @@ url: /
 ---
 Add Ethiopia Guji to the bag twice and the Hand Grinder once.
 Open the bag, type the promo code welcome10 and apply it.
-Check that the discount is −€9.10 and shipping is Free.
-Check that the total is €81.90.`;
+Check that the discount is "−€9.10" and shipping is "Free".
+Check that the total is "€81.90".`;
 
 const prompt = () => `Proofed checks every pull request of this repository in a real Chrome. It runs scenarios: Markdown files with plain-English steps that Kane CLI, an AI browser agent, follows on the running app. Kane sees only the page, never the code. This repository has one scenario so far, ${dir}/home.md:
 
@@ -54,12 +54,13 @@ Where the app runs: it is in \`${appDir}\`${appDir === "." ? " (the repository r
 
 How to find the flows: read the README, the app's routes and its pages and components. Look for what a visitor can see and do: pages, navigation, buttons, forms, filters, anything that changes what's on the screen. If the app has a demo, preview or sample-data mode that works without signing in, its pages count too.
 
-Spread the scenarios over the app instead of spending them all on one page: start with the page most visitors open first, past the heading home.md already checks, then one scenario for each main area. Within a scenario, prefer a flow (press this, and that appears) over re-reading static text, and check the one or two things a user would notice if it broke. A scenario that checks ten texts fails on every copy change and proves little more.
+Spread the scenarios over the app instead of spending them all on one page: start with the page most visitors open first, past the heading home.md already checks, then one scenario for each main area. Within a scenario, prefer a flow (press this, and that appears) over re-reading static text, and check the one or two things a user would notice if it broke. A scenario that checks ten texts fails on every copy change and proves little more. For the same reason, a check quotes a few words that tell the thing apart ("Paused", "€81.90"), not a whole sentence.
 
 Write a scenario only if Kane can run it on that server as is, every time:
 - No sign-in, no payment, no email, no third-party service. A page that needs a login or a backend that isn't running is out.
 - Nothing it does stays behind for the next run: no data created, changed or deleted on a server.
 - Every step names what the user sees: the exact labels of buttons and links, headings, and the texts and numbers a check expects, copied from the code. Copy only text the page shows as is, not variable names, translation keys, or values made at runtime (dates, counts, random ids).
+- A text a check expects goes in double quotes, so Kane knows where it ends: Check that the row says "Paused" again. Without them, Kane reads the words after it as part of the text.
 - It ends with checks of what is on the page. "Check that it works" checks nothing; "Check that the heading reads Pricing and three plans are listed" does.
 
 A scenario that fails because it was guessed is deleted anyway. If you can't find a flow that meets all of the above, write fewer, or none.
@@ -140,8 +141,9 @@ async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Wr
   for (const file of files) if (!kept.some((r) => r.scenario.file === file)) rmSync(file, { force: true });
   const stockResults = results.slice(0, stock.length);
   const credits = (rs: ScenarioResult[]) => Math.round(rs.reduce((sum, r) => sum + (r.end?.credits_consumed ?? 0), 0));
-  console.log(`Kane credits: ${credits(results)} in all, ${credits(fresh.filter((r) => r.outcome !== "passed"))} of them on the dropped scenarios.`);
-  if (kept.length === 0) return { results: stockResults, written: { status: "written", kept: [], dropped }, sha: headSha };
+  const droppedCredits = credits(fresh.filter((r) => r.outcome !== "passed"));
+  console.log(`Kane credits: ${credits(results)} in all, ${droppedCredits} of them on the dropped scenarios.`);
+  if (kept.length === 0) return { results: stockResults, written: { status: "written", kept: [], dropped, credits: droppedCredits }, sha: headSha };
 
   git("add", "--", ...kept.map((r) => r.scenario.file));
   git("-c", "user.name=Claude", "-c", "user.email=noreply@anthropic.com", "commit", "-m",
@@ -154,13 +156,13 @@ async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Wr
     console.log(`Pushed the scenarios to ${env("PROOFED_HEAD_REF")}${asApp ? " as the Proofed app" : ""}`);
   } catch (e) {
     console.log(`Couldn't push the scenarios: ${e instanceof Error ? e.message.split("\n")[0] : e}`);
-    return { results: stockResults, written: { status: "failed" }, sha: headSha };
+    return { results: stockResults, written: { status: "failed", credits: credits(fresh) }, sha: headSha };
   }
   const sha = git("rev-parse", "HEAD");
   const repoUrl = repo && `https://github.com/${repo.owner}/${repo.name}`;
   return {
     results: [...stockResults, ...kept],
-    written: { status: "written", kept: kept.map((r) => ({ id: r.scenario.id, about: about(r.scenario) })), dropped, commit: sha, commitUrl: repoUrl ? `${repoUrl}/commit/${sha}` : undefined },
+    written: { status: "written", kept: kept.map((r) => ({ id: r.scenario.id, about: about(r.scenario) })), dropped, credits: droppedCredits, commit: sha, commitUrl: repoUrl ? `${repoUrl}/commit/${sha}` : undefined },
     sha,
   };
 }

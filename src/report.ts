@@ -41,10 +41,12 @@ export type FixNote = Fixer & {
 
 // The setup PR's first check (generate.ts): the scenarios Claude wrote that Kane saw pass and Proofed
 // committed, each with Claude's line on what it checks, and the ones it dropped. "failed": Claude
-// didn't get as far as writing any.
-export type Written =
+// didn't get as far as writing any, or the push failed. `credits`: what Kane spent on the scenarios that
+// weren't kept, which the results don't carry but the run cost all the same.
+export type Written = (
   | { status: "written"; kept: { id: string; about: string }[]; dropped: { name: string; why: string }[]; commit?: string; commitUrl?: string }
-  | { status: "failed" };
+  | { status: "failed" }
+) & { credits?: number };
 
 const DATA_RE = /<!-- proofed:data (.*?) -->/s;
 export const FIX_BOX = "Fix with Claude";
@@ -255,7 +257,7 @@ function compose(
   const errored = results.filter((r) => r.outcome === "error");
   const unsure = results.filter((r) => r.outcome === "unsure");
   const passed = results.filter((r) => r.outcome === "passed");
-  const credits = all.reduce((sum, r) => sum + (r.end?.credits_consumed ?? 0), 0);
+  const credits = all.reduce((sum, r) => sum + (r.end?.credits_consumed ?? 0), written?.credits ?? 0);
   const repaired: Repaired[] =
     fix?.status === "fixed" && previous
       ? passed.flatMap((after) => {

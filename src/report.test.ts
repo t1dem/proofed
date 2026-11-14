@@ -215,6 +215,7 @@ test("on the setup PR, the scenarios Claude wrote are listed with their clips, a
     written: {
       status: "written", kept: [{ id: "pricing-plans", about: "The pricing page lists the three plans." }], commit: "9f8e7d6c5b", commitUrl: "https://github.com/o/r/commit/9f8e7d6c5b",
       dropped: [{ name: "Sign up", why: "The page says <Error>: sign-in needed." }],
+      credits: 7,
     },
   });
   assert.match(body, /^<!-- proofed -->\n### Proofed\n\nAll 2 affected scenarios pass in a real browser\.\n\n\*\*Claude wrote a scenario for this app\*\*, and Proofed added it to this PR in \[`9f8e7d6`\]/);
@@ -225,6 +226,8 @@ test("on the setup PR, the scenarios Claude wrote are listed with their clips, a
   assert.equal(body.split("pricing-plans.gif").length, 2);
   assert.match(body, /<summary>✓ Passed: Home page loads<\/summary>/);
   assert.deepEqual(readReportData(body)?.failures, []);
+  // The dropped scenario ran too, so its credits count.
+  assert.match(body, /Run by Kane CLI on 9f8e7d6 · 7 credits/);
 });
 
 test("on the setup PR, Claude not getting to write scenarios is one line", () => {
