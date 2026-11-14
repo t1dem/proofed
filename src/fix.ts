@@ -21,13 +21,15 @@ const MAX_ATTEMPTS = 3;
 type CommentEvent = { action: string; comment: { body: string }; issue: { number: number; pull_request?: object } };
 const event = readEvent<CommentEvent>();
 const { repo, runUrl, outDir } = ctx();
-const prNumber = event.issue?.number;
+// "Fix automatically" (action.yml): the check that just reported goes on here, on its push event.
+const auto = process.env.PROOFED_AUTO === "true";
+const prNumber = auto ? Number(process.env.PROOFED_NUMBER) || undefined : event.issue?.number;
 // A ticked box arrives as an edit of the report itself; "/proofed fix" as a new comment next to it.
 const fromCommand = event.action === "created";
-const report = fromCommand && repo && prNumber ? await findReport(repo, prNumber) : undefined;
-const body = (fromCommand ? report?.body : event.comment?.body) ?? "";
+const report = (auto || fromCommand) && repo && prNumber ? await findReport(repo, prNumber) : undefined;
+const body = (auto || fromCommand ? report?.body : event.comment?.body) ?? "";
 const data = readReportData(body);
-if (!prNumber || !event.issue?.pull_request || !data || (!fromCommand && !fixRequested(body))) {
+if (!prNumber || !(auto || event.issue?.pull_request) || !data || data.failures.length === 0 || (!auto && !fromCommand && !fixRequested(body))) {
   console.log("No fix requested.");
   process.exit(0);
 }

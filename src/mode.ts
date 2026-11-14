@@ -15,6 +15,7 @@ type Event = {
   pull_request: PullRequest;
   issue: { number: number; pull_request?: object };
   comment: { id: number; body: string; user: { type: string } };
+  sender?: { type: string };
 };
 
 const output = (values: Record<string, string | number>) => {
@@ -103,9 +104,17 @@ if (mode === "check" && event.pull_request && pr.head.ref === SETUP_BRANCH && pr
   }
 }
 
+// "Fix automatically" in the dashboard (vars.PROOFED_AUTOFIX): a check of a person's push goes on to fix
+// what it finds broken (action.yml), as a ticked "Fix with Claude" would. Not on a draft, where someone is
+// still at work, and not on a push by a bot: Claude's own fix commit would otherwise start another fix.
+const autofix =
+  mode === "check" && !generate && !!event.pull_request && vars.PROOFED_AUTOFIX === "true" && !pr.draft &&
+  event.sender?.type !== "Bot" && process.env.PROOFED_CLAUDE === "true" && process.env.PROOFED_FIX !== "false";
+
 output({
   mode,
   generate: String(generate),
+  autofix: String(autofix),
   number,
   head_sha: pr.head.sha,
   head_ref: pr.head.ref,

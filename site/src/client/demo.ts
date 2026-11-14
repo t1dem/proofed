@@ -5,9 +5,8 @@
 // that crashed on load is from PR #14, which re-ran PR #13's crash once screenshots existed.
 import { summarize, type Live, type LiveFix, type LiveStatus } from "../../../src/livefile";
 import { BLANK_PAGE, NOTHING_CHECKED } from "../../../src/runfile";
-import type { MeView, RepoView } from "../worker/api";
+import type { FixerView, MeView, RepoView } from "../worker/api";
 import type { LiveView } from "../worker/live";
-import type { Fixer } from "../worker/models";
 import type { PullDetail, PullView, Run } from "../worker/runs";
 
 const min = 60_000;
@@ -233,9 +232,9 @@ const pulls: PullView[] = [
 ];
 
 const repos: RepoView[] = [
-  { name: store, url: "#", private: false, installationId: 1, setup: "active", paused: false, secrets: ["LT_USERNAME", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN"], fixer: { model: "claude-opus-5-5", effort: "high" } },
-  { name: proofed, url: "#", private: false, installationId: 1, setup: "active", paused: false, secrets: ["LT_USERNAME", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN"], fixer: { model: "claude-haiku-5-5", effort: "xhigh" } },
-  { name: "t1dem/tostado-web", url: "#", private: true, installationId: 1, setup: "pr-open", setupPr: "#", paused: false, secrets: ["LT_USERNAME"], fixer: { model: "claude-haiku-5-5", effort: "xhigh" } },
+  { name: store, url: "#", private: false, installationId: 1, setup: "active", paused: false, secrets: ["LT_USERNAME", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN"], fixer: { model: "claude-opus-5-5", effort: "high", auto: false } },
+  { name: proofed, url: "#", private: false, installationId: 1, setup: "active", paused: false, secrets: ["LT_USERNAME", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN"], fixer: { model: "claude-haiku-5-5", effort: "xhigh", auto: false } },
+  { name: "t1dem/tostado-web", url: "#", private: true, installationId: 1, setup: "pr-open", setupPr: "#", paused: false, secrets: ["LT_USERNAME"], fixer: { model: "claude-haiku-5-5", effort: "xhigh", auto: false } },
   { name: "t1dem/braatens-site", url: "#", private: true, installationId: 1, setup: "none", paused: false, secrets: [], fixer: null },
 ];
 
@@ -390,7 +389,7 @@ export async function demo(path: string, init?: RequestInit): Promise<unknown> {
     const repo = repos.find((r) => r.name === repoAction[1]);
     const action = repoAction[2];
     if (action === "fixer") {
-      const fixer = JSON.parse(String(init.body)) as Fixer;
+      const fixer = JSON.parse(String(init.body)) as FixerView;
       if (repo) repo.fixer = fixer;
       return { fixer };
     }

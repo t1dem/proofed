@@ -232,6 +232,41 @@ runs:
         echo "report=$PROOFED_OUT/report.md" >> "$GITHUB_OUTPUT"
         node "$GITHUB_ACTION_PATH/src/cli.ts"
 
+    # "Fix automatically" in the dashboard: a check that saw a scenario fail goes on to fix it in this job,
+    # as a ticked "Fix with Claude" would (src/mode.ts decides when). The check's app server is stopped
+    # first, so Kane re-checks the fixer's own build rather than the old one still on the port.
+    - name: Fix automatically with Claude
+      if: ${{ !cancelled() && steps.mode.outputs.autofix == 'true' && steps.run.outputs.fixable == 'true' }}
+      shell: bash
+      env:
+        PROOFED_AUTO: "true"
+        PROOFED_NUMBER: ${{ steps.mode.outputs.number }}
+        PROOFED_URL: ${{ inputs.url }}
+        PROOFED_BUILD: ${{ inputs.build }}
+        PROOFED_SERVE: ${{ inputs.serve }}
+        PROOFED_DIR: ${{ inputs.working-directory }}
+        PROOFED_SCENARIOS: ${{ inputs.scenarios }}
+        PROOFED_BASE_SHA: ${{ steps.mode.outputs.base_sha }}
+        PROOFED_HEAD_REF: ${{ steps.mode.outputs.head_ref }}
+        PROOFED_BASE_REF: ${{ steps.mode.outputs.base_ref }}
+        PROOFED_CLAUDE_MODEL: ${{ steps.mode.outputs.model }}
+        PROOFED_CLAUDE_EFFORT: ${{ steps.mode.outputs.effort }}
+        PROOFED_OUT: ${{ runner.temp }}/proofed
+        LT_USERNAME: ${{ inputs.lt-username }}
+        LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
+        KANE_CLI_CDP_TIMEOUT_MS: "60000"
+        KANE_CLI_CDP_RETRIES: "2"
+        KANE_CLI_USER_AGENT: github-action
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PROOFED_SERVER: ${{ inputs.proofed-url }}
+      run: |
+        port=$(node -e 'const u = new URL(process.argv[1]); console.log(u.port || (u.protocol === "https:" ? 443 : 80))' "$PROOFED_URL")
+        (fuser -k "$port/tcp" || lsof -ti "tcp:$port" | xargs -r kill) >/dev/null 2>&1 || true
+        for i in $(seq 1 20); do curl -s -o /dev/null "$PROOFED_URL" || break; sleep 0.5; done
+        npm install -g @anthropic-ai/claude-code >/dev/null
+        node "$GITHUB_ACTION_PATH/src/fix.ts"
+
     # The setup PR's check, while it holds only the stock scenario (src/mode.ts): Claude writes the first
     # scenarios, Kane runs them with the stock one, and the ones that pass are pushed to the setup branch.
     - name: Write scenarios with Claude, run them with Kane

@@ -1,7 +1,7 @@
 import { Check, ChevronDown, LoaderCircle, LogOut, Moon, Pause, Play, Sun, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import type { MeView, RepoView } from "../worker/api";
-import { EFFORTS, modelLabel, MODELS, type Fixer } from "../worker/models";
+import type { FixerView, MeView, RepoView } from "../worker/api";
+import { EFFORTS, modelLabel, MODELS } from "../worker/models";
 import type { PullView } from "../worker/runs";
 import type { Theme } from "./App";
 import { api, DEMO, message, mutate, useLoad } from "./lib";
@@ -189,11 +189,12 @@ function Keys({ me, onSaved }: { me: MeView; onSaved: (message: string) => void 
 // A row in the model menu: the same height and weight picked or not, so nothing moves under the mouse.
 const menuRow = `flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] ${soft} hover:bg-hover active:bg-hover max-md:h-11 max-md:text-[15px] ${focus}`;
 
-// Which Claude model (and effort) "Fix with Claude" uses in this repo, saved as Actions variables.
-// One button in the repo's row; models on the left of the menu, effort on the right.
+// Which Claude model (and effort) "Fix with Claude" uses in this repo, and whether it fixes on its own,
+// saved as Actions variables. One button in the repo's row; models on the left of the menu, effort on
+// the right, the switch for fixing automatically under both.
 function FixerMenu({ repo }: { repo: RepoView }) {
   const fixer = repo.fixer;
-  const [saving, setSaving] = useState<"model" | "effort">();
+  const [saving, setSaving] = useState<"model" | "effort" | "auto">();
   const [error, setError] = useState<string>();
   const [open, setOpen] = useState(false);
   const [typing, setTyping] = useState(false);
@@ -218,8 +219,8 @@ function FixerMenu({ repo }: { repo: RepoView }) {
   }
 
   const custom = !MODELS.some((m) => m.id === fixer.model);
-  const setFixer = (next: Fixer) => mutate<RepoView[]>("/api/repos", (all) => all.map((r) => (r.name === repo.name ? { ...r, fixer: next } : r)));
-  const save = async (next: Fixer, what: "model" | "effort") => {
+  const setFixer = (next: FixerView) => mutate<RepoView[]>("/api/repos", (all) => all.map((r) => (r.name === repo.name ? { ...r, fixer: next } : r)));
+  const save = async (next: FixerView, what: "model" | "effort" | "auto") => {
     setFixer(next);
     setSaving(what);
     setError(undefined);
@@ -315,6 +316,26 @@ function FixerMenu({ repo }: { repo: RepoView }) {
               ))}
             </div>
           </div>
+          <div className="border-t border-edge p-1.5 max-md:px-2">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={fixer.auto}
+              disabled={saving === "auto"}
+              onClick={() => save({ ...fixer, auto: !fixer.auto }, "auto")}
+              className={`flex w-full items-start gap-3 rounded-md px-2 py-2 text-left ${soft} hover:bg-hover active:bg-hover ${focus}`}
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] max-md:text-[15px]">Fix automatically</span>
+                <span className="mt-0.5 block text-[12px] text-faint max-md:text-[13px]">
+                  When Kane sees a scenario fail, Claude starts a fix right away. Not on drafts, or when the test may be wrong.
+                </span>
+              </span>
+              <span className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors ${fixer.auto ? "bg-work" : "bg-edge"}`}>
+                <span className={`absolute top-0.5 size-4 rounded-full bg-fg transition-[left] ${fixer.auto ? "left-[18px]" : "left-0.5"}`} />
+              </span>
+            </button>
+          </div>
           {error && <p className="border-t border-edge px-3.5 py-2.5 text-[13px] text-bad">{error}</p>}
         </div>
         </>
@@ -381,7 +402,9 @@ function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange:
     repo.setup === "active"
       ? paused
         ? "Paused: pull requests aren't checked and /proofed isn't answered"
-        : "Checks every pull request"
+        : repo.fixer?.auto
+          ? "Checks every pull request and fixes what breaks"
+          : "Checks every pull request"
       : repo.setup === "pr-open"
         ? "Setup PR is open"
         : "Not set up";
