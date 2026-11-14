@@ -338,7 +338,7 @@ export function Pull({ repo, pr, listed, go, asked, ask }: PullProps) {
         sub={detail.status === "ok" && detail.data.runs[0] && <RunLine run={detail.data.runs[0]} />}
         aside={
           pull && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {typeof state === "object" && <span className="text-[13px] text-bad">{state.error}</span>}
               {canFix && !pull.paused && (
                 <button type="button" className={solid} disabled={state === "sending"} onClick={() => ask(pull, "fix")}>
