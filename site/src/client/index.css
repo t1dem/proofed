@@ -96,6 +96,23 @@ html[data-app][data-theme="light"] body::before {
   }
 }
 
+/* Text at work: a band of light runs across it, left to right. */
+.shimmer {
+  background: linear-gradient(90deg, var(--color-faint) 35%, var(--color-fg) 50%, var(--color-faint) 65%) 0 0 / 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 1.8s linear infinite;
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+
 /* The landing's paper and ink, so the app and the site read as one thing. */
 html[data-app][data-theme="light"] {
   color-scheme: light;
@@ -150,5 +167,10 @@ html[data-app][data-theme="light"] {
   *::after {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+  }
+  .shimmer {
+    animation: none;
+    color: var(--color-fg);
+    background: none;
   }
 }

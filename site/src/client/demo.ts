@@ -424,7 +424,7 @@ export async function demo(path: string, init?: RequestInit): Promise<unknown> {
     const key = `${p.repo}/${p.pr}`;
     const going = runs.get(key);
     const state = going ? (going.live.kind === "fix" ? ("fixing" as const) : ("running" as const)) : p.state;
-    return { ...p, state, ...(going && { live: summarize(going.live) }), paused: repos.some((r) => r.name === p.repo && r.paused) };
+    return { ...p, state, ...(going && { live: summarize(going.live), checking: { sha: going.live.sha, at: going.live.startedAt } }), paused: repos.some((r) => r.name === p.repo && r.paused) };
   });
   if (path === "/api/pulls") return withPause;
   const live = /^\/api\/pulls\/(.+\/\d+)\/live$/.exec(path);

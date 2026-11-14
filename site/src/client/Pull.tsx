@@ -5,7 +5,7 @@ import { NOTHING_CHECKED } from "../../../src/runfile";
 import type { PullDetail, PullView, Run, RunScenario } from "../worker/runs";
 import { ago, titleName, useLoad, type Ask, type Route, type useAsk } from "./lib";
 import { LiveRun } from "./Live";
-import { Backdrop, bone, focus, iconButton, kindOf, Link, link, Mark, MobileBar, outline, PageTitle, panel, popover, useSheetDrag, plain, Segmented, sha7, soft, solid, useDismiss } from "./ui";
+import { Backdrop, bone, focus, iconButton, kindOf, Link, link, Mark, marks, MobileBar, outline, PageTitle, panel, popover, useSheetDrag, plain, Segmented, sha7, soft, solid, useDismiss } from "./ui";
 
 type Seen = { run: Run; scenario: RunScenario };
 
@@ -297,7 +297,9 @@ function runCost(run: Run) {
 
 // The line under the title: how the shown run went and where it came from. With more than one run
 // the commit opens the list of them, and picking one shows the pull request as that run left it.
-function RunMeta({ runs, at, onAt }: { runs: Run[]; at: number; onAt: (key: string | undefined) => void }) {
+// The commit Kane or Claude is at work on heads the list in their color until its run reports.
+type Checking = { sha: string; at: number; kind: "running" | "fixing" };
+function RunMeta({ runs, at, onAt, checking }: { runs: Run[]; at: number; onAt: (key: string | undefined) => void; checking?: Checking }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLSpanElement>(null);
   const close = useCallback(() => setOpen(false), []);
@@ -313,7 +315,7 @@ function RunMeta({ runs, at, onAt }: { runs: Run[]; at: number; onAt: (key: stri
       <span className="text-dim">{runLabel(run)}</span>
       {dot}
       <span>{when} on</span>
-      {runs.length > 1 ? (
+      {runs.length > 1 || checking ? (
         <span ref={box} className="relative">
           <button
             type="button"
@@ -328,6 +330,15 @@ function RunMeta({ runs, at, onAt }: { runs: Run[]; at: number; onAt: (key: stri
           {open && <Backdrop onClose={close} />}
           {open && (
             <span ref={sheet} className={`${popover} left-0 right-auto block w-[min(340px,calc(100vw-32px))] p-1 max-md:px-2`}>
+              {checking && (
+                <span className="flex h-8 w-full items-center gap-2.5 px-2 text-[13px] max-md:h-12 max-md:px-3 max-md:text-[15px]">
+                  <span className={`size-2 shrink-0 rounded-full ${marks[checking.kind].fill}`} />
+                  <span className="font-mono text-[12px] text-fg">{sha7(checking.sha)}</span>
+                  <span className="min-w-0 flex-1 truncate text-dim">{marks[checking.kind].label}</span>
+                  <span className="tabular-nums text-faint">{ago(checking.at)}</span>
+                  <span className="w-3.5 shrink-0" />
+                </span>
+              )}
               {runs.map((r, i) => (
                 <button
                   key={r.key}
@@ -523,6 +534,23 @@ function Scenarios({ runs, at, scenario }: ScenariosProps) {
   const scenarios = [...new Map(view.flatMap((r) => r.scenarios).map((s) => [s.id, s])).values()];
   const [picked, setPicked] = useState(() => runs.flatMap((r) => r.scenarios).find((s) => s.name === scenario)?.id);
   const current = scenarios.find((s) => s.id === picked) ?? scenarios.find((s) => s.outcome !== "passed") ?? scenarios[0];
+  // The tabs are drawn anew with each scenario (ScenarioView is keyed by it), so the strip keeps its
+  // sideways scroll here and shows the picked tab, instead of jumping back to the first one.
+  const scrolled = useRef(0);
+  const strip = useCallback(
+    (el: HTMLDivElement | null) => {
+      if (!el) return;
+      el.scrollLeft = scrolled.current;
+      const tab = el.querySelector<HTMLElement>('[aria-selected="true"]');
+      if (!tab) return;
+      const left = tab.offsetLeft;
+      const right = left + tab.offsetWidth;
+      if (left < el.scrollLeft) el.scrollLeft = left - 8;
+      else if (right > el.scrollLeft + el.clientWidth) el.scrollLeft = right - el.clientWidth + 8;
+      scrolled.current = el.scrollLeft;
+    },
+    [current?.id],
+  );
   const told = current && story(view, current.id);
   if (!current || !told) return <p className="text-dim">This run had no scenarios to check.</p>;
 
@@ -531,9 +559,11 @@ function Scenarios({ runs, at, scenario }: ScenariosProps) {
   // On a phone the tabs scroll sideways; the fade at the right edge says there are more.
   const tabs = scenarios.length > 1 && (
     <div
+      ref={strip}
+      onScroll={(e) => (scrolled.current = e.currentTarget.scrollLeft)}
       role="tablist"
       aria-label="Scenarios"
-      className="flex overflow-x-auto overflow-y-hidden border-b border-edge px-2 [scrollbar-width:none] max-sm:[mask-image:linear-gradient(to_right,#000_80%,transparent)] sm:px-3">
+      className="relative flex overflow-x-auto overflow-y-hidden border-b border-edge px-2 [scrollbar-width:none] max-sm:[mask-image:linear-gradient(to_right,#000_80%,transparent)] sm:px-3">
       {scenarios.map((s) => {
         const on = s.id === current.id;
         return (
@@ -633,7 +663,7 @@ export function Pull({ repo, pr, scenario, listed, go, asked, ask }: PullProps) 
       <div className="max-md:h-4" />
       <PageTitle
         onPhone="title"
-        sub={runs.length > 0 && <RunMeta runs={runs} at={at} onAt={setRunKey} />}
+        sub={runs.length > 0 && <RunMeta runs={runs} at={at} onAt={setRunKey} checking={pull?.checking && (kind === "running" || kind === "fixing") ? { ...pull.checking, kind } : undefined} />}
         aside={
           pull && (
             // On a phone these are the MobileBar's GitHub and the action bar at the bottom.

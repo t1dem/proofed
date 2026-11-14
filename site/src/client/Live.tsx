@@ -1,4 +1,3 @@
-import { LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Live, LiveScenario } from "../../../src/livefile";
 import type { LiveView } from "../worker/live";
@@ -45,7 +44,7 @@ function headline(live: Live): [string, string] {
 
 // What Kane's Chrome shows, swapped in only once the next frame has loaded, so it never blinks.
 // A frame that fails to load is skipped: the last good one (or the caption) stays, never a broken image.
-function LiveFrame({ frame, on, now }: { frame: Frame | undefined; on: boolean; now: number }) {
+function LiveFrame({ frame, on, now, startedAt }: { frame: Frame | undefined; on: boolean; now: number; startedAt?: number }) {
   const [shown, setShown] = useState<string>();
   useEffect(() => {
     const next = frame?.url;
@@ -62,20 +61,28 @@ function LiveFrame({ frame, on, now }: { frame: Frame | undefined; on: boolean; 
     };
   }, [frame?.url, shown]);
   const age = frame ? now - frame.at : 0;
-  const chip = "pointer-events-none absolute left-3 top-3 inline-flex items-center gap-1.5 rounded bg-black/65 px-1.5 py-0.5 text-[12px] font-medium text-white";
   return (
-    <figure className="relative aspect-video min-w-0 overflow-hidden rounded-lg border border-edge bg-bg lg:sticky lg:top-6">
-      {shown ? (
-        <img src={shown} alt="What Kane's Chrome shows now" className="block size-full object-cover object-top" />
-      ) : (
-        <figcaption className="grid size-full place-items-center px-6 text-center text-[13px] text-faint">Kane's Chrome shows here once it opens the page.</figcaption>
-      )}
-      {shown && on && (
-        <span className={chip}>
-          <span className="size-1.5 animate-pulse rounded-full bg-bad" />
-          {age > 8000 ? `Live · ${Math.round(age / 1000)} s ago` : "Live"}
+    <figure className="min-w-0 overflow-hidden rounded-lg border border-edge bg-bg lg:sticky lg:top-6">
+      <div className="aspect-video bg-black">
+        {shown ? (
+          <img src={shown} alt="What Kane's Chrome shows now" className="block size-full object-cover object-top" />
+        ) : (
+          <figcaption className="grid size-full place-items-center bg-bg px-6 text-center text-[13px] text-faint">Kane's Chrome shows here once it opens the page.</figcaption>
+        )}
+      </div>
+      {/* A live stream's bar, under the picture as the recording's controls are: always at the end. */}
+      <div className="flex h-11 items-center gap-3 border-t border-edge px-3">
+        <span className={`inline-flex shrink-0 items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide ${on ? "text-fg" : "text-faint"}`}>
+          <span className={`size-2 rounded-full ${on ? "animate-pulse bg-bad" : "bg-faint"}`} />
+          Live
         </span>
-      )}
+        <span className="relative h-1 min-w-0 flex-1 rounded-full bg-edge">
+          <span className={`absolute inset-y-0 left-0 w-full rounded-full ${on ? "bg-bad" : "bg-faint"}`} />
+        </span>
+        <span className="shrink-0 text-[12px] tabular-nums text-faint">
+          {on && shown && age > 8000 ? `${Math.round(age / 1000)} s behind` : startedAt ? clock(now - startedAt) : ""}
+        </span>
+      </div>
     </figure>
   );
 }
@@ -86,24 +93,23 @@ function LiveSteps({ scenario }: { scenario: LiveScenario }) {
   if (scenario.steps.length === 0) return <p className="text-dim">Kane is opening the page.</p>;
   return (
     <ol className="-mx-3">
-      {scenario.steps.map((step) => {
+      {/* Numbered by position: Kane's own numbers start at 2 (its first step opens the page unannounced). */}
+      {scenario.steps.map((step, i) => {
         const running = step.status === "running";
         const failed = step.status === "failed";
+        // Until Kane says what the step is, its remark is a stand-in like "Step 5".
+        const said = step.remark && !/^step \d+$/i.test(step.remark) ? plain(step.remark) : undefined;
         return (
           <li
             key={step.n}
+            aria-current={running ? "step" : undefined}
             className={`flex gap-3 rounded-md px-3 py-1.5 transition-[opacity,color,background-color] duration-300 starting:opacity-0 ${failed ? "bg-bad-bg text-fg" : running ? "text-fg" : "text-dim"}`}
           >
             <span className="flex h-5 w-5 shrink-0 items-center justify-end">
-              {failed ? (
-                <Mark kind="failed" />
-              ) : running ? (
-                <LoaderCircle size={14} className="animate-spin text-busy" aria-label="Kane is on this step" />
-              ) : (
-                <span className="font-mono text-[12px] tabular-nums text-faint">{step.n}</span>
-              )}
+              {failed ? <Mark kind="failed" /> : <span className="font-mono text-[12px] tabular-nums text-faint">{i + 1}</span>}
             </span>
-            <span className="min-w-0">{step.remark ? plain(step.remark) : "…"}</span>
+            {/* The step Kane is on shimmers, as an agent's "Thinking" does. */}
+            <span className={`min-w-0 ${running ? "shimmer" : ""}`}>{said ?? (running ? "Thinking…" : "…")}</span>
           </li>
         );
       })}
@@ -195,7 +201,7 @@ export function LiveRun({ repo, pr }: { repo: string; pr: number }) {
           )}
           <div className={`grid gap-6 p-5 sm:p-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-8 ${live.scenarios.length > 1 ? "" : "border-t border-edge"}`}>
             <div className="min-w-0 lg:col-start-2 lg:row-start-1">
-              <LiveFrame key={current.id} frame={view.frames[current.id]} on={current.status === "running"} now={now} />
+              <LiveFrame key={current.id} frame={view.frames[current.id]} on={current.status === "running"} now={now} startedAt={current.startedAt} />
             </div>
             <div className="min-w-0 lg:col-start-1 lg:row-start-1">
               <LiveSteps scenario={current} />
