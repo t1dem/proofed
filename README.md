@@ -44,7 +44,7 @@ A scenario without `paths` runs on every PR. Editing a scenario file also runs i
 
 ## Setup
 
-The easy way: sign in at [proofed.neptunescodm.workers.dev](https://proofed.neptunescodm.workers.dev/app), save your keys and install the GitHub App on a repo. Proofed opens a PR with the workflow and a first scenario, and puts the keys into the repo's secrets.
+The easy way: sign in at [proofed.neptunescodm.workers.dev](https://proofed.neptunescodm.workers.dev/app), save your keys and install the GitHub App on a repo. Proofed opens a PR with the workflow and a first scenario, and puts the keys into the repo's secrets. That PR's check then has Claude read the app and write up to five scenarios for its main flows; Kane runs each one, and only the ones it saw pass are committed to the PR. This happens only while `home.md` is the only scenario, and only with a Claude token.
 
 By hand: add `LT_USERNAME` and `LT_ACCESS_KEY` (TestMu: Settings → Keys) and `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) to the repo secrets, then add one workflow. The action checks out the PR, builds and serves the app with your commands, and checks or fixes depending on the event. The whole file, working, is [proofed-demo-store's](https://github.com/t1dem/proofed-demo-store/blob/main/.github/workflows/proofed.yml); the part that matters:
 
@@ -87,4 +87,4 @@ A scenario takes about a minute and 20–30 Kane credits. Proofed only runs the 
 
 ## Code
 
-TypeScript that Node 24 runs directly, no build step. `src/mode.ts` decides what an event asks for, `src/cli.ts` is the PR check, `src/fix.ts` the fix loop, `src/run.ts` one scenario (Chrome, recorder, Kane, clip). `pnpm test` runs the unit tests.
+TypeScript that Node 24 runs directly, no build step. `src/mode.ts` decides what an event asks for, `src/cli.ts` is the PR check, `src/fix.ts` the fix loop, `src/generate.ts` the setup PR's first scenarios, `src/run.ts` one scenario (Chrome, recorder, Kane, clip). `pnpm test` runs the unit tests.

@@ -1,12 +1,14 @@
 // The one Proofed workflow runs on PR events and on comments; this decides what to do for this one:
 // check the PR in Chrome, or have Claude fix what the last check found. It also settles the fix model,
-// so a "/proofed fix" that can't run gets an answer before anything is installed.
+// so a "/proofed fix" that can't run gets an answer before anything is installed, and whether the
+// setup PR's check starts by writing scenarios.
 import { appendFileSync } from "node:fs";
-import { acknowledge, findReport, getPullRequest, hasStatus, reply, setStatus, type PullRequest } from "./github.ts";
+import { acknowledge, findReport, getPullRequest, hasStatus, listFolder, readFile, reply, setStatus, type PullRequest } from "./github.ts";
 import { DEFAULT_FIXER } from "./models.ts";
 import { ctx, readEvent } from "./pipeline.ts";
 import { alreadyReported, fixRequested, readReportData } from "./report.ts";
 import { parseCommand, parseFix, type FixCommand } from "./requests.ts";
+import { onlyFirstScenario, SETUP_BRANCH } from "./setup.ts";
 
 type Event = {
   action: string;
@@ -85,8 +87,25 @@ if (mode === "check" && event.pull_request) {
 // Settings saved from the Proofed dashboard arrive as the repo's Actions variables.
 const vars = JSON.parse(process.env.PROOFED_VARS || "{}") as Record<string, string | undefined>;
 const pr = event.pull_request ?? (await getPullRequest(repo, number));
+
+// The setup PR's check has Claude write the first scenarios before Kane runs them (generate.ts):
+// only while the branch holds just the stock scenario, so a person's scenarios are never touched,
+// and only with a Claude token. Otherwise Claude Code isn't even installed.
+let generate = false;
+if (mode === "check" && event.pull_request && pr.head.ref === SETUP_BRANCH && process.env.PROOFED_CLAUDE === "true") {
+  const dir = (process.env.PROOFED_SCENARIOS || ".proofed/scenarios").replace(/\/+$/, "");
+  try {
+    const [only, ...more] = (await listFolder(repo, dir, pr.head.sha)) ?? [];
+    generate = !!only && more.length === 0 && only.type === "file" &&
+      onlyFirstScenario([{ name: only.name, text: await readFile(repo, `${dir}/${only.name}`, pr.head.sha) }]);
+  } catch (e) {
+    console.log(`Couldn't read ${dir} on the setup branch, so no scenarios are written: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
 output({
   mode,
+  generate: String(generate),
   number,
   head_sha: pr.head.sha,
   head_ref: pr.head.ref,

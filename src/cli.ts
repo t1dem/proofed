@@ -7,6 +7,7 @@ import { baseRev, changedFiles, ctx, env, pickScenarios, publish, readEvent, run
 import { readReportData } from "./report.ts";
 import { askedScenario, descriptionRequest, parseCommand, parseFix } from "./requests.ts";
 import type { Scenario } from "./scenarios.ts";
+import { SETUP_BRANCH } from "./setup.ts";
 
 type Event = {
   pull_request: PullRequest;
@@ -49,7 +50,7 @@ if (command) {
   selected = asked;
 } else {
   // Proofed's own setup PR describes Proofed, not something to check in the app.
-  const request = pr?.head.ref === "proofed-setup" ? undefined : descriptionRequest(pr?.body);
+  const request = pr?.head.ref === SETUP_BRANCH ? undefined : descriptionRequest(pr?.body);
   asked = request ? [askedScenario("description", request)] : [];
   const only = process.env.PROOFED_ONLY?.split(",").map((s) => s.trim()).filter(Boolean);
   const changed = base ? changedFiles(base, sha === "local" ? "HEAD" : sha) : undefined;

@@ -31,6 +31,24 @@ export type PullRequest = {
 
 export const getPullRequest = (repo: Repo, number: number) => api<PullRequest>(repo, "GET", `/pulls/${number}`);
 
+type Entry = { name: string; type: string; content?: string };
+
+// A folder's entries at `ref`, or undefined when there is no folder there.
+export async function listFolder(repo: Repo, path: string, ref: string) {
+  try {
+    const found = await api<Entry | Entry[]>(repo, "GET", `/contents/${path}?ref=${ref}`);
+    return Array.isArray(found) ? found : undefined;
+  } catch (e) {
+    if (e instanceof GitHubError && e.status === 404) return undefined;
+    throw e;
+  }
+}
+
+export async function readFile(repo: Repo, path: string, ref: string) {
+  const file = await api<Entry>(repo, "GET", `/contents/${path}?ref=${ref}`);
+  return Buffer.from(file.content ?? "", "base64").toString("utf8");
+}
+
 // 👀 on a /proofed comment, so whoever asked sees it was picked up.
 export const acknowledge = (repo: Repo, commentId: number) =>
   api(repo, "POST", `/issues/comments/${commentId}/reactions`, { content: "eyes" });
