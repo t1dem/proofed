@@ -86,7 +86,8 @@ function LiveSteps({ scenario }: { scenario: LiveScenario }) {
   if (scenario.steps.length === 0) return <p className="text-dim">Kane is opening the page.</p>;
   return (
     <ol className="-mx-3">
-      {scenario.steps.map((step) => {
+      {/* Numbered by position: Kane's own numbers start at 2 (its first step opens the page unannounced). */}
+      {scenario.steps.map((step, i) => {
         const running = step.status === "running";
         const failed = step.status === "failed";
         return (
@@ -100,7 +101,7 @@ function LiveSteps({ scenario }: { scenario: LiveScenario }) {
               ) : running ? (
                 <LoaderCircle size={14} className="animate-spin text-busy" aria-label="Kane is on this step" />
               ) : (
-                <span className="font-mono text-[12px] tabular-nums text-faint">{step.n}</span>
+                <span className="font-mono text-[12px] tabular-nums text-faint">{i + 1}</span>
               )}
             </span>
             <span className="min-w-0">{step.remark ? plain(step.remark) : "…"}</span>
