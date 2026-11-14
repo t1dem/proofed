@@ -4,7 +4,7 @@ import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { publishClips, repoFromEnv, setStatus, upsertComment, type Repo } from "./github.ts";
 import { crashResult, findCrashes } from "./precheck.ts";
-import { buildReport, type ClipLinks, type FixNote, type ReportData } from "./report.ts";
+import { buildReport, type ClipLinks, type FixNote, type ReportData, type Written } from "./report.ts";
 import { nothingAsked } from "./requests.ts";
 import { runScenario, type ScenarioResult } from "./run.ts";
 import { RUN_FILE, type RunFile } from "./runfile.ts";
@@ -98,6 +98,7 @@ type PublishInput = {
   fix?: FixNote;
   asked?: Scenario[];
   previous?: ReportData;
+  written?: Written;
 };
 
 // The dashboard's copy of the run. Steps are capped like the comment's, so the file stays small.
@@ -135,7 +136,7 @@ function runFile({ sha, results, skipped, runUrl, fix }: PublishInput, clips: Ma
 }
 
 export async function publish(input: PublishInput) {
-  const { repo, pr, sha, results, skipped, runUrl, outDir, fix, asked, previous } = input;
+  const { repo, pr, sha, results, skipped, runUrl, outDir, fix, asked, previous, written } = input;
   const clips = new Map<string, ClipLinks>();
   let runKey: string | undefined;
   if (repo && pr) {
@@ -157,7 +158,7 @@ export async function publish(input: PublishInput) {
 
   const repoUrl = repo && `https://github.com/${repo.owner}/${repo.name}`;
   const body = buildReport({
-    sha, results, skipped, clips, runUrl, fixEnabled: process.env.PROOFED_FIX !== "false", fix, asked, previous, repoUrl, runKey,
+    sha, results, skipped, clips, runUrl, fixEnabled: process.env.PROOFED_FIX !== "false", fix, asked, previous, repoUrl, runKey, written,
   });
   writeFileSync(join(outDir, "report.md"), body);
   writeFileSync(join(outDir, "results.json"), JSON.stringify(results, null, 2));

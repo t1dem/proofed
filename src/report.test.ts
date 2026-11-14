@@ -201,3 +201,35 @@ test("a page that crashed on load shows its screenshot, and after a fix the befo
   assert.match(table[0]!, /^\| <img src="[^"]+\/a\/promo\.jpg" width="360" alt="What a user sees on opening the page"> \| <a href="[^"]+\/b\/promo\.mp4"><img src="[^"]+\/b\/promo\.jpg"/);
   assert.match(table[1]!, /^\| ✗ The page is blank[^|]*<br><br>`TypeError[^|]*\| ✓ Passes\. \|$/);
 });
+
+test("on the setup PR, the scenarios Claude wrote are listed with their clips, and the dropped ones say why", () => {
+  const raw = "https://github.com/o/r/raw/proofed-clips/pr-1/abc";
+  const home: ScenarioResult = { ...passed, scenario: { ...passed.scenario, id: "home", file: ".proofed/scenarios/home.md", name: "Home page loads" } };
+  const plans: ScenarioResult = {
+    ...passed,
+    scenario: { id: "pricing-plans", file: ".proofed/scenarios/pricing-plans.md", name: "Pricing lists three plans", paths: [], url: "/pricing", objective: "Open Pricing.\nCheck that three plans are listed." },
+  };
+  const body = buildReport({
+    sha: "9f8e7d6c5b", results: [home, plans], skipped: [], fixEnabled: true,
+    clips: new Map([["pricing-plans", { gif: `${raw}/pricing-plans.gif`, mp4: `${raw}/pricing-plans.mp4` }], ["home", { gif: `${raw}/home.gif` }]]),
+    written: {
+      status: "written", kept: [{ id: "pricing-plans", about: "The pricing page lists the three plans." }], commit: "9f8e7d6c5b", commitUrl: "https://github.com/o/r/commit/9f8e7d6c5b",
+      dropped: [{ name: "Sign up", why: "The page says <Error>: sign-in needed." }],
+    },
+  });
+  assert.match(body, /^<!-- proofed -->\n### Proofed\n\nAll 2 affected scenarios pass in a real browser\.\n\n\*\*Claude wrote a scenario for this app\*\*, and Proofed added it to this PR in \[`9f8e7d6`\]/);
+  assert.match(body, /They are plain Markdown in `\.proofed\/scenarios\/`/);
+  assert.match(body, /\*\*✓ Pricing lists three plans\*\* · `pricing-plans\.md`<br>The pricing page lists the three plans\.\n\n<img src="[^"]+\/pricing-plans\.gif"/);
+  assert.match(body, /Dropped, since Kane didn't see it pass:\n\n- \*\*Sign up\*\*: The page says &lt;Error>: sign-in needed\./);
+  // Shown once, above; the stock scenario stays where passes go.
+  assert.equal(body.split("pricing-plans.gif").length, 2);
+  assert.match(body, /<summary>✓ Passed: Home page loads<\/summary>/);
+  assert.deepEqual(readReportData(body)?.failures, []);
+});
+
+test("on the setup PR, Claude not getting to write scenarios is one line", () => {
+  const body = buildReport({ sha: "9f8e7d6c5b", results: [passed], skipped: [], clips: new Map(), fixEnabled: true, written: { status: "failed" } });
+  assert.match(body, /The affected scenario passes in a real browser\.\n\n[^\n]*scenarios couldn't be written this time\.\n\n/);
+  const none = buildReport({ sha: "9f8e7d6c5b", results: [passed], skipped: [], clips: new Map(), fixEnabled: true, written: { status: "written", kept: [], dropped: [] } });
+  assert.match(none, /Claude didn't find a flow it could write a scenario for without guessing, so none were added\./);
+});
