@@ -249,9 +249,20 @@ export function Avatar({ me }: { me: MeView }) {
 export const sha7 = (sha: string) => sha.slice(0, 7);
 
 // Kane starts each remark with the kind of step ("click: Clicking Pause"); the words alone say it.
+// Kane's remark is "<kind>: <text>", the text cut at 80 characters, sometimes mid-word. An analyze
+// step's text can be the raw call, ANALYZE(textual_visual, '<what it checks>'), and a wait's can
+// start with "PRIMARY:"; only what it checks is shown.
+const KANE_CUT = 80;
 export const plain = (remark: string) => {
-  const text = remark.replace(/^[a-z_]+:\s+/, "");
-  return text.charAt(0).toUpperCase() + text.slice(1);
+  let text = remark.replace(/^[a-z_]+:\s+/, "");
+  const cut = text.length >= KANE_CUT;
+  text = text
+    .replace(/^[A-Z_]+\([a-z_]+,\s*['"]?/, "")
+    .replace(/['"]?\)$/, "")
+    .replace(/^PRIMARY:\s*/, "");
+  if (cut) text = `${text.replace(/\s+\S*$/, "")}…`;
+  // A repository name ("t1dem/proofed …") keeps its case.
+  return /^\S*\//.test(text) ? text : text.charAt(0).toUpperCase() + text.slice(1);
 };
 
 // A grey stand-in for text or a frame that's still loading, in the shape of what comes.
