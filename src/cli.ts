@@ -1,7 +1,7 @@
 // The PR check. Runs when a PR is opened or updated, and when someone comments /proofed on one.
 // Picks the scenarios the diff touches, adds what the PR description asks to have checked, runs
 // each in Chrome with Kane, publishes the clips and reports on the PR.
-import { mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { acknowledge, findReport, getPullRequest, reply, setStatus, type PullRequest } from "./github.ts";
 import { live } from "./live.ts";
 import { baseRev, changedFiles, ctx, env, pickScenarios, publish, readEvent, runAll } from "./pipeline.ts";
@@ -80,3 +80,5 @@ try {
 
 console.log(`\n${broken.length > 0 ? "✗" : "✓"} ${results.filter((r) => r.outcome === "passed").length}/${results.length} passed`);
 process.exitCode = broken.length > 0 ? 1 : 0;
+// For "Fix automatically" (action.yml): only a scenario Kane saw fail, not one where the test may be wrong.
+if (process.env.GITHUB_OUTPUT && results.some((r) => r.outcome === "failed")) appendFileSync(process.env.GITHUB_OUTPUT, "fixable=true\n");

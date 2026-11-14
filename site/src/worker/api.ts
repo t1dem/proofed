@@ -10,6 +10,9 @@ import { openSetupPr } from "./setup";
 
 export const SECRET_NAMES = ["LT_USERNAME", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN"] as const;
 
+// `auto`: "Fix automatically", a check that saw a scenario fail goes on to fix it (src/mode.ts).
+export type FixerView = Fixer & { auto: boolean };
+
 export type RepoView = {
   name: string;
   url: string;
@@ -21,7 +24,7 @@ export type RepoView = {
   paused: boolean;
   secrets: string[];
   // null when Proofed can't read the repo's Actions variables (the installation predates that permission).
-  fixer: Fixer | null;
+  fixer: FixerView | null;
   report?: { state: string; headline: string; url: string; pr: number; updatedAt: number };
 };
 
@@ -86,6 +89,7 @@ async function describeRepo(env: Env, repo: InstallationRepo & { installationId:
       ({ variables }) => ({
         model: variables.find((v) => v.name === "PROOFED_MODEL")?.value || DEFAULT_FIXER.model,
         effort: variables.find((v) => v.name === "PROOFED_EFFORT")?.value || DEFAULT_FIXER.effort,
+        auto: variables.find((v) => v.name === "PROOFED_AUTOFIX")?.value === "true",
       }),
       () => null,
     ),
@@ -142,11 +146,12 @@ export async function pushSecrets(env: Env, user: UserRow, repoName: string, ins
   return pushed;
 }
 
-// The fix workflow reads vars.PROOFED_MODEL / PROOFED_EFFORT; the default is stored as no variable at all.
-async function setFixer(token: string, repoName: string, fixer: Fixer) {
+// The workflow reads vars.PROOFED_MODEL / PROOFED_EFFORT / PROOFED_AUTOFIX; a default is stored as no variable at all.
+async function setFixer(token: string, repoName: string, fixer: FixerView) {
   const vars = [
     ["PROOFED_MODEL", fixer.model, DEFAULT_FIXER.model],
     ["PROOFED_EFFORT", fixer.effort, DEFAULT_FIXER.effort],
+    ["PROOFED_AUTOFIX", fixer.auto ? "true" : "", ""],
   ] as const;
   for (const [name, value, fallback] of vars) {
     const path = `/repos/${repoName}/actions/variables`;
@@ -307,13 +312,13 @@ export async function handleApi(request: Request, env: Env, path: string) {
     const repo = (await listRepos(env, token)).find((r) => r.full_name === `${owner}/${name}`);
     if (!repo) return json({ error: "Proofed isn't installed on that repository." }, 404);
     if (action === "fixer") {
-      const body = (await request.json()) as Partial<Fixer>;
+      const body = (await request.json()) as Partial<FixerView>;
       const model = body.model?.trim().toLowerCase() ?? "";
       const effort = body.effort ?? "";
       if (!(MODELS.some((m) => m.id === model) || isModelId(model)) || !isEffort(effort)) {
         return json({ error: "Pick a listed model or type a full model ID such as claude-opus-5-1, and a listed effort." }, 400);
       }
-      const fixer = { model, effort };
+      const fixer = { model, effort, auto: body.auto === true };
       try {
         await setFixer(await installationToken(env, repo.installationId), repo.full_name, fixer);
       } catch (e) {
