@@ -534,6 +534,23 @@ function Scenarios({ runs, at, scenario }: ScenariosProps) {
   const scenarios = [...new Map(view.flatMap((r) => r.scenarios).map((s) => [s.id, s])).values()];
   const [picked, setPicked] = useState(() => runs.flatMap((r) => r.scenarios).find((s) => s.name === scenario)?.id);
   const current = scenarios.find((s) => s.id === picked) ?? scenarios.find((s) => s.outcome !== "passed") ?? scenarios[0];
+  // The tabs are drawn anew with each scenario (ScenarioView is keyed by it), so the strip keeps its
+  // sideways scroll here and shows the picked tab, instead of jumping back to the first one.
+  const scrolled = useRef(0);
+  const strip = useCallback(
+    (el: HTMLDivElement | null) => {
+      if (!el) return;
+      el.scrollLeft = scrolled.current;
+      const tab = el.querySelector<HTMLElement>('[aria-selected="true"]');
+      if (!tab) return;
+      const left = tab.offsetLeft;
+      const right = left + tab.offsetWidth;
+      if (left < el.scrollLeft) el.scrollLeft = left - 8;
+      else if (right > el.scrollLeft + el.clientWidth) el.scrollLeft = right - el.clientWidth + 8;
+      scrolled.current = el.scrollLeft;
+    },
+    [current?.id],
+  );
   const told = current && story(view, current.id);
   if (!current || !told) return <p className="text-dim">This run had no scenarios to check.</p>;
 
@@ -542,9 +559,11 @@ function Scenarios({ runs, at, scenario }: ScenariosProps) {
   // On a phone the tabs scroll sideways; the fade at the right edge says there are more.
   const tabs = scenarios.length > 1 && (
     <div
+      ref={strip}
+      onScroll={(e) => (scrolled.current = e.currentTarget.scrollLeft)}
       role="tablist"
       aria-label="Scenarios"
-      className="flex overflow-x-auto overflow-y-hidden border-b border-edge px-2 [scrollbar-width:none] max-sm:[mask-image:linear-gradient(to_right,#000_80%,transparent)] sm:px-3">
+      className="relative flex overflow-x-auto overflow-y-hidden border-b border-edge px-2 [scrollbar-width:none] max-sm:[mask-image:linear-gradient(to_right,#000_80%,transparent)] sm:px-3">
       {scenarios.map((s) => {
         const on = s.id === current.id;
         return (
