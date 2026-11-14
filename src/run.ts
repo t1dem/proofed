@@ -2,6 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { launchChrome } from "./chrome.ts";
 import { makeClip } from "./clip.ts";
+import { live } from "./live.ts";
 import { runKane, type RunEnd, type Step } from "./kane.ts";
 import { NOTHING_CHECKED } from "./runfile.ts";
 import { startRecorder, type Rect } from "./recorder.ts";
@@ -16,10 +17,13 @@ export type Outcome = "passed" | "failed" | "unsure" | "error";
 // load (precheck.ts) has only a screenshot: Kane never ran, so there is nothing to play.
 export type Clip = { mp4: string; gif: string; jpg: string } | { jpg: string; mp4?: undefined; gif?: undefined };
 
+// `at`: where the step starts in the clip, in seconds; the dashboard jumps there from the step.
+export type RunStep = Step & { at?: number };
+
 export type ScenarioResult = {
   scenario: Scenario;
   outcome: Outcome;
-  steps: Step[];
+  steps: RunStep[];
   end: RunEnd | undefined;
   clip: Clip | undefined;
   error?: string;
@@ -107,8 +111,13 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     // Counts as a browser hiccup: retried, and reported as "couldn't finish", never as a bug.
     return { scenario, outcome: "error", steps: [], end: undefined, clip: undefined, error: String(e) };
   }
+  let stills: NodeJS.Timeout | undefined;
   try {
     const recorder = await startRecorder(chrome.endpoint, join(dir, "frames"));
+    live.scenario(scenario.id, { status: "running", steps: [], startedAt: Date.now() });
+    stills = setInterval(() => {
+      if (live.on()) void recorder.snapshot().then((jpeg) => jpeg && live.frame(scenario.id, jpeg));
+    }, 2000);
     let focus: Promise<Rect | undefined> = Promise.resolve(undefined);
     const kane = await runKane({
       objective: kaneObjective(scenario.objective),
@@ -116,9 +125,13 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
       cdpEndpoint: chrome.endpoint,
       username: o.username,
       accessKey: o.accessKey,
-      onStep: (s) => s.status !== "running" && s.remark && log(`${s.status === "failed" ? "✗" : "·"} ${s.remark}`),
+      onStep: (s) => {
+        live.step(scenario.id, s);
+        if (s.status !== "running" && s.remark) log(`${s.status === "failed" ? "✗" : "·"} ${s.remark}`);
+      },
       onEnd: (end) => (focus = recorder.locate(focusWords(end))),
     });
+    clearInterval(stills);
     const focusRect = await focus;
     // Drop the blank about:blank frames from before Kane's first navigation.
     const start = Date.parse(kane.steps[0]?.ts ?? "") / 1000 || 0;
@@ -133,22 +146,27 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
       : (kane.end?.reason ?? kane.stderr.trim().split("\n").slice(-5).join("\n"));
     const film = { frames, actions: recorded.actions, focus: focusRect };
     writeFileSync(join(dir, "film.json"), JSON.stringify(film));
-    const clip = await makeClip(
-      { ...film, endpoint: chrome.endpoint },
+    // A step starts when Kane announces it (the "running" event), not when it reports it done.
+    const announced = new Map(kane.steps.filter((s) => s.status === "running").map((s) => [s.step, s.ts]));
+    const marks = kane.steps.map((s) => Date.parse(announced.get(s.step) ?? s.ts) / 1000);
+    const made = await makeClip(
+      { ...film, marks, endpoint: chrome.endpoint },
       join(dir, "clip"),
     ).catch((e: unknown) => {
       log(`clip failed: ${String(e)}`);
       return undefined;
     });
+    const clip = made && { mp4: made.mp4, gif: made.gif, jpg: made.jpg };
     return {
       scenario,
       outcome,
-      steps: kane.steps,
+      steps: kane.steps.map((s, i) => ({ ...s, at: made?.marks[i] })),
       end,
       clip,
       ...(outcome === "error" && { error }),
     };
   } finally {
+    clearInterval(stills);
     chrome.close();
   }
 }

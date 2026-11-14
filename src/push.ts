@@ -1,5 +1,6 @@
 // Pushing a commit Proofed made (Claude's fix, the setup PR's scenarios) to the PR's branch.
 import { execFileSync } from "node:child_process";
+import { oidcToken } from "./server.ts";
 
 // Pushed with the job's GITHUB_TOKEN, a commit leaves every workflow on it (the repo's own CI too)
 // waiting for someone to approve it; an app's push doesn't. Proofed's server trades this job's OIDC
@@ -12,12 +13,7 @@ async function appToken() {
     return undefined;
   }
   try {
-    const request = new URL(url);
-    request.searchParams.set("audience", "proofed");
-    const oidc = await fetch(request, { headers: { authorization: `bearer ${bearer}` } });
-    const { value } = oidc.ok ? ((await oidc.json()) as { value?: string }) : {};
-    if (!value) throw new Error(`GitHub gave no OIDC token (${oidc.status})`);
-    console.log(`::add-mask::${value}`);
+    const value = await oidcToken();
     const res = await fetch(new URL("/api/actions/token", server), { method: "POST", headers: { authorization: `Bearer ${value}` } });
     const { token } = res.ok ? ((await res.json()) as { token?: string }) : {};
     if (!token) throw new Error(`${server} answered ${res.status}`);

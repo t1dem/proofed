@@ -3,6 +3,7 @@
 // each in Chrome with Kane, publishes the clips and reports on the PR.
 import { mkdirSync } from "node:fs";
 import { acknowledge, findReport, getPullRequest, reply, setStatus, type PullRequest } from "./github.ts";
+import { live } from "./live.ts";
 import { baseRev, changedFiles, ctx, env, pickScenarios, publish, readEvent, runAll } from "./pipeline.ts";
 import { readReportData } from "./report.ts";
 import { askedScenario, descriptionRequest, parseCommand, parseFix } from "./requests.ts";
@@ -64,8 +65,10 @@ console.log(`Running ${selected.length} scenario(s)${asked.length ? `, including
 if (repo && pr) await setStatus(repo, sha, "pending", `Kane is checking ${selected.length} scenario(s) in Chrome`, runUrl);
 
 let results, broken;
+live.start({ kind: "check", pr: pr?.number, sha, runUrl });
 try {
   results = await runAll(selected, outDir);
+  await live.end();
   // Read just before it's overwritten, so the run history carries over.
   const previous = repo && pr ? readReportData((await findReport(repo, pr.number))?.body ?? "") : undefined;
   broken = await publish({ repo, pr: pr?.number, sha, results, skipped, runUrl, outDir, asked, previous });

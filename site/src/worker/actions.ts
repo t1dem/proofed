@@ -27,12 +27,20 @@ export const AUDIENCE = "proofed";
 // Every refusal looks the same: a caller learns nothing about which check it failed.
 const refuse = () => Response.json({ error: "unauthorized" }, { status: 401 });
 
-export async function handleActionsToken(request: Request, env: Env) {
+// The repository whose Actions job sent this request, from the job's OIDC token; undefined for anyone else.
+export async function jobRepo(request: Request) {
   const jwt = /^Bearer\s+(\S+)$/i.exec(request.headers.get("authorization") ?? "")?.[1];
   const claims = jwt ? await verifyActionsToken(jwt, { audience: AUDIENCE, key: actionsKey }) : undefined;
   const repo = claims?.repository;
   const repoId = Number(claims?.repository_id);
-  if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isSafeInteger(repoId) || repoId <= 0) return refuse();
+  if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isSafeInteger(repoId) || repoId <= 0) return undefined;
+  return { repo, repoId };
+}
+
+export async function handleActionsToken(request: Request, env: Env) {
+  const job = await jobRepo(request);
+  if (!job) return refuse();
+  const { repo, repoId } = job;
 
   try {
     const installation = await appRequest<{ id: number }>(env, "GET", `/repos/${repo}/installation`);

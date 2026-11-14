@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { askClaude } from "./claude.ts";
 import { findReport, setStatus, upsertComment } from "./github.ts";
+import { live } from "./live.ts";
 import { DEFAULT_FIXER, describeFixer, type Fixer } from "./models.ts";
 import { changedFiles, ctx, env, pickScenarios, publish, readEvent, runAll } from "./pipeline.ts";
 import { pushHead } from "./push.ts";
@@ -64,6 +65,9 @@ if (repo) {
   await upsertComment(repo, prNumber, withLine(body, `⏳ **Claude is working on a fix** with ${describeFixer(fixer)}. [Follow along](${runUrl})`));
   await setStatus(repo, git("rev-parse", "HEAD"), "pending", "Claude is fixing, Kane will re-check", runUrl);
 }
+// The dashboard follows along: which attempt it is, what's being done, and Kane's re-check.
+live.start({ kind: "fix", pr: prNumber, sha: git("rev-parse", "HEAD"), runUrl });
+live.track(scenariosFor(data.failures.map((f) => f.id)));
 
 function prompt(failures: FailureData[], feedback: string) {
   const diff = git("diff", `${base}...HEAD`).slice(0, 40_000);
@@ -106,6 +110,7 @@ function askFixer(text: string) {
 
 // Claude couldn't run at all: put the original report back, untick the box, and say why.
 async function restoreReport(note: string) {
+  await live.end();
   if (!repo || !prNumber) return;
   const box = `- [ ] **${FIX_BOX}**`;
   const original = body.replace(`- [x] **${FIX_BOX}**`, box);
@@ -161,6 +166,7 @@ let attempt = 0;
 while (!fixed && attempt < MAX_ATTEMPTS) {
   attempt++;
   console.log(`\n=== Attempt ${attempt}: asking ${fixer.model} (${fixer.effort}) about ${failures.map((f) => f.name).join(", ")}`);
+  live.fix({ attempt, of: MAX_ATTEMPTS, doing: "writing", ...fixer, tries: [...tries] });
   const answer = askFixer(prompt(failures, feedback));
   if (!answer.ok) {
     console.log(`Claude Code couldn't run: ${answer.message}`);
@@ -176,6 +182,7 @@ while (!fixed && attempt < MAX_ATTEMPTS) {
     tries.push({ summary, result: "No change to the code." });
     continue;
   }
+  live.fix({ doing: "building" });
   try {
     execSync(buildCommand, { stdio: "pipe" });
   } catch (e) {
@@ -185,6 +192,7 @@ while (!fixed && attempt < MAX_ATTEMPTS) {
     continue;
   }
 
+  live.fix({ doing: "checking" });
   const stop = await serve();
   try {
     lastResults = await runAll(scenariosFor(failures.map((f) => f.id)), `${outDir}/attempt-${attempt}`);
@@ -206,6 +214,7 @@ if (!fixed) {
     await restoreReport(`Claude tried ${attempt} times without a change that builds. Last note: ${feedback.split("\n")[0]}`);
     process.exit(1);
   }
+  await live.end();
   await publish({
     repo, pr: prNumber, sha: git("rev-parse", "HEAD"), results: lastResults, skipped: [], runUrl, outDir, asked, previous: data,
     fix: { status: "gave-up", attempts: attempt, summary, ...fixer, tries },
@@ -219,6 +228,7 @@ const changes = git("diff", "--numstat", "HEAD").split("\n").filter(Boolean).map
   return { file, added: Number(added) || 0, removed: Number(removed) || 0 };
 });
 const names = data.failures.map((f) => f.name).join(", ");
+live.fix({ doing: "pushing", tries: [...tries] });
 git("-c", "user.name=Claude", "-c", "user.email=noreply@anthropic.com", "commit", "-am",
   `Fix ${names}\n\n${summary}\n\nWritten by Claude Code from a Proofed report; Kane re-ran the scenario in Chrome and it passes.\n\nFixed-by: ${fixer.model} (${fixer.effort} effort)`);
 const asApp = await pushHead(branch);
@@ -235,6 +245,7 @@ const missing = final.filter((s) => !known.has(s.id));
 console.log(`Final check: ${final.length - missing.length} result(s) from the last attempt, ${missing.length} to run.`);
 let ran: ScenarioResult[] = [];
 if (missing.length > 0) {
+  live.fix({ doing: "checking" });
   const stop = await serve();
   try {
     ran = await runAll(missing, `${outDir}/final`);
@@ -248,6 +259,7 @@ const repoUrl = repo && `https://github.com/${repo.owner}/${repo.name}`;
 // The app's push has started a check of this commit, which skips Kane when the report is already
 // about it (mode.ts). It waits for this job to end, since the workflow's concurrency doesn't let that
 // push cancel a run, so the report published here is there by the time it looks.
+await live.end();
 const broken = await publish({
   repo, pr: prNumber, sha, results, skipped, runUrl, outDir, asked, previous: data,
   fix: {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import type { PullDetail, PullView } from "../worker/runs";
 
 export class SignedOut extends Error {}
@@ -96,13 +97,18 @@ export function useLoad<T>(path: string, refreshMs?: number) {
     return data === undefined ? { status: "loading" } : { status: "ok", data };
   };
   const [state, setState] = useState<Load<T>>(fromCache);
-  const reload = useCallback(() => {
-    fetchInto<T>(path).catch((e: unknown) =>
-      setState((before) =>
-        e instanceof SignedOut ? { status: "signed-out" } : before.status === "ok" ? before : { status: "error", message: message(e) },
+  // Resolves once the answer is in (pull to refresh waits on it).
+  const reload = useCallback(
+    () =>
+      fetchInto<T>(path).then(
+        () => {},
+        (e: unknown) =>
+          setState((before) =>
+            e instanceof SignedOut ? { status: "signed-out" } : before.status === "ok" ? before : { status: "error", message: message(e) },
+          ),
       ),
-    );
-  }, [path]);
+    [path],
+  );
 
   useEffect(() => {
     setState(fromCache());
@@ -127,29 +133,51 @@ export function useLoad<T>(path: string, refreshMs?: number) {
   return [state, reload] as const;
 }
 
-export type Route = { page: "inbox" } | { page: "settings" } | { page: "pull"; repo: string; pr: number };
+// Opened from the home screen, as an app: no browser around it, so no browser gestures either.
+export const installed = () => matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone === true;
 
-function parseRoute(pathname: string): Route {
+// `scenario` (a pull request's tab, by name) rides in the hash, so the inbox's squares can open one.
+export type Route = { page: "inbox" } | { page: "settings" } | { page: "pull"; repo: string; pr: number; scenario?: string };
+
+function parseRoute({ pathname, hash }: Location): Route {
   const [, , first, second, third] = pathname.split("/");
   if (first === "settings") return { page: "settings" };
-  if (first && second && third && /^\d+$/.test(third)) return { page: "pull", repo: `${first}/${second}`, pr: Number(third) };
+  if (first && second && third && /^\d+$/.test(third)) {
+    const scenario = hash.length > 1 ? decodeURIComponent(hash.slice(1)) : undefined;
+    return { page: "pull", repo: `${first}/${second}`, pr: Number(third), ...(scenario && { scenario }) };
+  }
   return { page: "inbox" };
 }
 
 export const pathOf = (route: Route) =>
-  (route.page === "inbox" ? "/app" : route.page === "settings" ? "/app/settings" : `/app/${route.repo}/${route.pr}`) + location.search;
+  (route.page === "inbox" ? "/app" : route.page === "settings" ? "/app/settings" : `/app/${route.repo}/${route.pr}`) +
+  location.search +
+  (route.page === "pull" && route.scenario ? `#${encodeURIComponent(route.scenario)}` : "");
+
+// The page change as a view transition where the browser has them: what both pages show (a pull
+// request's title) moves from one place to the other instead of blinking.
+export function transition(change: () => void) {
+  if (!document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) return change();
+  document.startViewTransition(() => flushSync(change));
+}
+
+// The name that pairs a pull request's title in the inbox with the one on its page.
+export const titleName = (pull: { repo: string; pr: number }) => `pr-${pull.repo}-${pull.pr}`.replace(/[^\w-]/g, "-");
 
 export function useRoute() {
-  const [route, setRoute] = useState(() => parseRoute(location.pathname));
+  const [route, setRoute] = useState(() => parseRoute(location));
   useEffect(() => {
-    const onPop = () => setRoute(parseRoute(location.pathname));
+    const onPop = () => transition(() => setRoute(parseRoute(location)));
     addEventListener("popstate", onPop);
     return () => removeEventListener("popstate", onPop);
   }, []);
   const go = useCallback((next: Route) => {
     history.pushState(null, "", pathOf(next));
-    setRoute(next);
-    scrollTo(0, 0);
+    transition(() => {
+      setRoute(next);
+      // At once: the page's smooth scrolling (index.css) would roll the new page up after it appears.
+      scrollTo({ top: 0, behavior: "instant" });
+    });
   }, []);
   return [route, go] as const;
 }
@@ -165,14 +193,15 @@ export function ago(ts: number) {
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 type Asked = "sending" | { error: string };
-export type Ask = (pull: { repo: string; pr: number }, action: "fix" | "rerun") => void;
+// "check": Kane checks `what`, as a "/proofed <what to check>" comment would have it.
+export type Ask = (pull: { repo: string; pr: number }, action: "fix" | "rerun" | "check", what?: string) => void;
 
 // "Fix with Claude" and "Run again": Proofed comments /proofed on the pull request for the user,
 // and the workflow takes it from there. The pull request turns "running" (or "fixing") on screen at
 // once; the server keeps that state until the workflow reports.
 export function useAsk(reload: () => void) {
   const [asked, setAsked] = useState<Record<string, Asked | undefined>>({});
-  const ask: Ask = (pull, action) => {
+  const ask: Ask = (pull, action, what) => {
     const key = `${pull.repo}#${pull.pr}`;
     const set = (value: Asked | undefined) => setAsked((all) => ({ ...all, [key]: value }));
     const detail = `/api/pulls/${pull.repo}/${pull.pr}`;
@@ -181,7 +210,7 @@ export function useAsk(reload: () => void) {
     mutate<PullView[]>("/api/pulls", (all) => all.map((p) => (same(p) ? { ...p, state } : p)));
     mutate<PullDetail>(detail, (d) => ({ ...d, pull: { ...d.pull, state } }));
     set("sending");
-    api(`${detail}/${action}`, { method: "POST" }).then(
+    api(`${detail}/${action}`, { method: "POST", ...(what && { body: JSON.stringify({ what }) }) }).then(
       () => set(undefined),
       (e: unknown) => set({ error: message(e) }),
     ).finally(() => {

@@ -1,6 +1,7 @@
 // What the dashboard knows about a pull request beyond the comment's headline: the run file the
 // action commits next to its clips (see src/runfile.ts at the repo root). The webhook reads it
 // when the comment that names it arrives.
+import { summarize, type Live, type LiveSummary } from "../../../src/livefile";
 import { readRunKey, RUN_FILE, type RunFile, type RunFix, type RunScenario } from "../../../src/runfile";
 import { gh } from "./github";
 import type { Env } from "./index";
@@ -25,6 +26,8 @@ export type PullView = {
   fix?: Pick<RunFix, "status" | "model" | "effort" | "commit"> & { attempts: number };
   // The repo's workflow is switched off: nothing would answer "Fix with Claude" or "Run again". Set by the API.
   paused?: boolean;
+  // Where the run is now, while Kane or Claude is at work and the action reports it (src/live.ts).
+  live?: LiveSummary;
 };
 
 const CLIPS_BRANCH = "proofed-clips";
@@ -73,6 +76,8 @@ type ReportRow = {
 
 // A run that never reports (the job failed before Kane started) stops showing as on its way after this.
 const ASK_LASTS = 30 * 60_000;
+// A live state older than this is a run that died without reporting, so it isn't shown (see live.ts).
+export const LIVE_LASTS = 15 * 60_000;
 
 export async function markAsked(env: Env, repo: string, pr: number, action: "fix" | "rerun") {
   await env.DB.prepare("UPDATE reports SET asked = ?3, asked_at = ?4 WHERE repo = ?1 AND pr = ?2").bind(repo, pr, action, Date.now()).run();
@@ -103,12 +108,14 @@ function toRun(row: RunRow): Run {
   return { ...file, scenarios, key: row.key, at: row.created_at };
 }
 
-function toPull(report: ReportRow, latest: Run | undefined): PullView {
+function toPull(report: ReportRow, latest: Run | undefined, live?: Live): PullView {
+  const state = stateOf(report);
   return {
     repo: report.repo,
     pr: report.pr,
     title: report.title,
-    state: stateOf(report),
+    state,
+    ...(live && (state === "running" || state === "fixing") && { live: summarize(live) }),
     headline: report.headline,
     url: report.url,
     updatedAt: report.updated_at,
@@ -131,7 +138,7 @@ export async function listPulls(env: Env, repos: string[]): Promise<PullView[]> 
   const names = repos.slice(0, 90); // D1 takes at most 100 bound values
   const marks = names.map((_, i) => `?${i + 1}`).join(", ");
   const since = Date.now() - INBOX_DAYS * 86_400_000;
-  const [reports, runs] = await Promise.all([
+  const [reports, runs, live] = await Promise.all([
     env.DB.prepare(`SELECT * FROM reports WHERE repo IN (${marks}) AND closed = 0 AND updated_at > ?${names.length + 1} ORDER BY updated_at DESC LIMIT 200`)
       .bind(...names, since)
       .all<ReportRow>(),
@@ -141,9 +148,14 @@ export async function listPulls(env: Env, repos: string[]): Promise<PullView[]> 
     )
       .bind(...names, since)
       .all<RunRow>(),
+    env.DB.prepare(`SELECT repo, pr, data FROM live WHERE repo IN (${marks}) AND updated_at > ?${names.length + 1}`)
+      .bind(...names, Date.now() - LIVE_LASTS)
+      .all<{ repo: string; pr: number; data: string }>(),
   ]);
-  const latest = new Map(runs.results.map((r) => [`${r.repo}#${r.pr}`, toRun(r)]));
-  return reports.results.map((r) => toPull(r, latest.get(`${r.repo}#${r.pr}`)));
+  const key = (r: { repo: string; pr: number }) => `${r.repo}#${r.pr}`;
+  const latest = new Map(runs.results.map((r) => [key(r), toRun(r)]));
+  const going = new Map(live.results.map((r) => [key(r), JSON.parse(r.data) as Live]));
+  return reports.results.map((r) => toPull(r, latest.get(key(r)), going.get(key(r))));
 }
 
 export type PullDetail = { pull: PullView; runs: Run[] };

@@ -1,6 +1,7 @@
 import { handleActionsToken } from "./actions";
 import { handleApi } from "./api";
 import { callback, login, logout } from "./auth";
+import { handleLivePost } from "./live";
 import type { AppEnv } from "./github";
 import { handleWebhook } from "./webhook";
 
@@ -28,6 +29,13 @@ export default {
       return handleActionsToken(request, env).catch((e: unknown) => {
         console.error(pathname, e);
         return Response.json({ error: "Something went wrong talking to GitHub. Try again." }, { status: 502 });
+      });
+    }
+    // The action reporting a run as it goes (src/live.ts at the repo root), with the same kind of token.
+    if ((pathname === "/api/actions/live" || pathname === "/api/actions/live/frame") && request.method === "POST") {
+      return handleLivePost(request, env).catch((e: unknown) => {
+        console.error(pathname, e);
+        return Response.json({ error: "Couldn't keep that." }, { status: 500 });
       });
     }
     if (pathname.startsWith("/api/")) {

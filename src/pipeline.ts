@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { publishClips, repoFromEnv, setStatus, upsertComment, type Repo } from "./github.ts";
+import { live } from "./live.ts";
 import { crashResult, findCrashes } from "./precheck.ts";
 import { buildReport, type ClipLinks, type FixNote, type ReportData, type Written } from "./report.ts";
 import { nothingAsked } from "./requests.ts";
@@ -56,6 +57,7 @@ export function pickScenarios({ changed, only, rev }: { changed?: string[]; only
 export async function runAll(scenarios: Scenario[], outDir: string, concurrency = Number(process.env.PROOFED_CONCURRENCY) || 3) {
   const baseUrl = env("PROOFED_URL");
   const urlOf = (s: Scenario) => new URL(s.url, baseUrl).href;
+  live.track(scenarios);
   const checking = Date.now();
   const crashes = await findCrashes([...new Set(scenarios.map(urlOf))], outDir);
   const checkSeconds = Math.round((Date.now() - checking) / 1000);
@@ -67,7 +69,9 @@ export async function runAll(scenarios: Scenario[], outDir: string, concurrency 
       const crash = crashes.get(urlOf(scenario));
       if (crash) {
         console.log(`✗ ${scenario.name}: ${urlOf(scenario)} crashed while loading (${crash.error}); Kane not run`);
-        results[i] = { ...crashResult(scenario, crash), seconds: checkSeconds };
+        const result = crashResult(scenario, crash);
+        results[i] = { ...result, seconds: checkSeconds };
+        live.scenario(scenario.id, { status: result.outcome });
         continue;
       }
       console.log(`▶ ${scenario.name}`);
@@ -79,6 +83,7 @@ export async function runAll(scenarios: Scenario[], outDir: string, concurrency 
         accessKey: process.env.LT_ACCESS_KEY,
       });
       results[i] = { ...result, seconds: Math.round((Date.now() - started) / 1000) };
+      live.scenario(scenario.id, { status: result.outcome });
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, scenarios.length) }, worker));
@@ -118,7 +123,7 @@ function runFile({ sha, results, skipped, runUrl, fix }: PublishInput, clips: Ma
       steps: r.steps
         .filter((s) => s.status !== "running" && s.remark)
         .slice(-30)
-        .map((s) => ({ remark: s.remark.slice(0, 200), ...(s.status === "failed" && { failed: true }) })),
+        .map((s) => ({ remark: s.remark.slice(0, 200), ...(s.status === "failed" && { failed: true }), ...(s.at !== undefined && { at: s.at }) })),
       clip: clips.get(r.scenario.id),
       credits: r.end?.credits_consumed,
       seconds: r.seconds,
