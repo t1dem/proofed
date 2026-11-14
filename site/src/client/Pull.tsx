@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent, type React
 import { modelLabel } from "../worker/models";
 import { NOTHING_CHECKED } from "../../../src/runfile";
 import type { PullDetail, PullView, Run, RunScenario } from "../worker/runs";
-import { ago, titleName, useLoad, type Ask, type Route, type useAsk } from "./lib";
+import { ago, movingName, titleName, useLoad, type Ask, type Route, type useAsk } from "./lib";
 import { LiveRun } from "./Live";
 import { Backdrop, bone, focus, iconButton, kindOf, Link, link, Mark, marks, MobileBar, outline, PageTitle, panel, popover, useSheetDrag, plain, Segmented, sha7, soft, solid, useDismiss } from "./ui";
 
@@ -692,7 +692,7 @@ export function Pull({ repo, pr, scenario, listed, go, asked, ask }: PullProps) 
               <Mark kind={kind} size={18} />
             </span>
           )}
-          <span className="pr-title min-w-0" style={{ viewTransitionName: titleName({ repo, pr }) }}>
+          <span className="pr-title min-w-0" data-title={titleName({ repo, pr })} style={{ viewTransitionName: movingName({ repo, pr }) }}>
             {pull?.title ?? "Pull request"} <span className="font-normal text-faint">#{pr}</span>
           </span>
         </span>
