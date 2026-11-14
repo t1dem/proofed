@@ -94,7 +94,7 @@ test("a pass where nothing was checked isn't counted as one", () => {
 
 test("a page that crashed on load shows the browser's error, not Kane's", () => {
   const body = buildReport({
-    sha: "abc1234def", results: [crashResult(failed.scenario, "TypeError: Cannot read properties of null (reading '1')")],
+    sha: "abc1234def", results: [crashResult(failed.scenario, { error: "TypeError: Cannot read properties of null (reading '1')" })],
     skipped: [], clips: new Map(), fixEnabled: true,
   });
   assert.match(body, /> The page is blank: it crashed while loading, before anything could be checked\.\n\n\*\*Browser console error:\*\* `TypeError: Cannot read properties of null \(reading '1'\)`/);
@@ -161,9 +161,9 @@ test("a PR description whose check failed is reported as before", () => {
   assert.equal(readReportData(body)?.failures[0]?.id, "asked-in-description");
 });
 
-test("after a fix of a page that crashed on load, the Before side has the browser's error instead of a blank still", () => {
+test("after a fix of a page that crashed on load before screenshots, the Before side has only the browser's error", () => {
   const raw = "https://github.com/o/r/raw/proofed-clips/pr-1";
-  const crash = crashResult(failed.scenario, "TypeError: Cannot read properties of null (reading '1') | x");
+  const crash = crashResult(failed.scenario, { error: "TypeError: Cannot read properties of null (reading '1') | x" });
   const failing = buildReport({ sha: "1111111aaaa", results: [crash], skipped: [], clips: new Map(), fixEnabled: true });
   const body = buildReport({
     sha: "9f8e7d6c5b", results: [passed], skipped: [], fixEnabled: true, fix, previous: readReportData(failing),
@@ -175,4 +175,64 @@ test("after a fix of a page that crashed on load, the Before side has the browse
     table[0]!,
     /^\| ✗ The page is blank: it crashed while loading, before anything could be checked\.<br><br>`TypeError: Cannot read properties of null \(reading '1'\) \\\| x` \| <a href="[^"]+\/b\/promo\.mp4"><img src="[^"]+\/b\/promo\.jpg" width="360"[^>]*><\/a><br>✓ Passes\. \|$/,
   );
+});
+
+test("a page that crashed on load shows its screenshot, and after a fix the before/after has a picture on both sides", () => {
+  const raw = "https://github.com/o/r/raw/proofed-clips/pr-1";
+  const crash = crashResult(failed.scenario, { error: "TypeError: Cannot read properties of null (reading '1')", screenshot: "/tmp/crash-0.jpg" });
+  assert.deepEqual(crash.clip, { jpg: "/tmp/crash-0.jpg" });
+  const failing = buildReport({
+    sha: "1111111aaaa", results: [crash], skipped: [], fixEnabled: true,
+    clips: new Map([["promo", { jpg: `${raw}/a/promo.jpg` }]]),
+  });
+  assert.match(
+    failing,
+    /> The page is blank[^\n]*\n\n<img src="[^"]+\/a\/promo\.jpg" width="720" alt="What a user sees on opening the page">\n\n<sub>This is what a user sees on opening `\/`\.<\/sub>\n\n\*\*Browser console error:\*\*/,
+  );
+  assert.doesNotMatch(failing, /Watch as video|Kane's run/);
+  assert.deepEqual(readReportData(failing)?.failures[0]?.clip, { jpg: `${raw}/a/promo.jpg` });
+
+  const body = buildReport({
+    sha: "9f8e7d6c5b", results: [passed], skipped: [], fixEnabled: true, fix, previous: readReportData(failing),
+    clips: new Map([["promo", { gif: `${raw}/b/promo.gif`, mp4: `${raw}/b/promo.mp4`, jpg: `${raw}/b/promo.jpg` }]]),
+  });
+  const table = /\| Before[^\n]*\n\|---\|---\|\n((?:\|[^\n]*\n?)+)/.exec(body)?.[1]?.trim().split("\n") ?? [];
+  assert.equal(table.length, 2);
+  assert.match(table[0]!, /^\| <img src="[^"]+\/a\/promo\.jpg" width="360" alt="What a user sees on opening the page"> \| <a href="[^"]+\/b\/promo\.mp4"><img src="[^"]+\/b\/promo\.jpg"/);
+  assert.match(table[1]!, /^\| ✗ The page is blank[^|]*<br><br>`TypeError[^|]*\| ✓ Passes\. \|$/);
+});
+
+test("on the setup PR, the scenarios Claude wrote are listed with their clips, and the dropped ones say why", () => {
+  const raw = "https://github.com/o/r/raw/proofed-clips/pr-1/abc";
+  const home: ScenarioResult = { ...passed, scenario: { ...passed.scenario, id: "home", file: ".proofed/scenarios/home.md", name: "Home page loads" } };
+  const plans: ScenarioResult = {
+    ...passed,
+    scenario: { id: "pricing-plans", file: ".proofed/scenarios/pricing-plans.md", name: "Pricing lists three plans", paths: [], url: "/pricing", objective: "Open Pricing.\nCheck that three plans are listed." },
+  };
+  const body = buildReport({
+    sha: "9f8e7d6c5b", results: [home, plans], skipped: [], fixEnabled: true,
+    clips: new Map([["pricing-plans", { gif: `${raw}/pricing-plans.gif`, mp4: `${raw}/pricing-plans.mp4` }], ["home", { gif: `${raw}/home.gif` }]]),
+    written: {
+      status: "written", kept: [{ id: "pricing-plans", about: "The pricing page lists the three plans." }], commit: "9f8e7d6c5b", commitUrl: "https://github.com/o/r/commit/9f8e7d6c5b",
+      dropped: [{ name: "Sign up", why: "The page says <Error>: sign-in needed." }],
+      credits: 7,
+    },
+  });
+  assert.match(body, /^<!-- proofed -->\n### Proofed\n\nAll 2 affected scenarios pass in a real browser\.\n\n\*\*Claude wrote a scenario for this app\*\*, and Proofed added it to this PR in \[`9f8e7d6`\]/);
+  assert.match(body, /They are plain Markdown in `\.proofed\/scenarios\/`/);
+  assert.match(body, /\*\*✓ Pricing lists three plans\*\* · `pricing-plans\.md`<br>The pricing page lists the three plans\.\n\n<img src="[^"]+\/pricing-plans\.gif"/);
+  assert.match(body, /Dropped, since Kane didn't see it pass:\n\n- \*\*Sign up\*\*: The page says &lt;Error>: sign-in needed\./);
+  // Shown once, above; the stock scenario stays where passes go.
+  assert.equal(body.split("pricing-plans.gif").length, 2);
+  assert.match(body, /<summary>✓ Passed: Home page loads<\/summary>/);
+  assert.deepEqual(readReportData(body)?.failures, []);
+  // The dropped scenario ran too, so its credits count.
+  assert.match(body, /Run by Kane CLI on 9f8e7d6 · 7 credits/);
+});
+
+test("on the setup PR, Claude not getting to write scenarios is one line", () => {
+  const body = buildReport({ sha: "9f8e7d6c5b", results: [passed], skipped: [], clips: new Map(), fixEnabled: true, written: { status: "failed" } });
+  assert.match(body, /The affected scenario passes in a real browser\.\n\n[^\n]*scenarios couldn't be written this time\.\n\n/);
+  const none = buildReport({ sha: "9f8e7d6c5b", results: [passed], skipped: [], clips: new Map(), fixEnabled: true, written: { status: "written", kept: [], dropped: [] } });
+  assert.match(none, /Claude didn't find a flow it could write a scenario for without guessing, so none were added\./);
 });

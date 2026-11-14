@@ -1,8 +1,7 @@
 import { MARKER } from "./github.ts";
-import { runMarker } from "./runfile.ts";
+import { BLANK_PAGE, runMarker } from "./runfile.ts";
 import type { Step } from "./kane.ts";
 import { describeFixer, type Fixer } from "./models.ts";
-import { BLANK_PAGE } from "./precheck.ts";
 import { nothingAsked } from "./requests.ts";
 import { unchecked, type ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
@@ -39,6 +38,15 @@ export type FixNote = Fixer & {
   tries?: FixAttempt[];
   changes?: FileChange[];
 };
+
+// The setup PR's first check (generate.ts): the scenarios Claude wrote that Kane saw pass and Proofed
+// committed, each with Claude's line on what it checks, and the ones it dropped. "failed": Claude
+// didn't get as far as writing any, or the push failed. `credits`: what Kane spent on the scenarios that
+// weren't kept, which the results don't carry but the run cost all the same.
+export type Written = (
+  | { status: "written"; kept: { id: string; about: string }[]; dropped: { name: string; why: string }[]; commit?: string; commitUrl?: string }
+  | { status: "failed" }
+) & { credits?: number };
 
 const DATA_RE = /<!-- proofed:data (.*?) -->/s;
 export const FIX_BOX = "Fix with Claude";
@@ -99,6 +107,15 @@ function clip(links: ClipLinks | undefined, width = 720) {
   return `\n\n<img src="${links.gif}" width="${width}" alt="Kane's run in the browser">${video}`;
 }
 
+// Only a still and no recording: the screenshot of a page that crashed on load (precheck.ts).
+const isScreenshot = (links: ClipLinks | undefined) => !!links?.jpg && !links.gif && !links.mp4;
+const SCREENSHOT_ALT = "What a user sees on opening the page";
+
+function screenshot(links: ClipLinks | undefined, url: string) {
+  if (!isScreenshot(links)) return "";
+  return `\n\n<img src="${links!.jpg}" width="720" alt="${SCREENSHOT_ALT}">\n\n<sub>This is what a user sees on opening ${code(url)}.</sub>`;
+}
+
 // The before/after table needs the video and a picture; the GIF only stands in for a missing still.
 function storedClip(links: ClipLinks | undefined): ClipLinks | undefined {
   if (!links?.mp4 && !links?.jpg && !links?.gif) return undefined;
@@ -108,7 +125,7 @@ function storedClip(links: ClipLinks | undefined): ClipLinks | undefined {
 function still(links: ClipLinks | undefined) {
   const src = links?.jpg ?? links?.gif;
   if (!src) return "";
-  const img = `<img src="${src}" width="360" alt="Kane's run in the browser">`;
+  const img = `<img src="${src}" width="360" alt="${isScreenshot(links) ? SCREENSHOT_ALT : "Kane's run in the browser"}">`;
   return links?.mp4 ? `<a href="${links.mp4}">${img}</a>` : img;
 }
 
@@ -144,11 +161,33 @@ function whatChanged(fix: FixNote) {
   return text ? `\n\n**What changed:** ${text}` : "";
 }
 
+function writtenSection(written: Written, results: ScenarioResult[], clips: Map<string, ClipLinks>) {
+  if (written.status === "failed") return "Proofed tried to add scenarios for this app's main flows, but the scenarios couldn't be written this time.";
+  const kept = written.kept.flatMap(({ id, about }) => results.filter((r) => r.scenario.id === id).map((r) => ({ r, about })));
+  const dropped = written.dropped.map((d) => `- **${html(d.name)}**: ${html(oneLine(d.why, 200))}`).join("\n");
+  if (kept.length === 0) {
+    return dropped
+      ? `Claude wrote ${written.dropped.length === 1 ? "a scenario" : `${written.dropped.length} scenarios`} for this app, but Kane didn't see ${written.dropped.length === 1 ? "it" : "any of them"} pass, so none were added:\n\n${dropped}`
+      : "Claude didn't find a flow it could write a scenario for without guessing, so none were added.";
+  }
+  const folder = kept[0]!.r.scenario.file.split("/").slice(0, -1).join("/");
+  const commit = written.commit ? ` in ${commitRef(written.commit, written.commitUrl)}` : "";
+  const intro =
+    `**Claude wrote ${kept.length === 1 ? "a scenario" : `${kept.length} scenarios`} for this app**, and Proofed added ${kept.length === 1 ? "it" : "them"} to this PR${commit}. ` +
+    `Kane ran each one in Chrome and saw it pass. They are plain Markdown in \`${folder}/\`: edit or delete them like any other file.`;
+  const items = kept.map(
+    ({ r, about }) => `**✓ ${r.scenario.name}** · \`${r.scenario.file.split("/").at(-1)}\`<br>${html(oneLine(about, 200))}${clip(clips.get(r.scenario.id), 560)}`,
+  );
+  const droppedNote = dropped ? `\n\nDropped, since Kane didn't see ${written.dropped.length === 1 ? "it" : "them"} pass:\n\n${dropped}` : "";
+  return `${intro}\n\n${items.join("\n\n")}${droppedNote}`;
+}
+
 type Repaired = { before: FailureData; after: ScenarioResult };
 
 // The commit, the fixer and what changed are said once, above all the repaired scenarios.
-// A page that crashed on load has no clip, only the browser's error (precheck.ts keeps it as the diagnosis).
-// With a still on one side only, it goes above that side's text instead of in a half-empty row.
+// A page that crashed on load has its screenshot as the still and the browser's error under it
+// (precheck.ts keeps the error as the diagnosis). Reports from before screenshots have only the error;
+// with a still on one side only, it goes above that side's text instead of in a half-empty row.
 function beforeAfter({ before, after }: Repaired, beforeSha: string, sha: string, links: ClipLinks | undefined) {
   const stills = [still(before.clip), still(links)];
   const confirmed = after.end?.summary?.trim() || after.end?.reason?.trim() || "Passes.";
@@ -186,6 +225,7 @@ type ReportInput = {
   repoUrl?: string;
   // The folder on proofed-clips that holds this report's clips and run file, for the dashboard.
   runKey?: string;
+  written?: Written;
 };
 
 type Fit = { stepList: boolean; storedSteps: number };
@@ -208,7 +248,7 @@ export function buildReport(input: ReportInput) {
 }
 
 function compose(
-  { sha, results: all, skipped, clips, runUrl, fixEnabled, fix, asked, previous, repoUrl, runKey }: ReportInput,
+  { sha, results: all, skipped, clips, runUrl, fixEnabled, fix, asked, previous, repoUrl, runKey, written }: ReportInput,
   { stepList: withSteps, storedSteps }: Fit,
 ) {
   const unasked = all.filter(nothingAsked);
@@ -217,7 +257,7 @@ function compose(
   const errored = results.filter((r) => r.outcome === "error");
   const unsure = results.filter((r) => r.outcome === "unsure");
   const passed = results.filter((r) => r.outcome === "passed");
-  const credits = all.reduce((sum, r) => sum + (r.end?.credits_consumed ?? 0), 0);
+  const credits = all.reduce((sum, r) => sum + (r.end?.credits_consumed ?? 0), written?.credits ?? 0);
   const repaired: Repaired[] =
     fix?.status === "fixed" && previous
       ? passed.flatMap((after) => {
@@ -226,6 +266,7 @@ function compose(
         })
       : [];
   const isRepaired = (r: ScenarioResult) => repaired.some((x) => x.after === r);
+  const isWritten = (r: ScenarioResult) => written?.status === "written" && written.kept.some((k) => k.id === r.scenario.id);
 
   const headline =
     results.length === 0
@@ -261,6 +302,8 @@ function compose(
     sections.push([...failed, ...errored, ...unsure, ...passed].map((r) => `- ${mark(r)} ${r.scenario.name}${tag(r)}`).join("\n"));
   }
 
+  if (written) sections.push(writtenSection(written, passed, clips));
+
   if (fix?.status === "fixed") {
     const commit = fix.commit ? ` in ${commitRef(fix.commit, fix.commitUrl)}` : "";
     sections.push(
@@ -287,7 +330,7 @@ function compose(
         ? `\n\n**What Kane saw:** ${diagnosis}`
         : "";
     sections.push(
-      `#### ✗ ${r.scenario.name}\n\n${quote(reason)}${clip(clips.get(r.scenario.id))}` +
+      `#### ✗ ${r.scenario.name}\n\n${quote(reason)}${clip(clips.get(r.scenario.id)) || screenshot(clips.get(r.scenario.id), r.scenario.url)}` +
         seen +
         (withSteps ? stepList(r.steps) : "") +
         (r.end?.test_url ? `\n\n[Kane's step-by-step report](${r.end.test_url})` : ""),
@@ -318,7 +361,7 @@ function compose(
     );
   }
 
-  const others = passed.filter((r) => !isRepaired(r));
+  const others = passed.filter((r) => !isRepaired(r) && !isWritten(r));
   if (others.length > 0) {
     const items = others.map((r) => `**✓ ${r.scenario.name}**${clip(clips.get(r.scenario.id), 560)}`).join("\n\n");
     sections.push(`<details><summary>✓ Passed: ${others.map((r) => r.scenario.name).join(", ")}</summary>\n\n${items}\n\n</details>`);

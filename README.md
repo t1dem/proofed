@@ -7,7 +7,7 @@ Built for the Kane CLI hackathon, November 2026.
 ## How a PR goes
 
 1. You open a PR. Proofed diffs it against the base branch and picks the scenarios whose `paths` the diff touches.
-2. Each start page is opened once in headless Chrome first. A page that throws while loading and stays blank fails its scenarios right away, with the browser's error, without spending Kane credits. Otherwise each scenario runs in its own headless Chrome. Kane drives the browser; Proofed records the screen over the Chrome DevTools Protocol, since Kane doesn't record video. The clip keeps a moment around each of Kane's clicks and keystrokes and cuts the waiting between them. A cursor shows where Kane clicked, the camera zooms in on the element it's using, and the clip ends on the part of the page the final check was about.
+2. Each start page is opened once in headless Chrome first. A page that throws while loading and stays blank fails its scenarios right away, with the browser's error and a screenshot of what a user sees, without spending Kane credits. Otherwise each scenario runs in its own headless Chrome. Kane drives the browser; Proofed records the screen over the Chrome DevTools Protocol, since Kane doesn't record video. The clip keeps a moment around each of Kane's clicks and keystrokes and cuts the waiting between them. A cursor shows where Kane clicked, the camera zooms in on the element it's using, and the clip ends on the part of the page the final check was about.
 3. The PR gets one comment, edited on every run, with a GIF of each run, a link to the mp4, and Kane's explanation of what went wrong. The commit gets a `Proofed` status.
 4. If Kane decides the test itself is wrong rather than the code, or reports a pass without checking anything on the page, the scenario is flagged as not checked: it doesn't block the merge, and it isn't counted as a pass. Browser hiccups (a screenshot timeout, a closed tab) are retried once and never reported as bugs.
 5. Tick **Fix with Claude**, or comment `/proofed fix`. Claude Code edits the code, the app is rebuilt, and Kane re-runs the broken scenarios. Up to three attempts, each one told why the last failed. Nothing is pushed until a fix passes. The report and the commit (a `Fixed-by:` line) say which model made the fix. The report then shows each repaired scenario before and after: the failing run next to the passing one, and the files the fix changed.
@@ -44,7 +44,7 @@ A scenario without `paths` runs on every PR. Editing a scenario file also runs i
 
 ## Setup
 
-The easy way: sign in at [proofed.neptunescodm.workers.dev](https://proofed.neptunescodm.workers.dev/app), save your keys and install the GitHub App on a repo. Proofed opens a PR with the workflow and a first scenario, and puts the keys into the repo's secrets.
+The easy way: sign in at [proofed.neptunescodm.workers.dev](https://proofed.neptunescodm.workers.dev/app), save your keys and install the GitHub App on a repo. Proofed opens a PR with the workflow and a first scenario, and puts the keys into the repo's secrets. That PR's check then has Claude read the app and write up to five scenarios for its main flows; Kane runs each one, and only the ones it saw pass are committed to the PR. This happens only while `home.md` is the only scenario, and only with a Claude token.
 
 By hand: add `LT_USERNAME` and `LT_ACCESS_KEY` (TestMu: Settings → Keys) and `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) to the repo secrets, then add one workflow. The action checks out the PR, builds and serves the app with your commands, and checks or fixes depending on the event. The whole file, working, is [proofed-demo-store's](https://github.com/t1dem/proofed-demo-store/blob/main/.github/workflows/proofed.yml); the part that matters:
 
@@ -87,4 +87,4 @@ A scenario takes about a minute and 20–30 Kane credits. Proofed only runs the 
 
 ## Code
 
-TypeScript that Node 24 runs directly, no build step. `src/mode.ts` decides what an event asks for, `src/cli.ts` is the PR check, `src/fix.ts` the fix loop, `src/run.ts` one scenario (Chrome, recorder, Kane, clip). `pnpm test` runs the unit tests.
+TypeScript that Node 24 runs directly, no build step. `src/mode.ts` decides what an event asks for, `src/cli.ts` is the PR check, `src/fix.ts` the fix loop, `src/generate.ts` the setup PR's first scenarios, `src/run.ts` one scenario (Chrome, recorder, Kane, clip). `pnpm test` runs the unit tests.

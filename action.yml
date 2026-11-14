@@ -34,7 +34,7 @@ inputs:
     description: TestMu access key (secrets.LT_ACCESS_KEY)
     required: true
   claude-code-oauth-token:
-    description: From `claude setup-token` (secrets.CLAUDE_CODE_OAUTH_TOKEN), for the fixer
+    description: From `claude setup-token` (secrets.CLAUDE_CODE_OAUTH_TOKEN), for the fixer and for the scenarios Claude writes on the setup PR
     default: ""
   vars:
     description: The repo's Actions variables as JSON (pass toJSON(vars) in an expression). Carries settings from the Proofed dashboard, such as PROOFED_MODEL.
@@ -61,7 +61,7 @@ inputs:
 outputs:
   report:
     description: Path to the Markdown report
-    value: ${{ steps.run.outputs.report }}
+    value: ${{ steps.run.outputs.report || steps.generate.outputs.report }}
 
 runs:
   using: composite
@@ -78,6 +78,9 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         PROOFED_FIX: ${{ inputs.fix }}
         PROOFED_VARS: ${{ inputs.vars }}
+        PROOFED_SCENARIOS: ${{ inputs.scenarios }}
+        # Whether there is a Claude token, not the token: this step needs no more.
+        PROOFED_CLAUDE: ${{ inputs.claude-code-oauth-token != '' }}
       run: node "$GITHUB_ACTION_PATH/src/mode.ts"
 
     # The fixer pushes to the PR's branch, so it needs the branch; the check needs the exact commit.
@@ -123,7 +126,7 @@ runs:
         FFMPEG_DIR: ${{ steps.ffmpeg.outputs.dir }}
       run: |
         npm install -g "@testmuai/kane-cli@${{ inputs.kane-version }}" >/dev/null
-        if [ "${{ steps.mode.outputs.mode }}" = fix ]; then npm install -g @anthropic-ai/claude-code >/dev/null; fi
+        if [ "${{ steps.mode.outputs.mode }}" = fix ] || [ "${{ steps.mode.outputs.generate }}" = true ]; then npm install -g @anthropic-ai/claude-code >/dev/null; fi
         if [ -n "$FFMPEG_ARCH" ] && [ ! -x "$FFMPEG_DIR/ffmpeg" ]; then
           case "$FFMPEG_ARCH" in
             x64) sum=bfe8a8fc511530457b528c48d77b5737527b504a3797a9bc4866aeca69c2dffa ;;
@@ -209,7 +212,7 @@ runs:
 
     - name: Run scenarios with Kane
       id: run
-      if: steps.mode.outputs.mode != 'none' && steps.mode.outputs.mode != 'fix'
+      if: steps.mode.outputs.mode != 'none' && steps.mode.outputs.mode != 'fix' && steps.mode.outputs.generate != 'true'
       shell: bash
       env:
         PROOFED_URL: ${{ inputs.url }}
@@ -227,6 +230,35 @@ runs:
       run: |
         echo "report=$PROOFED_OUT/report.md" >> "$GITHUB_OUTPUT"
         node "$GITHUB_ACTION_PATH/src/cli.ts"
+
+    # The setup PR's check, while it holds only the stock scenario (src/mode.ts): Claude writes the first
+    # scenarios, Kane runs them with the stock one, and the ones that pass are pushed to the setup branch.
+    - name: Write scenarios with Claude, run them with Kane
+      id: generate
+      if: steps.mode.outputs.mode == 'check' && steps.mode.outputs.generate == 'true'
+      shell: bash
+      env:
+        PROOFED_URL: ${{ inputs.url }}
+        PROOFED_BUILD: ${{ inputs.build }}
+        PROOFED_SERVE: ${{ inputs.serve }}
+        PROOFED_DIR: ${{ inputs.working-directory }}
+        PROOFED_SCENARIOS: ${{ inputs.scenarios }}
+        PROOFED_HEAD_REF: ${{ steps.mode.outputs.head_ref }}
+        PROOFED_CLAUDE_MODEL: ${{ steps.mode.outputs.model }}
+        PROOFED_CLAUDE_EFFORT: ${{ steps.mode.outputs.effort }}
+        PROOFED_FIX: ${{ inputs.fix }}
+        PROOFED_OUT: ${{ runner.temp }}/proofed
+        LT_USERNAME: ${{ inputs.lt-username }}
+        LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
+        KANE_CLI_CDP_TIMEOUT_MS: "60000"
+        KANE_CLI_CDP_RETRIES: "2"
+        KANE_CLI_USER_AGENT: github-action
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PROOFED_SERVER: ${{ inputs.proofed-url }}
+      run: |
+        echo "report=$PROOFED_OUT/report.md" >> "$GITHUB_OUTPUT"
+        node "$GITHUB_ACTION_PATH/src/generate.ts"
 
     - name: Fix with Claude, verify with Kane
       if: steps.mode.outputs.mode == 'fix'
@@ -260,6 +292,7 @@ runs:
         name: proofed-${{ github.run_attempt }}
         path: |
           ${{ runner.temp }}/proofed/**/clip.mp4
+          ${{ runner.temp }}/proofed/**/crash-*.jpg
           ${{ runner.temp }}/proofed/*.json
           ${{ runner.temp }}/proofed/*.md
         if-no-files-found: ignore

@@ -1,12 +1,12 @@
-// When Proofed is installed on a repo, open a pull request that wires it up: the check workflow,
-// the fix workflow and a first scenario. Build commands are guessed from package.json, and the PR
-// says what was guessed so a human can correct it before merging.
+// When Proofed is installed on a repo, open a pull request that wires it up: the one workflow that
+// checks and fixes, and a first scenario. Build commands are guessed from package.json, and the PR
+// says what was guessed so a human can correct it before merging. The PR's own check then has
+// Claude write scenarios for the app's main flows and adds the ones Kane saw pass (src/generate.ts).
+import { FIRST_SCENARIO, SETUP_BRANCH } from "../../../src/setup";
 import { gh, GitHubError } from "./github";
 
 type Repo = { full_name: string; default_branch?: string };
 export type Commands = { setup: string; cache: string; dir: string; install: string; build: string; serve: string; url: string; notes: string[] };
-
-const BRANCH = "proofed-setup";
 
 async function readFile(token: string, repo: string, path: string) {
   try {
@@ -168,19 +168,14 @@ ${c.cache ? `          cache: ${c.cache}\n` : ""}          lt-username: \${{ sec
           # Settings from the Proofed dashboard, such as the model Claude fixes with.
           vars: \${{ toJSON(vars) }}
 `;
-const firstScenario = `---
-name: Home page loads
-url: /
----
-Open the home page. Check that the main heading is visible and that the page shows no error message.
-`;
-
 const prBody = (repo: string, c: Commands) => `Proofed runs the user flows a pull request touches in real Chrome with Kane CLI, records each run, and posts it on the PR. When a flow breaks, ticking **Fix with Claude** in that comment lets Claude Code fix it; the fix is pushed only after Kane has watched it pass.
 
 This PR adds:
 
 - \`.github/workflows/proofed.yml\`: one workflow. It checks every pull request in Chrome, checks again on a \`/proofed\` comment, and has Claude fix a failure when you tick **Fix with Claude** or comment \`/proofed fix\`. \`/proofed fix opus high\` picks another model for that one fix; the repo's model is set in the dashboard.
 - \`.proofed/scenarios/home.md\`: a first scenario. Add one Markdown file per flow; \`paths\` limits a scenario to PRs that touch those files.
+
+**Proofed will add scenarios to this PR itself.** On this PR's check, Claude reads the app and writes a few for its main flows, Kane runs each one in Chrome, and only the ones Kane saw pass are committed here; the comment below lists them. It needs \`CLAUDE_CODE_OAUTH_TOKEN\`, and happens only while \`home.md\` is the only scenario. They are plain Markdown: edit or delete them before you merge, like any other file.
 
 **Keys.** The checks need three repository secrets: \`LT_USERNAME\`, \`LT_ACCESS_KEY\` (TestMu) and \`CLAUDE_CODE_OAUTH_TOKEN\` (from \`claude setup-token\`). If you saved them at https://proofed.neptunescodm.workers.dev/app, Proofed has already added them; otherwise add them under [Settings → Secrets → Actions](https://github.com/${repo}/settings/secrets/actions).
 
@@ -211,7 +206,7 @@ export async function openSetupPr(token: string, repo: Repo, appSlug: string) {
     base_tree: baseCommit.tree.sha,
     tree: [
       { path: ".github/workflows/proofed.yml", mode: "100644", type: "blob", content: workflow(commands, `${appSlug}[bot]`) },
-      { path: ".proofed/scenarios/home.md", mode: "100644", type: "blob", content: firstScenario },
+      { path: ".proofed/scenarios/home.md", mode: "100644", type: "blob", content: FIRST_SCENARIO },
     ],
   });
   const commit = await gh<{ sha: string }>(token, "POST", `/repos/${name}/git/commits`, {
@@ -221,21 +216,21 @@ export async function openSetupPr(token: string, repo: Repo, appSlug: string) {
   });
 
   try {
-    await gh(token, "POST", `/repos/${name}/git/refs`, { ref: `refs/heads/${BRANCH}`, sha: commit.sha });
+    await gh(token, "POST", `/repos/${name}/git/refs`, { ref: `refs/heads/${SETUP_BRANCH}`, sha: commit.sha });
   } catch (e) {
     if (!(e instanceof GitHubError && e.status === 422)) throw e;
-    await gh(token, "PATCH", `/repos/${name}/git/refs/heads/${BRANCH}`, { sha: commit.sha, force: true });
+    await gh(token, "PATCH", `/repos/${name}/git/refs/heads/${SETUP_BRANCH}`, { sha: commit.sha, force: true });
   }
 
   const pr = await gh<{ html_url: string }>(token, "POST", `/repos/${name}/pulls`, {
     title: "Add Proofed",
-    head: BRANCH,
+    head: SETUP_BRANCH,
     base,
     body: prBody(name, commands),
   }).catch(async (e: unknown) => {
     // A setup PR from an earlier install is still open: it now points at the fresh commit.
     if (e instanceof GitHubError && e.status === 422) {
-      const [open] = await gh<{ html_url: string }[]>(token, "GET", `/repos/${name}/pulls?head=${name.split("/")[0]}:${BRANCH}&state=open`);
+      const [open] = await gh<{ html_url: string }[]>(token, "GET", `/repos/${name}/pulls?head=${name.split("/")[0]}:${SETUP_BRANCH}&state=open`);
       if (open) return open;
     }
     throw e;

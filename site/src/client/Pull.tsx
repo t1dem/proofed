@@ -28,10 +28,13 @@ function verdict({ outcome, reason, suggestion }: RunScenario) {
 }
 
 // The still is what the run ended on, so it's shown as it is; the recording starts on click.
+// A page that crashed on load has no recording, only a screenshot of it (src/precheck.ts).
 function Recording({ clip }: { clip: NonNullable<RunScenario["clip"]> }) {
   const [playing, setPlaying] = useState(false);
   const still = clip.jpg ?? clip.gif;
   const video = clip.mp4 && (playing || !still);
+  const screenshot = !clip.mp4 && !clip.gif;
+  const alt = screenshot ? "What a user sees on opening the page" : "Where Kane's run in the browser ended";
   return (
     <>
       {video ? (
@@ -39,13 +42,14 @@ function Recording({ clip }: { clip: NonNullable<RunScenario["clip"]> }) {
       ) : still ? (
         clip.mp4 ? (
           <button type="button" onClick={() => setPlaying(true)} aria-label="Play the run" className={`block w-full ${focus}`}>
-            <img src={still} alt="Where Kane's run in the browser ended" className="block w-full" />
+            <img src={still} alt={alt} className="block w-full" />
           </button>
         ) : (
-          <img src={still} alt="Where Kane's run in the browser ended" className="block w-full" />
+          <img src={still} alt={alt} className="block w-full" />
         )
       ) : null}
       <div className="flex items-center gap-1 border-t border-edge px-1.5 py-1.5">
+        {screenshot && <span className="min-w-0 px-2 text-[13px] text-dim">What a user sees on opening the page</span>}
         {clip.mp4 && !playing && still && (
           <button type="button" onClick={() => setPlaying(true)} className={`${outline} h-7 border-transparent px-2`}>
             <Play size={14} /> Play the run

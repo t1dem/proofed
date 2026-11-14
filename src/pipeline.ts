@@ -4,7 +4,7 @@ import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { publishClips, repoFromEnv, setStatus, upsertComment, type Repo } from "./github.ts";
 import { crashResult, findCrashes } from "./precheck.ts";
-import { buildReport, type ClipLinks, type FixNote, type ReportData } from "./report.ts";
+import { buildReport, type ClipLinks, type FixNote, type ReportData, type Written } from "./report.ts";
 import { nothingAsked } from "./requests.ts";
 import { runScenario, type ScenarioResult } from "./run.ts";
 import { RUN_FILE, type RunFile } from "./runfile.ts";
@@ -57,7 +57,7 @@ export async function runAll(scenarios: Scenario[], outDir: string, concurrency 
   const baseUrl = env("PROOFED_URL");
   const urlOf = (s: Scenario) => new URL(s.url, baseUrl).href;
   const checking = Date.now();
-  const crashes = await findCrashes([...new Set(scenarios.map(urlOf))]);
+  const crashes = await findCrashes([...new Set(scenarios.map(urlOf))], outDir);
   const checkSeconds = Math.round((Date.now() - checking) / 1000);
   const results: ScenarioResult[] = new Array(scenarios.length);
   let next = 0;
@@ -66,7 +66,7 @@ export async function runAll(scenarios: Scenario[], outDir: string, concurrency 
       const scenario = scenarios[i]!;
       const crash = crashes.get(urlOf(scenario));
       if (crash) {
-        console.log(`✗ ${scenario.name}: ${urlOf(scenario)} crashed while loading (${crash}); Kane not run`);
+        console.log(`✗ ${scenario.name}: ${urlOf(scenario)} crashed while loading (${crash.error}); Kane not run`);
         results[i] = { ...crashResult(scenario, crash), seconds: checkSeconds };
         continue;
       }
@@ -98,6 +98,7 @@ type PublishInput = {
   fix?: FixNote;
   asked?: Scenario[];
   previous?: ReportData;
+  written?: Written;
 };
 
 // The dashboard's copy of the run. Steps are capped like the comment's, so the file stays small.
@@ -135,20 +136,17 @@ function runFile({ sha, results, skipped, runUrl, fix }: PublishInput, clips: Ma
 }
 
 export async function publish(input: PublishInput) {
-  const { repo, pr, sha, results, skipped, runUrl, outDir, fix, asked, previous } = input;
+  const { repo, pr, sha, results, skipped, runUrl, outDir, fix, asked, previous, written } = input;
   const clips = new Map<string, ClipLinks>();
   let runKey: string | undefined;
   if (repo && pr) {
     const prefix = `pr-${pr}/${sha.slice(0, 7)}-${process.env.GITHUB_RUN_ID ?? "local"}`;
-    const files = results.flatMap((r) =>
-      r.clip
-        ? [
-            { id: r.scenario.id, kind: "gif" as const, path: `${prefix}/${r.scenario.id}.gif`, local: r.clip.gif },
-            { id: r.scenario.id, kind: "mp4" as const, path: `${prefix}/${r.scenario.id}.mp4`, local: r.clip.mp4 },
-            { id: r.scenario.id, kind: "jpg" as const, path: `${prefix}/${r.scenario.id}.jpg`, local: r.clip.jpg },
-          ]
-        : [],
-    );
+    const files = results.flatMap(({ scenario: { id }, clip }) => {
+      if (!clip) return [];
+      const file = (kind: keyof ClipLinks, local: string) => ({ id, kind, path: `${prefix}/${id}.${kind}`, local });
+      // A crash's screenshot comes without a video.
+      return [...(clip.mp4 ? [file("gif", clip.gif), file("mp4", clip.mp4)] : []), file("jpg", clip.jpg)];
+    });
     const urls = await publishClips(repo, files);
     for (const f of files) clips.set(f.id, { ...clips.get(f.id), [f.kind]: urls.get(f.path) });
     // In a commit of its own, after the clips: the file holds their links.
@@ -160,7 +158,7 @@ export async function publish(input: PublishInput) {
 
   const repoUrl = repo && `https://github.com/${repo.owner}/${repo.name}`;
   const body = buildReport({
-    sha, results, skipped, clips, runUrl, fixEnabled: process.env.PROOFED_FIX !== "false", fix, asked, previous, repoUrl, runKey,
+    sha, results, skipped, clips, runUrl, fixEnabled: process.env.PROOFED_FIX !== "false", fix, asked, previous, repoUrl, runKey, written,
   });
   writeFileSync(join(outDir, "report.md"), body);
   writeFileSync(join(outDir, "results.json"), JSON.stringify(results, null, 2));
