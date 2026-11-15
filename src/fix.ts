@@ -6,30 +6,35 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { askClaude } from "./claude.ts";
-import { findReport, setStatus, upsertComment } from "./github.ts";
+import { editComment, findReport, setStatus } from "./github.ts";
+import { putBack } from "./guard.ts";
 import { live } from "./live.ts";
 import { DEFAULT_FIXER, describeFixer, type Fixer } from "./models.ts";
-import { changedFiles, ctx, env, pickScenarios, publish, readEvent, runAll } from "./pipeline.ts";
+import { changedFiles, ctx, env, pickScenarios, publish, putReport, readEvent, runAll } from "./pipeline.ts";
 import { pushHead } from "./push.ts";
-import { fixRequested, FIX_BOX, readReportData, type FailureData, type FixAttempt } from "./report.ts";
+import { fixRequested, FIX_BOX, readReportData, WORKING, type FailureData, type FixAttempt } from "./report.ts";
 import { nothingAsked } from "./requests.ts";
 import type { ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
 
 const MAX_ATTEMPTS = 3;
 
-type CommentEvent = { action: string; comment: { body: string }; issue: { number: number; pull_request?: object } };
+type CommentEvent = { action: string; comment: { id: number; body: string }; issue: { number: number; pull_request?: object } };
 const event = readEvent<CommentEvent>();
 const { repo, runUrl, outDir } = ctx();
 // "Fix automatically" (action.yml): the check that just reported goes on here, on its push event.
 const auto = process.env.PROOFED_AUTO === "true";
 const prNumber = auto ? Number(process.env.PROOFED_NUMBER) || undefined : event.issue?.number;
 // A ticked box arrives as an edit of the report itself; "/proofed fix" as a new comment next to it.
+// Either way the fix is of the PR's current report: a box ticked on one a newer report has replaced
+// since (the tick raced the new report) asks for nothing.
 const fromCommand = event.action === "created";
-const report = (auto || fromCommand) && repo && prNumber ? await findReport(repo, prNumber) : undefined;
-const body = (auto || fromCommand ? report?.body : event.comment?.body) ?? "";
+const ticked = !auto && !fromCommand;
+const report = repo && prNumber ? await findReport(repo, prNumber) : undefined;
+const body = (ticked ? event.comment?.body : report?.body) ?? "";
 const data = readReportData(body);
-if (!prNumber || !(auto || event.issue?.pull_request) || !data || data.failures.length === 0 || (!auto && !fromCommand && !fixRequested(body))) {
+const replaced = ticked && !!repo && report?.id !== event.comment?.id;
+if (!prNumber || !(auto || event.issue?.pull_request) || !data || data.failures.length === 0 || (ticked && !fixRequested(body)) || replaced) {
   console.log("No fix requested.");
   process.exit(0);
 }
@@ -63,8 +68,8 @@ const BOX = new RegExp(`- \\[[ x]\\] \\*\\*${FIX_BOX}\\*\\*.*`);
 const withLine = (text: string, line: string) =>
   BOX.test(text) ? text.replace(BOX, line) : text.replace(/(### Proofed\n\n[^\n]*\n)/, `$1\n${line}\n`);
 
-if (repo) {
-  await upsertComment(repo, prNumber, withLine(body, `⏳ **Claude is working on a fix** with ${describeFixer(fixer)}. [Follow along](${runUrl})`));
+if (repo && report) {
+  await editComment(repo, report.id, withLine(body, `${WORKING} with ${describeFixer(fixer)}. [Follow along](${runUrl})`));
   await setStatus(repo, git("rev-parse", "HEAD"), "pending", "Claude is fixing, Kane will re-check", runUrl);
 }
 // The dashboard follows along: which attempt it is, what's being done, and Kane's re-check.
@@ -110,14 +115,16 @@ function askFixer(text: string) {
   return { ok: true as const, summary: summary.trim() };
 }
 
-// Claude couldn't run at all: put the original report back, untick the box, and say why.
-async function restoreReport(note: string) {
+// Put the original report back, untick the box, and say why. Claude not running at all is an edit;
+// Claude giving up (`ended`) is the end of the fix, so the report is posted again for the notification.
+async function restoreReport(note: string, ended = false) {
   await live.end();
-  if (!repo || !prNumber) return;
+  if (!repo || !prNumber || !report) return;
   const box = `- [ ] **${FIX_BOX}**`;
   const original = body.replace(`- [x] **${FIX_BOX}**`, box);
   const quoted = `> ${note}`;
-  await upsertComment(repo, prNumber, original.includes(box) ? original.replace(box, `${quoted}\n\n${box}`) : withLine(original, quoted));
+  const restored = original.includes(box) ? original.replace(box, `${quoted}\n\n${box}`) : withLine(original, quoted);
+  await (ended ? putReport(repo, prNumber, restored, true) : editComment(repo, report.id, restored));
   await setStatus(repo, git("rev-parse", "HEAD"), "failure", "Fix didn't run; the original failure stands", runUrl);
 }
 
@@ -179,9 +186,14 @@ while (!fixed && attempt < MAX_ATTEMPTS) {
   summary = answer.summary;
   console.log(`Claude: ${summary}`);
 
+  // The scenarios and the workflows are not the fixer's to change (guard.ts): what it did there is undone.
+  const undone = putBack(env("PROOFED_SCENARIOS", ".proofed/scenarios"));
+  if (undone.length > 0) console.log(`Put back, the fixer may not change these: ${undone.join(", ")}`);
   if (!git("status", "--porcelain")) {
-    feedback = "You made no changes to the code.";
-    tries.push({ summary, result: "No change to the code." });
+    feedback = undone.length > 0
+      ? `You changed only ${undone.join(", ")}. Scenarios and workflows are off limits and were put back. Fix the application code.`
+      : "You made no changes to the code.";
+    tries.push({ summary, result: undone.length > 0 ? "It edited the scenario instead of the code. Proofed put the scenario back." : "No change to the code." });
     continue;
   }
   live.fix({ doing: "building" });
@@ -213,7 +225,7 @@ if (!fixed) {
   git("checkout", "--", ".");
   // Kane never got to re-run anything (no change, or it didn't build): keep the original report.
   if (lastResults.length === 0) {
-    await restoreReport(`Claude tried ${attempt} times without a change that builds. Last note: ${feedback.split("\n")[0]}`);
+    await restoreReport(`Claude tried ${attempt} times without a change that builds. Last note: ${feedback.split("\n")[0]}`, true);
     process.exit(1);
   }
   await live.end();

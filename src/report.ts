@@ -1,4 +1,4 @@
-import { MARKER } from "./github.ts";
+import { MARKER, OLD_MARKER } from "./github.ts";
 import { BLANK_PAGE, runMarker } from "./runfile.ts";
 import type { Step } from "./kane.ts";
 import { describeFixer, type Fixer } from "./models.ts";
@@ -25,7 +25,8 @@ export type RunState = "failed" | "passed" | "fixed" | "error";
 export type RunEntry = { sha: string; state: RunState };
 // `asked`: one-off checks from the PR description or a /proofed comment, kept so the fixer can re-run them.
 // `history`: one entry per published report, newest last.
-export type ReportData = { sha: string; failures: FailureData[]; asked?: Scenario[]; history?: RunEntry[] };
+// `open`: the scenarios that didn't pass (failed, couldn't finish, not confirmed); left out when there are none.
+export type ReportData = { sha: string; failures: FailureData[]; asked?: Scenario[]; history?: RunEntry[]; open?: string[] };
 export type FileChange = { file: string; added: number; removed: number };
 // One round of the fix loop: what Claude said it changed, and what came of it.
 export type FixAttempt = { summary: string; result: string };
@@ -72,6 +73,42 @@ export const alreadyReported = (action: string | undefined, headSha: string, rep
   action === "synchronize" && report?.sha === headSha;
 
 export const fixRequested = (body: string) => body.includes(`- [x] **${FIX_BOX}**`);
+
+export const WORKING = "⏳ **Claude is working on a fix**";
+
+// JSON inside an HTML comment: "--" would end the comment early, so escape it.
+export const dataComment = (data: ReportData) => `<!-- proofed:data ${JSON.stringify(data).replaceAll("--", "\\u002d\\u002d")} -->`;
+
+// What a report says: the overall state, as the dashboard reads it, and which scenarios aren't passing.
+export type Outcome = { state: "passing" | "failing" | "blocked"; open: string[] };
+const STATES: Record<RunState, Outcome["state"]> = { failed: "failing", error: "blocked", passed: "passing", fixed: "passing" };
+
+// Reports from before `open` was kept name only the failures.
+export function outcomeOf(data: ReportData): Outcome {
+  const last = data.history?.at(-1);
+  const state = last?.sha === data.sha ? STATES[last.state] : data.failures.length > 0 ? "failing" : "passing";
+  return { state, open: [...(data.open ?? data.failures.map((f) => f.id))].sort() };
+}
+
+// GitHub notifies on a new comment, not on an edit. So a report is posted anew when someone should hear
+// of it: the first report, a run a person asked for or a fix that ended (`notify`), or an outcome that
+// changed. A push that finds the same as the current report only updates it.
+export function postsNew(current: string | undefined, next: string, notify: boolean) {
+  if (notify || current === undefined) return true;
+  const was = readReportData(current);
+  const now = readReportData(next);
+  if (!was || !now) return true;
+  // A fix's report keeps its before and after: the next commit gets its own.
+  if (was.sha !== now.sha && was.history?.at(-1)?.state === "fixed") return true;
+  const [a, b] = [outcomeOf(was), outcomeOf(now)];
+  return a.state !== b.state || a.open.join("\n") !== b.open.join("\n");
+}
+
+const LIVE_LINES = new RegExp(`\\n\\n(?:- \\[[ x]\\] \\*\\*${FIX_BOX}\\*\\*|${WORKING.replaceAll("*", "\\*")})[^\\n]*`, "g");
+
+// A report a newer one replaced: without the fix box, so nobody ticks a stale one, or a "working" line
+// that would never end, and with a marker that nothing reads as the PR's report.
+export const outdated = (body: string) => body.replaceAll(MARKER, OLD_MARKER).replace(LIVE_LINES, "");
 
 // A re-run on the same commit replaces its entry. Re-checking a commit Claude pushed keeps it a fix.
 export function addRun(history: RunEntry[] = [], run: RunEntry): RunEntry[] {
@@ -372,6 +409,7 @@ function compose(
 
   const state: RunState = failed.length > 0 ? "failed" : errored.length > 0 ? "error" : fix?.status === "fixed" ? "fixed" : "passed";
   const history = addRun(previous?.history, { sha, state });
+  const open = [...failed, ...errored, ...unsure].map((r) => r.scenario.id);
   // Not kept for the fixer: its final check would only spend credits finding nothing to check again.
   const rerun = asked?.filter((s) => !unasked.some((r) => r.scenario.id === s.id));
   const data: ReportData = {
@@ -388,6 +426,7 @@ function compose(
       clip: storedClip(clips.get(r.scenario.id)),
     })),
     history,
+    ...(open.length && { open }),
   };
 
   const footer = [`Run by Kane CLI on ${short(sha)}`, credits > 0 && `${Math.round(credits)} credits`, runUrl && `[logs](${runUrl})`]
@@ -398,8 +437,5 @@ function compose(
     ? "Comment <code>/proofed</code> to check again or <code>/proofed fix</code> to have Claude fix it."
     : "Comment <code>/proofed</code> to check again.";
   const lines = [footer, history.length > 1 && historyLine(history, repoUrl), hint].filter(Boolean).join("<br>");
-  // JSON inside an HTML comment: "--" would end the comment early, so escape it.
-  const hidden = `<!-- proofed:data ${JSON.stringify(data).replaceAll("--", "\\u002d\\u002d")} -->`;
-
-  return `${sections.join("\n\n")}\n\n<sub>${lines}</sub>\n${hidden}${runKey ? `\n${runMarker(runKey)}` : ""}`;
+  return `${sections.join("\n\n")}\n\n<sub>${lines}</sub>\n${dataComment(data)}${runKey ? `\n${runMarker(runKey)}` : ""}`;
 }

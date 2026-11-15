@@ -63,21 +63,50 @@ export class GitHubError extends Error {
 }
 
 export const MARKER = "<!-- proofed -->";
+// A report a newer one replaced carries this instead. Neither the fix trigger in the installed workflows
+// nor the dashboard's webhook matches it, so an edit of an old report is never read as the PR's report.
+export const OLD_MARKER = "<!-- proofed:old -->";
 
-// Proofed's own report on the PR. Only a bot's comment counts: anyone can paste the marker.
-export async function findReport(repo: Repo, pr: number) {
-  const comments = await api<{ id: number; html_url: string; body?: string; user?: { type: string } }[]>(repo, "GET", `/issues/${pr}/comments?per_page=100`);
-  return comments.find((c) => c.user?.type === "Bot" && c.body?.includes(MARKER));
+export type Comment = { id: number; node_id: string; html_url: string; body?: string; user?: { type: string } };
+
+// Proofed's reports on the PR, oldest first: the newest is the report. Only a bot's comment counts,
+// since anyone can paste the marker. `older` are reports that weren't retired, as when an edit failed.
+export function reportsIn(comments: Comment[]) {
+  const reports = comments.filter((c) => c.user?.type === "Bot" && c.body?.includes(MARKER));
+  return { current: reports.at(-1), older: reports.slice(0, -1) };
 }
+
+// Every page: a report is posted afresh further down a long thread, past the first hundred comments.
+export async function listReports(repo: Repo, pr: number) {
+  const comments: Comment[] = [];
+  for (let page = 1; ; page++) {
+    const batch = await api<Comment[]>(repo, "GET", `/issues/${pr}/comments?per_page=100&page=${page}`);
+    comments.push(...batch);
+    if (batch.length < 100) return reportsIn(comments);
+  }
+}
+
+export const findReport = async (repo: Repo, pr: number) => (await listReports(repo, pr)).current;
 
 export const reply = (repo: Repo, pr: number, body: string) => api(repo, "POST", `/issues/${pr}/comments`, { body });
 
-// One comment per PR, edited in place on every run, so the thread doesn't fill up with bot noise.
-export async function upsertComment(repo: Repo, pr: number, body: string) {
-  const mine = await findReport(repo, pr);
-  return mine
-    ? api<{ html_url: string }>(repo, "PATCH", `/issues/comments/${mine.id}`, { body })
-    : api<{ html_url: string }>(repo, "POST", `/issues/${pr}/comments`, { body });
+export const postComment = (repo: Repo, pr: number, body: string) => api<Comment>(repo, "POST", `/issues/${pr}/comments`, { body });
+
+export const editComment = (repo: Repo, id: number, body: string) => api<Comment>(repo, "PATCH", `/issues/comments/${id}`, { body });
+
+// Folded on GitHub as outdated. A token that may comment but not minimize only leaves it unfolded.
+export async function minimize(repo: Repo, nodeId: string) {
+  const res = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: { authorization: `Bearer ${repo.token}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      query: "mutation($id: ID!) { minimizeComment(input: { subjectId: $id, classifier: OUTDATED }) { minimizedComment { isMinimized } } }",
+      variables: { id: nodeId },
+    }),
+  });
+  // GraphQL reports most errors with a 200.
+  const answer = (await res.json().catch(() => ({}))) as { errors?: { message: string }[] };
+  if (!res.ok || answer.errors?.length) throw new GitHubError(res.status, `minimizeComment: ${res.status} ${answer.errors?.map((e) => e.message).join("; ") ?? ""}`);
 }
 
 const STATUS = "Proofed";
