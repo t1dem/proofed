@@ -91,14 +91,19 @@ function LiveFrame({ frame, on, now, startedAt }: { frame: Frame | undefined; on
 function LiveSteps({ scenario }: { scenario: LiveScenario }) {
   if (scenario.status === "waiting") return <p className="text-dim">Waiting for a free Chrome. Kane runs three scenarios at a time.</p>;
   if (scenario.steps.length === 0) return <p className="text-dim">Kane is opening the page.</p>;
+  const shown = scenario.steps.flatMap((step, i) => {
+    // Kane doesn't always say a step ended before it starts the next: only the last one can be going.
+    const running = step.status === "running" && i === scenario.steps.length - 1;
+    // Until Kane says what the step is, its remark is a stand-in like "Step 5".
+    const said = step.remark && !/^step \d+$/i.test(step.remark) ? plain(step.remark) : undefined;
+    // A step Kane left behind without a word has nothing to show.
+    return said || running || step.status === "failed" ? [{ step, said, running }] : [];
+  });
   return (
     <ol className="-mx-3">
       {/* Numbered by position: Kane's own numbers start at 2 (its first step opens the page unannounced). */}
-      {scenario.steps.map((step, i) => {
-        const running = step.status === "running";
+      {shown.map(({ step, said, running }, i) => {
         const failed = step.status === "failed";
-        // Until Kane says what the step is, its remark is a stand-in like "Step 5".
-        const said = step.remark && !/^step \d+$/i.test(step.remark) ? plain(step.remark) : undefined;
         return (
           <li
             key={step.n}

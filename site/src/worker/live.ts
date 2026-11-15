@@ -58,7 +58,7 @@ export async function handleLivePost(request: Request, env: Env) {
 // What the dashboard gets: the state, when it last changed, and where each scenario's latest frame is.
 export type LiveView = { live: (Live & { at: number }) | null; frames: Record<string, { url: string; at: number }> };
 
-export async function getLive(env: Env, repo: string, pr: number): Promise<LiveView> {
+export async function getLive(env: Env, repo: string, pr: number, api = "/api"): Promise<LiveView> {
   const since = Date.now() - LIVE_LASTS;
   const [row, frames] = await Promise.all([
     env.DB.prepare("SELECT data, updated_at FROM live WHERE repo = ?1 AND pr = ?2 AND updated_at > ?3")
@@ -67,7 +67,7 @@ export async function getLive(env: Env, repo: string, pr: number): Promise<LiveV
     env.DB.prepare("SELECT scenario, at FROM live_frames WHERE repo = ?1 AND pr = ?2").bind(repo, pr).all<{ scenario: string; at: number }>(),
   ]);
   if (!row) return { live: null, frames: {} };
-  const base = `/api/pulls/${repo}/${pr}/live`;
+  const base = `${api}/pulls/${repo}/${pr}/live`;
   return {
     live: { ...(JSON.parse(row.data) as Live), at: row.updated_at },
     frames: Object.fromEntries(frames.results.map((f) => [f.scenario, { url: `${base}/${encodeURIComponent(f.scenario)}.jpg?at=${f.at}`, at: f.at }])),

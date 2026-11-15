@@ -2,10 +2,10 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { publishClips, repoFromEnv, setStatus, upsertComment, type Repo } from "./github.ts";
+import { editComment, listReports, minimize, postComment, publishClips, repoFromEnv, setStatus, type Repo } from "./github.ts";
 import { live } from "./live.ts";
 import { crashResult, findCrashes } from "./precheck.ts";
-import { buildReport, type ClipLinks, type FixNote, type ReportData, type Written } from "./report.ts";
+import { buildReport, outdated, postsNew, type ClipLinks, type FixNote, type ReportData, type Written } from "./report.ts";
 import { nothingAsked } from "./requests.ts";
 import { runScenario, type ScenarioResult } from "./run.ts";
 import { RUN_FILE, type RunFile } from "./runfile.ts";
@@ -92,6 +92,20 @@ export async function runAll(scenarios: Scenario[], outDir: string, concurrency 
 
 export const isBroken = (r: ScenarioResult) => r.outcome === "failed" || r.outcome === "error";
 
+// Posts the report as a new comment or edits the current one (postsNew). A new one retires the reports
+// before it: folded as outdated and left without anything that reads as the report. Neither step can
+// fail the run; the newest report is the one everything reads.
+export async function putReport(repo: Repo, pr: number, body: string, notify: boolean) {
+  const { current, older } = await listReports(repo, pr);
+  if (current && !postsNew(current.body, body, notify)) return editComment(repo, current.id, body);
+  const posted = await postComment(repo, pr, body);
+  for (const old of current ? [...older, current] : older) {
+    await editComment(repo, old.id, outdated(old.body ?? "")).catch((e: unknown) => console.log(`Couldn't retire the old report: ${e instanceof Error ? e.message : e}`));
+    await minimize(repo, old.node_id).catch((e: unknown) => console.log(`Couldn't fold the old report: ${e instanceof Error ? e.message : e}`));
+  }
+  return posted;
+}
+
 type PublishInput = {
   repo: Repo | undefined;
   pr: number | undefined;
@@ -104,6 +118,8 @@ type PublishInput = {
   asked?: Scenario[];
   previous?: ReportData;
   written?: Written;
+  // A person asked for this run (a /proofed comment, or Run again on the dashboard).
+  requested?: boolean;
 };
 
 // The dashboard's copy of the run. Steps are capped like the comment's, so the file stays small.
@@ -141,7 +157,7 @@ function runFile({ sha, results, skipped, runUrl, fix }: PublishInput, clips: Ma
 }
 
 export async function publish(input: PublishInput) {
-  const { repo, pr, sha, results, skipped, runUrl, outDir, fix, asked, previous, written } = input;
+  const { repo, pr, sha, results, skipped, runUrl, outDir, fix, asked, previous, written, requested = false } = input;
   const clips = new Map<string, ClipLinks>();
   let runKey: string | undefined;
   if (repo && pr) {
@@ -174,7 +190,8 @@ export async function publish(input: PublishInput) {
   const passed = results.filter((r) => r.outcome === "passed");
   const counted = results.filter((r) => !nothingAsked(r));
   if (repo && pr) {
-    const comment = await upsertComment(repo, pr, body);
+    // The end of a fix is news too, either way it went.
+    const comment = await putReport(repo, pr, body, requested || !!fix);
     const names = (rs: ScenarioResult[]) => rs.map((r) => r.scenario.name).join(", ");
     // Unsure runs don't block a merge, but they aren't passes either.
     const [state, description] =

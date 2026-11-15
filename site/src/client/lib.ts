@@ -9,9 +9,12 @@ export class SignedOut extends Error {}
 // answers are neither shown nor overwritten. Links keep the query (pathOf), so the demo stays a demo.
 export const DEMO = new URLSearchParams(location.search).has("demo");
 
+// /try is open to anyone: its pages read the demo store's pull requests from the public API (worker/try.ts).
+const PUBLIC = location.pathname === "/try" || location.pathname.startsWith("/try/");
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (DEMO) return (await import("./demo")).demo(path, init) as T;
-  const res = await fetch(path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
+  const res = await fetch(PUBLIC ? path.replace(/^\/api\/pulls\//, "/api/try/pulls/") : path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
   const body = (await res.json().catch(() => ({}))) as T & { error?: string };
   if (res.status === 401) {
     forgetAll();

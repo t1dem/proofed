@@ -171,9 +171,12 @@ function Sidebar({ me, route, go, pulls, repo, onRepo, theme, onTheme }: Sidebar
   // A phone has the TabBar instead.
   return (
     <aside className="sticky top-0 z-10 hidden h-dvh w-60 shrink-0 flex-col border-r border-edge bg-side px-3 py-4 md:flex">
-      <a href="/" className={`mb-5 self-start rounded-md px-2 font-serif text-xl ${focus}`}>
-        Proofed
-      </a>
+      <div className="mb-5 flex items-baseline justify-between gap-2">
+        <a href="/" className={`rounded-md px-2 font-serif text-xl ${focus}`}>
+          Proofed
+        </a>
+        {DEMO && <span className="px-2 text-[12px] font-medium text-faint">Sample data</span>}
+      </div>
       <nav>
         {/* Inbox is every repository: it also clears the repository filter. */}
         <Link

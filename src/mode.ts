@@ -15,7 +15,7 @@ type Event = {
   pull_request: PullRequest;
   issue: { number: number; pull_request?: object };
   comment: { id: number; body: string; user: { type: string } };
-  sender?: { type: string };
+  sender?: { type: string; login?: string };
 };
 
 const output = (values: Record<string, string | number>) => {
@@ -42,6 +42,8 @@ if (event.action === "edited" && event.comment) {
   // Someone ticked "Fix with Claude" in Proofed's report.
   const { body, user } = event.comment;
   if (user.type !== "Bot" || !fixRequested(body) || !readReportData(body)) skip("No fix requested.");
+  // A tick that raced a newer report: the box was on a report that's no longer the one.
+  if ((await findReport(repo, number))?.id !== event.comment.id) skip("A newer report has replaced the one the box was ticked in.");
   mode = "fix";
 } else if (event.comment) {
   const command = parseCommand(event.comment.body);
@@ -107,9 +109,13 @@ if (mode === "check" && event.pull_request && pr.head.ref === SETUP_BRANCH && pr
 // "Fix automatically" in the dashboard (vars.PROOFED_AUTOFIX): a check of a person's push goes on to fix
 // what it finds broken (action.yml), as a ticked "Fix with Claude" would. Not on a draft, where someone is
 // still at work, and not on a push by a bot: Claude's own fix commit would otherwise start another fix.
+// The one exception is a pull request Proofed's own app opens (the site's "Break it yourself"): it is
+// fixed like a person's. Renovate's and other bots' are left alone, nobody asked for a push to those.
+const opened = event.action === "opened" || event.action === "reopened";
+const byBot = event.sender?.type === "Bot" && !(opened && event.sender.login === "proofed-by-kane[bot]");
 const autofix =
   mode === "check" && !generate && !!event.pull_request && vars.PROOFED_AUTOFIX === "true" && !pr.draft &&
-  event.sender?.type !== "Bot" && process.env.PROOFED_CLAUDE === "true" && process.env.PROOFED_FIX !== "false";
+  !byBot && process.env.PROOFED_CLAUDE === "true" && process.env.PROOFED_FIX !== "false";
 
 output({
   mode,

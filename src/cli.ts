@@ -71,7 +71,7 @@ try {
   await live.end();
   // Read just before it's overwritten, so the run history carries over.
   const previous = repo && pr ? readReportData((await findReport(repo, pr.number))?.body ?? "") : undefined;
-  broken = await publish({ repo, pr: pr?.number, sha, results, skipped, runUrl, outDir, asked, previous });
+  broken = await publish({ repo, pr: pr?.number, sha, results, skipped, runUrl, outDir, asked, previous, requested: command !== undefined });
 } catch (e) {
   // Don't leave the PR on "pending" forever.
   if (repo && pr) await setStatus(repo, sha, "error", "Proofed itself failed; see the logs", runUrl).catch(() => {});

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { addRun, alreadyReported, buildReport, fixRequested, readReportData, type ReportData } from "./report.ts";
+import { blockedReport } from "./blocked.ts";
+import { addRun, alreadyReported, buildReport, fixRequested, outdated, postsNew, readReportData, WORKING, type ReportData } from "./report.ts";
 import { crashResult } from "./precheck.ts";
 import { askedScenario } from "./requests.ts";
 import { NOTHING_CHECKED, type ScenarioResult } from "./run.ts";
@@ -235,4 +236,40 @@ test("on the setup PR, Claude not getting to write scenarios is one line", () =>
   assert.match(body, /The affected scenario passes in a real browser\.\n\n[^\n]*scenarios couldn't be written this time\.\n\n/);
   const none = buildReport({ sha: "9f8e7d6c5b", results: [passed], skipped: [], clips: new Map(), fixEnabled: true, written: { status: "written", kept: [], dropped: [] } });
   assert.match(none, /Claude didn't find a flow it could write a scenario for without guessing, so none were added\./);
+});
+
+test("a push with the same outcome edits the report; anything new is a new comment", () => {
+  const cart: ScenarioResult = { ...failed, scenario: { ...failed.scenario, id: "cart", name: "Cart" } };
+  const unsure: ScenarioResult = { ...passed, outcome: "unsure", end: { type: "run_end", status: "passed", reason: NOTHING_CHECKED } };
+  const report = (sha: string, results: ScenarioResult[]) => buildReport({ sha, results, skipped: [], clips: new Map(), fixEnabled: true });
+  const blocked = (sha: string) => blockedReport({ stage: "build", command: "pnpm build", dir: ".", url: "http://localhost:4173", log: "", sha });
+  const failing = report("1111111aaaa", [failed, passed]);
+
+  assert.equal(postsNew(failing, report("2222222bbbb", [failed, passed]), false), false);
+  assert.equal(postsNew(failing, report("2222222bbbb", [failed, cart]), false), true);
+  assert.equal(postsNew(failing, report("2222222bbbb", [passed]), false), true);
+  assert.equal(postsNew(report("1111111aaaa", [passed]), report("2222222bbbb", [passed, passed]), false), false);
+  // Still a pass, but one scenario is no longer confirmed.
+  assert.equal(postsNew(report("1111111aaaa", [passed]), report("2222222bbbb", [unsure]), false), true);
+  assert.equal(postsNew(blocked("1111111aaaa"), blocked("2222222bbbb"), false), false);
+  assert.equal(postsNew(blocked("1111111aaaa"), report("2222222bbbb", [passed]), false), true);
+  // A /proofed comment or the end of a fix; no report yet; a report from before the data was kept.
+  assert.equal(postsNew(failing, report("1111111aaaa", [failed, passed]), true), true);
+  assert.equal(postsNew(undefined, failing, false), true);
+  assert.equal(postsNew(failing.replace(/<!-- proofed:data .* -->/s, ""), failing, false), true);
+});
+
+test("a replaced report has no box to tick, no working line, and doesn't read as the report", () => {
+  const working = buildReport({ sha: "1111111aaaa", results: [failed], skipped: [], clips: new Map(), fixEnabled: true })
+    .replace(/- \[ \] \*\*Fix with Claude\*\*.*/, `${WORKING} with Claude Haiku 5.5. [Follow along](https://example.com)`);
+  const ticked = buildReport({ sha: "1111111aaaa", results: [failed], skipped: [], clips: new Map(), fixEnabled: true }).replace("- [ ] **Fix", "- [x] **Fix");
+  for (const body of [working, ticked]) {
+    const old = outdated(body);
+    // The fix trigger of installed workflows, and the dashboard's webhook.
+    assert.equal(old.includes("<!-- proofed -->"), false);
+    assert.equal(old.includes("- [x] **Fix with Claude**"), false);
+    assert.doesNotMatch(old, /Fix with Claude\*\*|Claude is working/);
+    assert.match(old, /^<!-- proofed:old -->\n### Proofed\n\n\*\*1 of 1\*\* scenarios broke on this PR\.\n\n#### ✗ Promo/);
+    assert.deepEqual(readReportData(old), readReportData(body));
+  }
 });
