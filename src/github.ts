@@ -28,6 +28,7 @@ export type PullRequest = {
   base: { sha: string; ref: string };
   head: { sha: string; ref: string };
   draft?: boolean;
+  user?: { login: string };
 };
 
 export const getPullRequest = (repo: Repo, number: number) => api<PullRequest>(repo, "GET", `/pulls/${number}`);

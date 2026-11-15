@@ -8,7 +8,7 @@ import { DEFAULT_FIXER } from "./models.ts";
 import { ctx, readEvent } from "./pipeline.ts";
 import { alreadyReported, fixRequested, readReportData } from "./report.ts";
 import { parseCommand, parseFix, type FixCommand } from "./requests.ts";
-import { onlyFirstScenario, SETUP_BRANCH } from "./setup.ts";
+import { APP_LOGIN, onlyFirstScenario, SETUP_BRANCH } from "./setup.ts";
 
 type Event = {
   action: string;
@@ -112,7 +112,7 @@ if (mode === "check" && event.pull_request && pr.head.ref === SETUP_BRANCH && pr
 // The one exception is a pull request Proofed's own app opens (the site's "Break it yourself"): it is
 // fixed like a person's. Renovate's and other bots' are left alone, nobody asked for a push to those.
 const opened = event.action === "opened" || event.action === "reopened";
-const byBot = event.sender?.type === "Bot" && !(opened && event.sender.login === "proofed-by-kane[bot]");
+const byBot = event.sender?.type === "Bot" && !(opened && event.sender.login === APP_LOGIN);
 const autofix =
   mode === "check" && !generate && !!event.pull_request && vars.PROOFED_AUTOFIX === "true" && !pr.draft &&
   !byBot && process.env.PROOFED_CLAUDE === "true" && process.env.PROOFED_FIX !== "false";
