@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { connectCdp, type TargetInfo } from "./cdp.ts";
+import { connectCdp, type ScreencastMetadata, type TargetInfo } from "./cdp.ts";
 import type { LiveCursor } from "./livefile.ts";
 
 export type Rect = { x: number; y: number; width: number; height: number };
@@ -10,13 +10,16 @@ export type Frame = { file: string; time: number; scale: number; width: number; 
 // What Kane did on the page, in CSS pixels of the viewport at that moment.
 export type Action = { kind: "click" | "type"; time: number; x: number; y: number; rect: Rect };
 // A still for the live view, with where Kane last clicked or typed when it shows that same page.
-export type Still = { jpeg: Uint8Array; cursor?: LiveCursor };
+// `at`: the moment it shows the page as of (Date.now()), so an older still never replaces a newer one.
+export type Still = { jpeg: Uint8Array; at: number; cursor?: LiveCursor };
 // The page an action was on: its document, address, scroll and viewport size.
 type Page = { doc: number; href: string; sx: number; sy: number; w: number; h: number };
 const PAGE = `({ doc: performance.timeOrigin, href: location.href, sx: scrollX, sy: scrollY, w: innerWidth, h: innerHeight })`;
 
 const MAX_WIDTH = 1920;
 const MAX_HEIGHT = 1080;
+// The largest frame Proofed's server takes (MAX_FRAME in site/src/worker/live.ts).
+const MAX_LIVE_FRAME = 400_000;
 const BINDING = "__proofedAction";
 
 // Runs in every page Kane opens. It only listens: Kane's clicks and typing are reported back
@@ -31,23 +34,31 @@ const LISTENER = `(() => {
   };
   let pointerAt = 0;
   let typingIn = null;
+  let clicked = null;
   addEventListener("pointerdown", (e) => {
     if (!e.isTrusted || !(e.target instanceof Element)) return;
     pointerAt = Date.now();
     typingIn = null;
+    clicked = { el: e.target, x: e.clientX, y: e.clientY };
     report("click", e.clientX, e.clientY, e.target);
   }, true);
   // A click dispatched from script has no pointer events before it: place it on the element.
   addEventListener("click", (e) => {
     if (Date.now() - pointerAt < 500 || !(e.target instanceof Element)) return;
     const r = e.target.getBoundingClientRect();
-    report("click", r.x + r.width / 2, r.y + r.height / 2, e.target);
+    clicked = { el: e.target, x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    report("click", clicked.x, clicked.y, e.target);
   }, true);
+  // Typing in the field Kane just clicked stays at the click point, still inside the field unless it
+  // scrolled away; its centre would make the cursor jump a few pixels within the same field.
   addEventListener("input", (e) => {
     if (!(e.target instanceof Element) || e.target === typingIn) return;
     typingIn = e.target;
     const r = e.target.getBoundingClientRect();
-    report("type", r.x + r.width / 2, r.y + r.height / 2, e.target);
+    const at = clicked?.el === e.target && clicked.x >= r.left && clicked.x <= r.right && clicked.y >= r.top && clicked.y <= r.bottom
+      ? clicked
+      : { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    report("type", at.x, at.y, e.target);
   }, true);
 })();`;
 
@@ -101,6 +112,9 @@ export async function startRecorder(endpoint: string, outDir: string) {
   const actions: Action[] = [];
   let lastSession: string | undefined;
   let lastAction: (Action & { page: Page; session: string | undefined }) | undefined;
+  // The latest screencast frame of each page. Chrome sends one on each repaint, so it shows the page
+  // as it still is until the next comes in.
+  const latest = new Map<string, { jpeg: Uint8Array; meta: ScreencastMetadata }>();
 
   const attached = new Set<string>();
   cdp.on("Target.targetCreated", ({ targetInfo }) => {
@@ -140,6 +154,7 @@ export async function startRecorder(endpoint: string, outDir: string) {
       bytes: jpeg.length,
     });
     lastSession = sessionId;
+    if (sessionId) latest.set(sessionId, { jpeg, meta: metadata });
     void cdp.send("Page.screencastFrameAck", { sessionId: ack }, sessionId).catch(() => {});
   });
 
@@ -148,8 +163,21 @@ export async function startRecorder(endpoint: string, outDir: string) {
     const { page, ...action } = JSON.parse(payload) as Action & { page: Page };
     actions.push(action);
     lastAction = { ...action, page, session: sessionId };
-    recorder.onAction?.();
+    recorder.onAction?.(before(lastAction));
   });
+
+  // The page's last screencast frame, picked as the action is reported: it shows the very page Kane
+  // clicked, even when the click then navigates, and frames of the next page only come in after it.
+  // Only one of the same page, at the same viewport size and scroll, gets the cursor.
+  const before = (action: NonNullable<typeof lastAction>): Still | undefined => {
+    const frame = action.session ? latest.get(action.session) : undefined;
+    if (!frame || frame.jpeg.length > MAX_LIVE_FRAME) return undefined;
+    const { meta } = frame;
+    const { page } = action;
+    if (Math.round(meta.deviceWidth) !== page.w || Math.round(meta.deviceHeight) !== page.h) return undefined;
+    if (Math.abs(meta.scrollOffsetX - page.sx) >= 2 || Math.abs(meta.scrollOffsetY - page.sy) >= 2) return undefined;
+    return { jpeg: frame.jpeg, at: Date.now(), cursor: { x: action.x / page.w, y: action.y / page.h } };
+  };
 
   await cdp.send("Target.setDiscoverTargets", { discover: true });
   // Don't let Kane navigate before the listener is installed on the starting tab.
@@ -158,8 +186,9 @@ export async function startRecorder(endpoint: string, outDir: string) {
   const recorder = {
     frames,
     actions,
-    // Called on each of Kane's clicks and the first keystroke in a field.
-    onAction: undefined as (() => void) | undefined,
+    // Called on each of Kane's clicks and the first keystroke in a field, with the frame from just
+    // before it and the cursor on it, when there is a usable one.
+    onAction: undefined as ((before: Still | undefined) => void) | undefined,
     async locate(words: string[]): Promise<Rect | undefined> {
       if (!lastSession || words.length === 0) return undefined;
       const { result } = await cdp
@@ -171,22 +200,24 @@ export async function startRecorder(endpoint: string, outDir: string) {
         .catch(() => ({ result: {} as { value?: string | null } }));
       return result.value ? (JSON.parse(result.value) as Rect) : undefined;
     },
-    // A still of what the page shows now, for the dashboard while the run is going (live.ts).
-    // Its own screenshot, not a screencast frame: those are full quality, for the clip. No clip or
-    // scale: Chrome shrinks a screenshot by emulating a smaller viewport for it, and when Kane takes
-    // a screenshot at the same moment the page is left at that size, in its narrow layout.
+    // A still of what the page shows now, for the dashboard while the run is going (live.ts), with
+    // the last action's cursor while the page is still the one it was on: a screenshot of its own, so
+    // the page check after it holds for the picture. No clip or scale: Chrome shrinks a screenshot by
+    // emulating a smaller viewport for it, and when Kane takes a screenshot at the same moment the
+    // page is left at that size, in its narrow layout.
     async snapshot(): Promise<Still | undefined> {
       const session = lastSession;
       if (!session) return undefined;
       const action = lastAction;
+      const at = Date.now();
       try {
         const { data } = await cdp.send<{ data: string }>("Page.captureScreenshot", { format: "jpeg", quality: 60 }, session);
         const jpeg = Buffer.from(data, "base64");
-        if (!action || action.session !== session) return { jpeg };
+        if (!action || action.session !== session) return { jpeg, at };
         // Asked after the screenshot: a page that is still the one of the action was showing during it.
         const { result } = await cdp.send<{ result: { value?: Page } }>("Runtime.evaluate", { expression: PAGE, returnByValue: true }, session);
         const now = result.value;
-        return { jpeg, ...(now && samePage(action.page, now) && { cursor: { x: action.x / now.w, y: action.y / now.h } }) };
+        return { jpeg, at, ...(now && samePage(action.page, now) && { cursor: { x: action.x / now.w, y: action.y / now.h } }) };
       } catch {
         return undefined; // The page is navigating or closed; the next one will do.
       }

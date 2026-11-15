@@ -25,6 +25,23 @@ let chain: Promise<unknown> = Promise.resolve();
 let failures = 0;
 const lastFrame = new Map<string, number>();
 const lastActionFrame = new Map<string, number>();
+// Frames go out one at a time too: the server keeps the last to arrive, so one sent alongside a newer
+// one could land after it. Behind a slow upload, each scenario keeps only its newest frame waiting.
+const waiting = new Map<string, { path: string; jpeg: Uint8Array; at: number }>();
+const newestSent = new Map<string, number>();
+let sending = false;
+
+async function sendFrames() {
+  if (sending) return;
+  sending = true;
+  for (let next = waiting.entries().next(); !next.done; next = waiting.entries().next()) {
+    const [id, f] = next.value;
+    waiting.delete(id);
+    newestSent.set(id, f.at);
+    await post(f.path, new Blob([f.jpeg as Uint8Array<ArrayBuffer>]), "image/jpeg");
+  }
+  sending = false;
+}
 
 async function post(path: string, body: string | Blob, type: string) {
   if (!server) return;
@@ -105,14 +122,17 @@ export const live = {
 
   // What Kane's Chrome shows now, at most every couple of seconds per scenario, and where Kane last
   // clicked or typed on it. The cursor rides with its picture, so the dashboard never pairs the two wrong.
-  frame(id: string, { jpeg, cursor }: Still, action = false) {
+  frame(id: string, { jpeg, at, cursor }: Still, action = false) {
     const now = Date.now();
     if (!state || now - ((action ? lastActionFrame : lastFrame).get(id) ?? 0) < (action ? ACTION_FRAME_EVERY : FRAME_EVERY)) return;
+    // A still of an earlier moment than one already sent or waiting (a slow screenshot) shows the past.
+    if (at < Math.max(newestSent.get(id) ?? 0, waiting.get(id)?.at ?? 0)) return;
     lastFrame.set(id, now);
     if (action) lastActionFrame.set(id, now);
     const query = new URLSearchParams({ run: state.run, pr: String(state.pr), scenario: id });
     if (cursor) for (const [k, v] of Object.entries(cursor)) query.set(k, v.toFixed(4));
-    void post(`/api/actions/live/frame?${query}`, new Blob([jpeg as Uint8Array<ArrayBuffer>]), "image/jpeg");
+    waiting.set(id, { path: `/api/actions/live/frame?${query}`, jpeg, at });
+    void sendFrames();
   },
 
   // Before the report: the last state goes out, and nothing after it.

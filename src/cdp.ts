@@ -2,7 +2,7 @@
 // Only the events Proofed listens to are typed.
 
 export type TargetInfo = { type: string; targetId: string };
-export type ScreencastMetadata = { timestamp: number; deviceWidth: number; deviceHeight: number };
+export type ScreencastMetadata = { timestamp: number; deviceWidth: number; deviceHeight: number; scrollOffsetX: number; scrollOffsetY: number };
 export type ExceptionDetails = { text: string; exception?: { description?: string; value?: unknown } };
 
 type Events = {

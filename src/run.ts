@@ -115,12 +115,15 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
   try {
     const recorder = await startRecorder(chrome.endpoint, join(dir, "frames"));
     live.scenario(scenario.id, { status: "running", steps: [], startedAt: Date.now() });
-    // A still right after each click or typing, so the live view shows the cursor there before the
-    // page moves on; between actions, one every couple of seconds.
+    // A still for each click or typing with the cursor on it: the frame from just before it, or a
+    // new screenshot when there is none to use. Between actions, one every couple of seconds.
     const still = (action: boolean) => {
       if (live.on()) void recorder.snapshot().then((s) => s && live.frame(scenario.id, s, action));
     };
-    recorder.onAction = () => still(true);
+    recorder.onAction = (before) => {
+      if (before) live.frame(scenario.id, before, true);
+      else still(true);
+    };
     stills = setInterval(() => still(false), 2000);
     let focus: Promise<Rect | undefined> = Promise.resolve(undefined);
     const kane = await runKane({
