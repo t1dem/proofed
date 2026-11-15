@@ -51,7 +51,8 @@ jobs:
           url: http://localhost:4173
           working-directory: site
           install: pnpm install --frozen-lockfile
-          build: pnpm build
+          # The preview's database starts empty: without its tables every page that reads it (/try) is an error.
+          build: pnpm build && pnpm exec wrangler d1 migrations apply proofed --local
           serve: pnpm preview --port 4173
           cache: pnpm
           lt-username: ${{ secrets.LT_USERNAME }}
