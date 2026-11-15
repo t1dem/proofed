@@ -21,7 +21,8 @@ export type FailureData = {
   steps: string[];
   clip?: ClipLinks;
 };
-export type RunState = "failed" | "passed" | "fixed" | "error";
+// "unsure": nothing broke, but a scenario wasn't confirmed either (run.ts), so the run isn't a pass.
+export type RunState = "failed" | "passed" | "fixed" | "error" | "unsure";
 export type RunEntry = { sha: string; state: RunState };
 // `asked`: one-off checks from the PR description or a /proofed comment, kept so the fixer can re-run them.
 // `history`: one entry per published report, newest last.
@@ -81,7 +82,7 @@ export const dataComment = (data: ReportData) => `<!-- proofed:data ${JSON.strin
 
 // What a report says: the overall state, as the dashboard reads it, and which scenarios aren't passing.
 export type Outcome = { state: "passing" | "failing" | "blocked"; open: string[] };
-const STATES: Record<RunState, Outcome["state"]> = { failed: "failing", error: "blocked", passed: "passing", fixed: "passing" };
+const STATES: Record<RunState, Outcome["state"]> = { failed: "failing", error: "blocked", passed: "passing", fixed: "passing", unsure: "passing" };
 
 // Reports from before `open` was kept name only the failures.
 export function outcomeOf(data: ReportData): Outcome {
@@ -240,7 +241,7 @@ function beforeAfter({ before, after }: Repaired, beforeSha: string, sha: string
   return `#### ✓ ${after.scenario.name}\n\n${rows.join("\n")}`;
 }
 
-const MARKS: Record<RunState, string> = { failed: "✗", passed: "✓", fixed: "✓ fixed", error: "⚠" };
+const MARKS: Record<RunState, string> = { failed: "✗", passed: "✓", fixed: "✓ fixed", error: "⚠", unsure: "? not confirmed" };
 
 function historyLine(history: RunEntry[], repoUrl: string | undefined) {
   return history
@@ -407,7 +408,7 @@ function compose(
   if (skipped.length > 0) sections.push(`<sub>Not affected by this diff: ${skipped.join(", ")}</sub>`);
   if (unasked.length > 0) sections.push("<sub>The PR description didn't name anything Kane could check in the browser.</sub>");
 
-  const state: RunState = failed.length > 0 ? "failed" : errored.length > 0 ? "error" : fix?.status === "fixed" ? "fixed" : "passed";
+  const state: RunState = failed.length > 0 ? "failed" : errored.length > 0 ? "error" : fix?.status === "fixed" ? "fixed" : unsure.length > 0 ? "unsure" : "passed";
   const history = addRun(previous?.history, { sha, state });
   const open = [...failed, ...errored, ...unsure].map((r) => r.scenario.id);
   // Not kept for the fixer: its final check would only spend credits finding nothing to check again.

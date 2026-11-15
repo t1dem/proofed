@@ -65,7 +65,7 @@ function Top() {
 }
 
 const kindOfRun = (run: TryRun): Kind =>
-  run.fixed ? "passed" : run.state === "fixing" ? "fixing" : run.state === "running" ? "running" : run.state === "failing" ? "failed" : run.state === "blocked" ? "error" : "passed";
+  run.fixed ? "passed" : run.state === "fixing" ? "fixing" : run.state === "running" ? "running" : run.state === "failing" ? "failed" : run.state === "blocked" ? "error" : run.unsure ? "unsure" : "passed";
 
 const saysOf = (run: TryRun) =>
   run.fixed
@@ -78,7 +78,9 @@ const saysOf = (run: TryRun) =>
           ? "Kane caught it"
           : run.state === "blocked"
             ? "The run didn't finish"
-            : "Kane found nothing broken";
+            : run.unsure
+              ? "Kane didn't confirm it either way"
+              : "Kane found nothing broken";
 
 function Picker({ view, go, reload }: { view: TryView; go: Go; reload: () => Promise<void> }) {
   const [opening, setOpening] = useState<string>();
@@ -171,12 +173,13 @@ function Picker({ view, go, reload }: { view: TryView; go: Go; reload: () => Pro
 }
 
 // Where the pull request is on its way from opened to fixed.
-function Track({ state, fixed, gaveUp, reported }: { state: PullState; fixed: boolean; gaveUp: boolean; reported: boolean }) {
-  const check: Kind = state === "running" && !reported ? "running" : state === "blocked" && !reported ? "error" : state === "passing" && !fixed ? "passed" : "failed";
+function Track({ state, fixed, gaveUp, reported, unsure }: { state: PullState; fixed: boolean; gaveUp: boolean; reported: boolean; unsure: boolean }) {
+  const check: Kind =
+    state === "running" && !reported ? "running" : state === "blocked" && !reported ? "error" : state === "passing" && !fixed ? (unsure ? "unsure" : "passed") : "failed";
   const fix: Kind = fixed ? "passed" : gaveUp ? "error" : state === "fixing" ? "fixing" : "waiting";
   const steps: [Kind, string][] = [
     ["passed", "Pull request opened"],
-    [check, check === "running" ? "Kane is checking it" : check === "failed" ? "Kane caught a break" : check === "error" ? "The run didn't finish" : "Kane found nothing broken"],
+    [check, check === "running" ? "Kane is checking it" : check === "failed" ? "Kane caught a break" : check === "error" ? "The run didn't finish" : check === "unsure" ? "Kane didn't confirm it either way" : "Kane found nothing broken"],
     [fix, fix === "passed" ? "Claude fixed it, Kane confirmed" : fix === "error" ? "Claude couldn't fix it" : fix === "fixing" ? "Claude is fixing, Kane re-checks" : "Claude fixes, Kane re-checks"],
   ];
   return (
@@ -229,7 +232,7 @@ function Run({ repo, pr, go }: { repo: string; pr: number; go: Go }) {
         </a>
       </header>
 
-      {pull && <Track state={pull.state} fixed={fix?.status === "fixed"} gaveUp={fix?.status === "gave-up"} reported={runs.length > 0} />}
+      {pull && <Track state={pull.state} fixed={fix?.status === "fixed"} gaveUp={fix?.status === "gave-up"} reported={runs.length > 0} unsure={kind === "unsure"} />}
 
       {detail.status === "error" && <p className="mt-8 text-bad">{detail.message}</p>}
       {detail.status === "loading" && <span className={`${bone} mt-8 block aspect-video w-full rounded-lg`} />}
@@ -238,6 +241,15 @@ function Run({ repo, pr, go }: { repo: string; pr: number; go: Go }) {
           {working && <LiveRun repo={repo} pr={pr} />}
           {waitingForFix && (
             <p className="mb-6 text-dim">Kane caught it. Claude starts on a fix in a few seconds; the page follows along by itself.</p>
+          )}
+          {kind === "failed" && !fix && !waitingForFix && (
+            <p className="mb-6 text-dim">
+              No fix followed. When Claude can't run,{" "}
+              <a href={pull?.url} className={link}>
+                the report on GitHub
+              </a>{" "}
+              says why.
+            </p>
           )}
           {runs.length > 0 && (
             <>
