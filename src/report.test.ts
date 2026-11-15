@@ -273,3 +273,13 @@ test("a replaced report has no box to tick, no working line, and doesn't read as
     assert.deepEqual(readReportData(old), readReportData(body));
   }
 });
+
+test("a run where nothing broke but a scenario wasn't confirmed isn't a pass in the history", () => {
+  const unsure: ScenarioResult = { ...failed, outcome: "unsure", end: { type: "run_end", status: "failed", reason: "The total wasn't there.", verdict: { family: "automation_bug" } } };
+  const first = buildReport({ sha: "1111111aaaa", results: [unsure], skipped: [], clips: new Map(), fixEnabled: true });
+  assert.deepEqual(readReportData(first)?.history, [{ sha: "1111111aaaa", state: "unsure" }]);
+  const second = buildReport({ sha: "2222222bbbb", results: [passed], skipped: [], clips: new Map(), fixEnabled: true, previous: readReportData(first) });
+  assert.match(second, /1111111 \? not confirmed → 2222222 ✓/);
+  // Still the same to a merge: nothing is known to be broken.
+  assert.equal(postsNew(first, buildReport({ sha: "1111111aaaa", results: [unsure], skipped: [], clips: new Map(), fixEnabled: true }), false), false);
+});

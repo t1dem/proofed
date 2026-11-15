@@ -21,7 +21,8 @@ const BUGS = [
 ] as const;
 
 export type TryBug = { id: string; title: string; says: string };
-export type TryRun = { pr: number; bug: string; title: string; startedAt: number; finishedAt?: number; state: PullState; fixed: boolean };
+// `unsure`: nothing broke in the last run, but Kane didn't confirm a scenario either.
+export type TryRun = { pr: number; bug: string; title: string; startedAt: number; finishedAt?: number; state: PullState; fixed: boolean; unsure: boolean };
 export type TryView = {
   repo: string;
   bugs: TryBug[];
@@ -74,6 +75,7 @@ async function describe(env: Env, row: TryRow & { pr: number }): Promise<TryRun 
     ...(row.finished_at && { finishedAt: row.finished_at }),
     state,
     fixed: fix?.status === "fixed",
+    unsure: state === "passing" && !!detail?.pull.scenarios.some((s) => s.outcome === "unsure"),
     over,
   };
 }

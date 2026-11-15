@@ -3,6 +3,9 @@
 // so this file has no imports and nothing Node-specific.
 export const SETUP_BRANCH = "proofed-setup";
 
+// Proofed's GitHub App, as the author of what it opens and pushes.
+export const APP_LOGIN = "proofed-by-kane[bot]";
+
 export const FIRST_SCENARIO = `---
 name: Home page loads
 url: /

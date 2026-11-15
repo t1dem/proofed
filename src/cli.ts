@@ -8,7 +8,7 @@ import { baseRev, changedFiles, ctx, env, pickScenarios, publish, readEvent, run
 import { readReportData } from "./report.ts";
 import { askedScenario, descriptionRequest, parseCommand, parseFix } from "./requests.ts";
 import type { Scenario } from "./scenarios.ts";
-import { SETUP_BRANCH } from "./setup.ts";
+import { APP_LOGIN, SETUP_BRANCH } from "./setup.ts";
 
 type Event = {
   pull_request: PullRequest;
@@ -50,8 +50,10 @@ if (command) {
   asked = [askedScenario("comment", command)];
   selected = asked;
 } else {
-  // Proofed's own setup PR describes Proofed, not something to check in the app.
-  const request = pr?.head.ref === SETUP_BRANCH ? undefined : descriptionRequest(pr?.body);
+  // A PR Proofed opened itself (the setup PR, the site's "Break it yourself") is described by Proofed:
+  // that text says what Proofed does, not what to check in the app.
+  const ownPr = pr?.head.ref === SETUP_BRANCH || pr?.user?.login === APP_LOGIN;
+  const request = ownPr ? undefined : descriptionRequest(pr?.body);
   asked = request ? [askedScenario("description", request)] : [];
   const only = process.env.PROOFED_ONLY?.split(",").map((s) => s.trim()).filter(Boolean);
   const changed = base ? changedFiles(base, sha === "local" ? "HEAD" : sha) : undefined;
