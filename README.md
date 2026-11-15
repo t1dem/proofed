@@ -4,6 +4,41 @@ Proofed runs the user flows a pull request touches in real Chrome with [Kane CLI
 
 Built for the Kane CLI hackathon, November 2026.
 
+## For judges
+
+**Try it, no account:** [proofed.neptunescodm.workers.dev/try](https://proofed.neptunescodm.workers.dev/try). Pick one of four prepared pull requests. Proofed opens it on [t1dem/proofed-demo-store](https://github.com/t1dem/proofed-demo-store), a real repository, and the page follows the run: Kane in Chrome, the report, Claude's fix, Kane's re-check. One run goes at a time, 15 a day, 3 per visitor, because each one spends Kane credits and Claude's time.
+
+A run takes 8 to 14 minutes from the click to the fixed report. If you'd rather read than wait, here are all four changes on the demo store. #5 and #9 were opened from that page; #10 and #11 are the other two changes, opened by hand:
+
+| Pull request | What Kane found | What happened next |
+|---|---|---|
+| [demo-store #5](https://github.com/t1dem/proofed-demo-store/pull/5) | The promo code `welcome10` typed in lowercase is rejected | Claude fixed it on the first attempt ([`c242f6c`](https://github.com/t1dem/proofed-demo-store/commit/c242f6c)), Kane confirmed |
+| [demo-store #9](https://github.com/t1dem/proofed-demo-store/pull/9) | The confirmation page charges €13.00 instead of €17.90 | Kane didn't confirm Claude's first attempt; the second passed ([`f9fa5a6`](https://github.com/t1dem/proofed-demo-store/commit/f9fa5a6)) |
+| [demo-store #11](https://github.com/t1dem/proofed-demo-store/pull/11) | The + button in the bag leaves the quantity at 1 | Claude fixed it on the first attempt ([`9999a0d`](https://github.com/t1dem/proofed-demo-store/commit/9999a0d)), Kane confirmed; 8.5 minutes in all |
+| [demo-store #10](https://github.com/t1dem/proofed-demo-store/pull/10) | A €44.50 bag ships free, though free shipping starts at €50 | Claude fixed it on the first attempt ([`23eb54b`](https://github.com/t1dem/proofed-demo-store/commit/23eb54b)), Kane confirmed; 10.5 minutes in all |
+
+**The dashboard without signing in:** [/app?demo](https://proofed.neptunescodm.workers.dev/app?demo). The pull requests of `t1dem/proofed` and `t1dem/proofed-demo-store` in it are copied from GitHub. The `sample-coffee-store` repository is made up, to show every state at once, and is labelled "Sample data".
+
+**Proofed checks itself:** every pull request to this repository runs five dashboard scenarios through Kane, for example [#25](https://github.com/t1dem/proofed/pull/25#issuecomment-6897255024).
+
+### What it doesn't do
+
+- **Kane's verdict on the same failure varies.** On [demo-store #6](https://github.com/t1dem/proofed-demo-store/pull/6) the same failed check that #9 reports as a break came back twice as "the test may be wrong". Proofed shows such a run as not confirmed, never as a pass, and starts no fix. The scenario now says where its €17.90 comes from; #9 ran after that change.
+- **The fixer needs Claude to be available.** Fixes on the demo store run on a subscription token. On [#7](https://github.com/t1dem/proofed-demo-store/pull/7) and [#8](https://github.com/t1dem/proofed-demo-store/pull/8) the usage limit was reached, so Kane caught the break and no fix followed. The report says so.
+- **It checks only what a scenario describes.** A flow nobody wrote a scenario for isn't run, and a scenario whose `paths` miss a file isn't picked when that file changes.
+- **It is slow next to unit tests.** A scenario takes one to four minutes of Kane's time, and a fix adds a build and a re-check per attempt.
+
+### What running Kane in CI took
+
+Each of these is a few lines in `src/`, found by a run that went wrong:
+
+- A pass with no `assert` step counts as "not checked" (`src/run.ts`). Asked something vague, Kane opened the page, waited and reported a pass.
+- Kane is told to do each step once and not to reach the goal another way (`src/run.ts`). Left alone it routes around a broken button and passes.
+- A wall-clock limit of 360 seconds sits over Kane's own `--timeout 300` (`src/kane.ts`): one run was still going after 361.
+- Kane runs in its own process group, killed as a whole (`src/kane.ts`). Its runner and Playwright children outlive a plain kill and hold the output open.
+- `kane-cli login` runs once before the parallel scenarios (`action.yml`), and a scenario that ends without a verdict is retried once (`src/run.ts`). In 13 of 36 runs that started scenarios side by side, one of the first exited within seconds; the retry always reached a verdict.
+- A start page that throws while loading fails its scenarios before Kane runs (`src/precheck.ts`), with the browser's error and a screenshot, at no credits.
+
 ## How a PR goes
 
 1. You open a PR. Proofed diffs it against the base branch and picks the scenarios whose `paths` the diff touches.
