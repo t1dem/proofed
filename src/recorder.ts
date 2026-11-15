@@ -11,8 +11,9 @@ export type Frame = { file: string; time: number; scale: number; width: number; 
 export type Action = { kind: "click" | "type"; time: number; x: number; y: number; rect: Rect };
 // A still for the live view, with where Kane last clicked or typed when it shows that same page.
 export type Still = { jpeg: Uint8Array; cursor?: LiveCursor };
-type Page = { doc: number; href: string; sx: number; sy: number };
-const PAGE = `JSON.stringify({ doc: performance.timeOrigin, href: location.href, sx: scrollX, sy: scrollY })`;
+// The page an action was on: its document, address, scroll and viewport size.
+type Page = { doc: number; href: string; sx: number; sy: number; w: number; h: number };
+const PAGE = `({ doc: performance.timeOrigin, href: location.href, sx: scrollX, sy: scrollY, w: innerWidth, h: innerHeight })`;
 
 const MAX_WIDTH = 1920;
 const MAX_HEIGHT = 1080;
@@ -20,12 +21,12 @@ const BINDING = "__proofedAction";
 
 // Runs in every page Kane opens. It only listens: Kane's clicks and typing are reported back
 // through a CDP binding so the clip can draw a cursor and zoom to where things happen.
-// It also says which page the action was on (the document, its address and scroll), so the live
-// view only draws a cursor over the same page as it was then.
+// It also says which page the action was on, so the live view only draws a cursor over the same
+// page as it was then.
 const LISTENER = `(() => {
   const report = (kind, x, y, el) => {
     const r = el.getBoundingClientRect();
-    const page = { doc: performance.timeOrigin, href: location.href, sx: scrollX, sy: scrollY };
+    const page = ${PAGE};
     globalThis.${BINDING}?.(JSON.stringify({ kind, time: Date.now() / 1000, x, y, rect: { x: r.x, y: r.y, width: r.width, height: r.height }, page }));
   };
   let pointerAt = 0;
@@ -84,9 +85,11 @@ const LOCATE = (words: string[]) => `(() => {
   return JSON.stringify(box ? { x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top } : best.rect);
 })()`;
 
-// A cursor drawn where an action was is only right on the same page, scrolled the same: another
-// document or address (a single-page app's route) or a scroll and it would point at something else.
-export const samePage = (a: Page, b: Page) => a.doc === b.doc && a.href === b.href && Math.abs(a.sx - b.sx) < 2 && Math.abs(a.sy - b.sy) < 2;
+// A cursor drawn where an action was is only right on the same page, scrolled and sized the same:
+// another document or address (a single-page app's route), a scroll or another layout and it would
+// point at something else.
+export const samePage = (a: Page, b: Page) =>
+  a.doc === b.doc && a.href === b.href && Math.abs(a.sx - b.sx) < 2 && Math.abs(a.sy - b.sy) < 2 && a.w === b.w && a.h === b.h;
 
 // Kane doesn't record video, so we attach to the same Chrome over CDP and keep every
 // screencast frame with its timestamp. Frames are only sent when the page repaints,
@@ -168,23 +171,22 @@ export async function startRecorder(endpoint: string, outDir: string) {
         .catch(() => ({ result: {} as { value?: string | null } }));
       return result.value ? (JSON.parse(result.value) as Rect) : undefined;
     },
-    // A small still of what the page shows now, for the dashboard while the run is going (live.ts).
-    // Its own screenshot, not a screencast frame: those are full size, for the clip.
-    async snapshot(width = 800): Promise<Still | undefined> {
+    // A still of what the page shows now, for the dashboard while the run is going (live.ts).
+    // Its own screenshot, not a screencast frame: those are full quality, for the clip. No clip or
+    // scale: Chrome shrinks a screenshot by emulating a smaller viewport for it, and when Kane takes
+    // a screenshot at the same moment the page is left at that size, in its narrow layout.
+    async snapshot(): Promise<Still | undefined> {
       const session = lastSession;
       if (!session) return undefined;
       const action = lastAction;
       try {
-        type Viewport = { cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number } };
-        const { cssVisualViewport: v } = await cdp.send<Viewport>("Page.getLayoutMetrics", {}, session);
-        const clip = { x: v.pageX, y: v.pageY, width: v.clientWidth, height: v.clientHeight, scale: Math.min(1, width / v.clientWidth) };
-        const { data } = await cdp.send<{ data: string }>("Page.captureScreenshot", { format: "jpeg", quality: 60, clip }, session);
+        const { data } = await cdp.send<{ data: string }>("Page.captureScreenshot", { format: "jpeg", quality: 60 }, session);
         const jpeg = Buffer.from(data, "base64");
         if (!action || action.session !== session) return { jpeg };
         // Asked after the screenshot: a page that is still the one of the action was showing during it.
-        const { result } = await cdp.send<{ result: { value?: string } }>("Runtime.evaluate", { expression: PAGE, returnByValue: true }, session);
-        const now = JSON.parse(result.value ?? "null") as Page | null;
-        return { jpeg, ...(now && samePage(action.page, now) && { cursor: { x: action.x / v.clientWidth, y: action.y / v.clientHeight } }) };
+        const { result } = await cdp.send<{ result: { value?: Page } }>("Runtime.evaluate", { expression: PAGE, returnByValue: true }, session);
+        const now = result.value;
+        return { jpeg, ...(now && samePage(action.page, now) && { cursor: { x: action.x / now.w, y: action.y / now.h } }) };
       } catch {
         return undefined; // The page is navigating or closed; the next one will do.
       }

@@ -11,7 +11,8 @@ import { oidcToken, serverUrl } from "./server.ts";
 
 const SEND_EVERY = 1000;
 const FRAME_EVERY = 2000;
-// A still taken for an action may follow the last one sooner, but not much: Kane can click twice in a row.
+// A still taken for an action goes out even right after a regular one, so the cursor shows before the
+// page moves on; only a burst of actions (a click and the typing after it) is thinned out.
 const ACTION_FRAME_EVERY = 500;
 const GIVE_UP_AFTER = 5;
 
@@ -23,6 +24,7 @@ let lastSent = 0;
 let chain: Promise<unknown> = Promise.resolve();
 let failures = 0;
 const lastFrame = new Map<string, number>();
+const lastActionFrame = new Map<string, number>();
 
 async function post(path: string, body: string | Blob, type: string) {
   if (!server) return;
@@ -104,8 +106,10 @@ export const live = {
   // What Kane's Chrome shows now, at most every couple of seconds per scenario, and where Kane last
   // clicked or typed on it. The cursor rides with its picture, so the dashboard never pairs the two wrong.
   frame(id: string, { jpeg, cursor }: Still, action = false) {
-    if (!state || Date.now() - (lastFrame.get(id) ?? 0) < (action ? ACTION_FRAME_EVERY : FRAME_EVERY)) return;
-    lastFrame.set(id, Date.now());
+    const now = Date.now();
+    if (!state || now - ((action ? lastActionFrame : lastFrame).get(id) ?? 0) < (action ? ACTION_FRAME_EVERY : FRAME_EVERY)) return;
+    lastFrame.set(id, now);
+    if (action) lastActionFrame.set(id, now);
     const query = new URLSearchParams({ run: state.run, pr: String(state.pr), scenario: id });
     if (cursor) for (const [k, v] of Object.entries(cursor)) query.set(k, v.toFixed(4));
     void post(`/api/actions/live/frame?${query}`, new Blob([jpeg as Uint8Array<ArrayBuffer>]), "image/jpeg");
