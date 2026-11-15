@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readLive, summarize } from "./livefile.ts";
+import { readCursor, readLive, summarize } from "./livefile.ts";
 
 const base = { run: "1-1", pr: 2, sha: "abc", kind: "check", startedAt: 1, scenarios: [] };
 
@@ -37,4 +37,13 @@ test("summarize names the scenario Kane is on and its latest step", () => {
     ],
   })!;
   assert.deepEqual(summarize(live), { kind: "check", total: 2, done: 1, scenario: "B", step: "Opened the store" });
+});
+
+test("readCursor takes a point on the frame and nothing else", () => {
+  assert.deepEqual(readCursor("0.25", "1"), { x: 0.25, y: 1 });
+  assert.equal(readCursor(null, null), undefined);
+  assert.equal(readCursor("0.5", ""), undefined);
+  assert.equal(readCursor("1.2", "0.5"), undefined);
+  assert.equal(readCursor("-0.1", "0.5"), undefined);
+  assert.equal(readCursor("NaN", "0.5"), undefined);
 });

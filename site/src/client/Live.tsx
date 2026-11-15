@@ -42,30 +42,61 @@ function headline(live: Live): [string, string] {
   return [`Kane is checking ${what}`, sub];
 }
 
+// The clip's cursor (src/clip.ts), its tip on the point where Kane clicked or typed. It glides from
+// one point to the next as the clip's does; a cursor that wasn't on the last frame appears in place,
+// and one that isn't on this frame fades out where it was.
+function Cursor({ at, gone }: { at: NonNullable<Frame["cursor"]>; gone?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 34"
+      aria-hidden
+      className={`pointer-events-none absolute w-[max(15px,2.2%)] -translate-x-[8.33%] -translate-y-[5.88%] drop-shadow-[0_2px_3px_rgba(0,0,0,0.35)] transition-[left,top,opacity] duration-600 ease-[cubic-bezier(0.65,0,0.35,1)] starting:opacity-0 motion-reduce:transition-none ${gone ? "opacity-0" : ""}`}
+      style={{ left: `${at.x * 100}%`, top: `${at.y * 100}%` }}
+    >
+      <path d="M2 2v25.5l6.4-6.2 4.1 9.9 4.4-1.8-4-9.7h8.9z" fill="#0b0d12" stroke="#fff" strokeWidth="2" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 // What Kane's Chrome shows, swapped in only once the next frame has loaded, so it never blinks.
 // A frame that fails to load is skipped: the last good one (or the caption) stays, never a broken image.
+// The cursor comes with its frame and changes with it, never ahead of the picture or behind it.
+// A frame without one keeps the last, `gone`, so it can fade out; one that comes back gets a new
+// key (n), so it appears at its point instead of gliding there from where the old one faded.
+type Shown = { url: string; aspect: number; cursor?: NonNullable<Frame["cursor"]> & { n: number }; gone?: boolean };
+
+function nextShown(last: Shown | undefined, url: string, aspect: number, at: Frame["cursor"]): Shown {
+  const c = last?.cursor;
+  if (!at) return { url, aspect, ...(c && { cursor: c, gone: true }) };
+  return { url, aspect, cursor: { ...at, n: c && !last.gone ? c.n : (c?.n ?? 0) + 1 } };
+}
+
 function LiveFrame({ frame, on, now, startedAt }: { frame: Frame | undefined; on: boolean; now: number; startedAt?: number }) {
-  const [shown, setShown] = useState<string>();
+  const [shown, setShown] = useState<Shown>();
   useEffect(() => {
-    const next = frame?.url;
-    if (!next || next === shown) return;
+    if (!frame || frame.url === shown?.url) return;
     let current = true;
     const img = new Image();
-    img.src = next;
+    img.src = frame.url;
     img.decode().then(
-      () => current && setShown(next),
+      () => current && setShown((last) => nextShown(last, frame.url, img.naturalWidth / img.naturalHeight, frame.cursor)),
       () => {},
     );
     return () => {
       current = false;
     };
-  }, [frame?.url, shown]);
+  }, [frame?.url, shown?.url]);
   const age = frame ? now - frame.at : 0;
   return (
     <figure className="min-w-0 overflow-hidden rounded-lg border border-edge bg-bg lg:sticky lg:top-6">
-      <div className="aspect-video bg-black">
+      <div className="relative aspect-video overflow-hidden bg-black">
         {shown ? (
-          <img src={shown} alt="What Kane's Chrome shows now" className="block size-full object-cover object-top" />
+          // Covers the 16:9 box the way object-cover with the top kept would: full width and cut at the
+          // bottom, or full height and cut on both sides. The cursor's fractions then land on the picture.
+          <div className="absolute top-0 left-1/2 -translate-x-1/2" style={{ aspectRatio: shown.aspect, width: `max(100%, ${(shown.aspect / (16 / 9)) * 100}%)` }}>
+            <img src={shown.url} alt="What Kane's Chrome shows now" className="block size-full" />
+            {shown.cursor && <Cursor key={shown.cursor.n} at={shown.cursor} gone={shown.gone} />}
+          </div>
         ) : (
           <figcaption className="grid size-full place-items-center bg-bg px-6 text-center text-[13px] text-faint">Kane's Chrome shows here once it opens the page.</figcaption>
         )}
