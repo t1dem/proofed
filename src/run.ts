@@ -115,9 +115,13 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
   try {
     const recorder = await startRecorder(chrome.endpoint, join(dir, "frames"));
     live.scenario(scenario.id, { status: "running", steps: [], startedAt: Date.now() });
-    stills = setInterval(() => {
-      if (live.on()) void recorder.snapshot().then((jpeg) => jpeg && live.frame(scenario.id, jpeg));
-    }, 2000);
+    // A still right after each click or typing, so the live view shows the cursor there before the
+    // page moves on; between actions, one every couple of seconds.
+    const still = (action: boolean) => {
+      if (live.on()) void recorder.snapshot().then((s) => s && live.frame(scenario.id, s, action));
+    };
+    recorder.onAction = () => still(true);
+    stills = setInterval(() => still(false), 2000);
     let focus: Promise<Rect | undefined> = Promise.resolve(undefined);
     const kane = await runKane({
       objective: kaneObjective(scenario.objective),

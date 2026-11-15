@@ -5,11 +5,14 @@
 // keeps refusing switches it off.
 import type { Step } from "./kane.ts";
 import type { Live, LiveFix, LiveScenario } from "./livefile.ts";
+import type { Still } from "./recorder.ts";
 import type { Scenario } from "./scenarios.ts";
 import { oidcToken, serverUrl } from "./server.ts";
 
 const SEND_EVERY = 1000;
 const FRAME_EVERY = 2000;
+// A still taken for an action may follow the last one sooner, but not much: Kane can click twice in a row.
+const ACTION_FRAME_EVERY = 500;
 const GIVE_UP_AFTER = 5;
 
 let state: Live | undefined;
@@ -98,11 +101,13 @@ export const live = {
     changed();
   },
 
-  // What Kane's Chrome shows now, at most every couple of seconds per scenario.
-  frame(id: string, jpeg: Uint8Array) {
-    if (!state || Date.now() - (lastFrame.get(id) ?? 0) < FRAME_EVERY) return;
+  // What Kane's Chrome shows now, at most every couple of seconds per scenario, and where Kane last
+  // clicked or typed on it. The cursor rides with its picture, so the dashboard never pairs the two wrong.
+  frame(id: string, { jpeg, cursor }: Still, action = false) {
+    if (!state || Date.now() - (lastFrame.get(id) ?? 0) < (action ? ACTION_FRAME_EVERY : FRAME_EVERY)) return;
     lastFrame.set(id, Date.now());
     const query = new URLSearchParams({ run: state.run, pr: String(state.pr), scenario: id });
+    if (cursor) for (const [k, v] of Object.entries(cursor)) query.set(k, v.toFixed(4));
     void post(`/api/actions/live/frame?${query}`, new Blob([jpeg as Uint8Array<ArrayBuffer>]), "image/jpeg");
   },
 

@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { connectCdp, type TargetInfo } from "./cdp.ts";
+import type { LiveCursor } from "./livefile.ts";
 
 export type Rect = { x: number; y: number; width: number; height: number };
 // `scale` turns page (CSS) pixels into pixels of this frame's image.
@@ -8,6 +9,10 @@ export type Rect = { x: number; y: number; width: number; height: number };
 export type Frame = { file: string; time: number; scale: number; width: number; height: number; bytes: number };
 // What Kane did on the page, in CSS pixels of the viewport at that moment.
 export type Action = { kind: "click" | "type"; time: number; x: number; y: number; rect: Rect };
+// A still for the live view, with where Kane last clicked or typed when it shows that same page.
+export type Still = { jpeg: Uint8Array; cursor?: LiveCursor };
+type Page = { doc: number; href: string; sx: number; sy: number };
+const PAGE = `JSON.stringify({ doc: performance.timeOrigin, href: location.href, sx: scrollX, sy: scrollY })`;
 
 const MAX_WIDTH = 1920;
 const MAX_HEIGHT = 1080;
@@ -15,10 +20,13 @@ const BINDING = "__proofedAction";
 
 // Runs in every page Kane opens. It only listens: Kane's clicks and typing are reported back
 // through a CDP binding so the clip can draw a cursor and zoom to where things happen.
+// It also says which page the action was on (the document, its address and scroll), so the live
+// view only draws a cursor over the same page as it was then.
 const LISTENER = `(() => {
   const report = (kind, x, y, el) => {
     const r = el.getBoundingClientRect();
-    globalThis.${BINDING}?.(JSON.stringify({ kind, time: Date.now() / 1000, x, y, rect: { x: r.x, y: r.y, width: r.width, height: r.height } }));
+    const page = { doc: performance.timeOrigin, href: location.href, sx: scrollX, sy: scrollY };
+    globalThis.${BINDING}?.(JSON.stringify({ kind, time: Date.now() / 1000, x, y, rect: { x: r.x, y: r.y, width: r.width, height: r.height }, page }));
   };
   let pointerAt = 0;
   let typingIn = null;
@@ -76,6 +84,10 @@ const LOCATE = (words: string[]) => `(() => {
   return JSON.stringify(box ? { x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top } : best.rect);
 })()`;
 
+// A cursor drawn where an action was is only right on the same page, scrolled the same: another
+// document or address (a single-page app's route) or a scroll and it would point at something else.
+export const samePage = (a: Page, b: Page) => a.doc === b.doc && a.href === b.href && Math.abs(a.sx - b.sx) < 2 && Math.abs(a.sy - b.sy) < 2;
+
 // Kane doesn't record video, so we attach to the same Chrome over CDP and keep every
 // screencast frame with its timestamp. Frames are only sent when the page repaints,
 // which is why the clip later replays them with their real durations.
@@ -85,6 +97,7 @@ export async function startRecorder(endpoint: string, outDir: string) {
   const frames: Frame[] = [];
   const actions: Action[] = [];
   let lastSession: string | undefined;
+  let lastAction: (Action & { page: Page; session: string | undefined }) | undefined;
 
   const attached = new Set<string>();
   cdp.on("Target.targetCreated", ({ targetInfo }) => {
@@ -127,17 +140,23 @@ export async function startRecorder(endpoint: string, outDir: string) {
     void cdp.send("Page.screencastFrameAck", { sessionId: ack }, sessionId).catch(() => {});
   });
 
-  cdp.on("Runtime.bindingCalled", ({ name, payload }) => {
-    if (name === BINDING) actions.push(JSON.parse(payload) as Action);
+  cdp.on("Runtime.bindingCalled", ({ name, payload }, sessionId) => {
+    if (name !== BINDING) return;
+    const { page, ...action } = JSON.parse(payload) as Action & { page: Page };
+    actions.push(action);
+    lastAction = { ...action, page, session: sessionId };
+    recorder.onAction?.();
   });
 
   await cdp.send("Target.setDiscoverTargets", { discover: true });
   // Don't let Kane navigate before the listener is installed on the starting tab.
   await Promise.race([ready, new Promise((r) => setTimeout(r, 5000))]);
 
-  return {
+  const recorder = {
     frames,
     actions,
+    // Called on each of Kane's clicks and the first keystroke in a field.
+    onAction: undefined as (() => void) | undefined,
     async locate(words: string[]): Promise<Rect | undefined> {
       if (!lastSession || words.length === 0) return undefined;
       const { result } = await cdp
@@ -151,14 +170,21 @@ export async function startRecorder(endpoint: string, outDir: string) {
     },
     // A small still of what the page shows now, for the dashboard while the run is going (live.ts).
     // Its own screenshot, not a screencast frame: those are full size, for the clip.
-    async snapshot(width = 800): Promise<Uint8Array | undefined> {
-      if (!lastSession) return undefined;
+    async snapshot(width = 800): Promise<Still | undefined> {
+      const session = lastSession;
+      if (!session) return undefined;
+      const action = lastAction;
       try {
         type Viewport = { cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number } };
-        const { cssVisualViewport: v } = await cdp.send<Viewport>("Page.getLayoutMetrics", {}, lastSession);
+        const { cssVisualViewport: v } = await cdp.send<Viewport>("Page.getLayoutMetrics", {}, session);
         const clip = { x: v.pageX, y: v.pageY, width: v.clientWidth, height: v.clientHeight, scale: Math.min(1, width / v.clientWidth) };
-        const { data } = await cdp.send<{ data: string }>("Page.captureScreenshot", { format: "jpeg", quality: 60, clip }, lastSession);
-        return Buffer.from(data, "base64");
+        const { data } = await cdp.send<{ data: string }>("Page.captureScreenshot", { format: "jpeg", quality: 60, clip }, session);
+        const jpeg = Buffer.from(data, "base64");
+        if (!action || action.session !== session) return { jpeg };
+        // Asked after the screenshot: a page that is still the one of the action was showing during it.
+        const { result } = await cdp.send<{ result: { value?: string } }>("Runtime.evaluate", { expression: PAGE, returnByValue: true }, session);
+        const now = JSON.parse(result.value ?? "null") as Page | null;
+        return { jpeg, ...(now && samePage(action.page, now) && { cursor: { x: action.x / v.clientWidth, y: action.y / v.clientHeight } }) };
       } catch {
         return undefined; // The page is navigating or closed; the next one will do.
       }
@@ -168,4 +194,5 @@ export async function startRecorder(endpoint: string, outDir: string) {
       return { frames, actions };
     },
   };
+  return recorder;
 }

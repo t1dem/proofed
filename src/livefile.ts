@@ -97,6 +97,16 @@ export function readLive(input: unknown): Live | undefined {
   };
 }
 
+// Where Kane last clicked or typed on a live frame, as a fraction of its width and height. It comes
+// with the frame as two query parameters (x, y); a frame without them shows no cursor.
+export type LiveCursor = { x: number; y: number };
+
+export function readCursor(x: string | null, y: string | null): LiveCursor | undefined {
+  if (x === null || y === null || x === "" || y === "") return undefined;
+  const at = { x: Number(x), y: Number(y) };
+  return [at.x, at.y].every((v) => Number.isFinite(v) && v >= 0 && v <= 1) ? at : undefined;
+}
+
 // What the inbox says about a busy pull request: where the run is, in a line.
 export type LiveSummary = {
   kind: Live["kind"];

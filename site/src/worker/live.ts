@@ -1,6 +1,6 @@
 // A run as it goes. The action posts its state and a frame of each scenario's Chrome here while it
 // works (src/live.ts at the repo root); the dashboard reads them back while the pull request is busy.
-import { readLive, type Live } from "../../../src/livefile";
+import { readCursor, readLive, type Live, type LiveCursor } from "../../../src/livefile";
 import { jobRepo } from "./actions";
 import type { Env } from "./index";
 import { LIVE_LASTS, markAsked } from "./runs";
@@ -28,11 +28,13 @@ export async function handleLivePost(request: Request, env: Env) {
     // A frame belongs to the run the state says is going; one from an older run is dropped.
     const current = await env.DB.prepare("SELECT run FROM live WHERE repo = ?1 AND pr = ?2").bind(repo, pr).first<{ run: string }>();
     if (current?.run !== run) return refuse(409, "not the current run");
+    // An action from before the cursor sends no point: its frames show none.
+    const cursor = readCursor(url.searchParams.get("x"), url.searchParams.get("y"));
     await env.DB.prepare(
-      `INSERT INTO live_frames (repo, pr, scenario, jpg, at) VALUES (?1, ?2, ?3, ?4, ?5)
-       ON CONFLICT(repo, pr, scenario) DO UPDATE SET jpg = ?4, at = ?5`,
+      `INSERT INTO live_frames (repo, pr, scenario, jpg, at, x, y) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+       ON CONFLICT(repo, pr, scenario) DO UPDATE SET jpg = ?4, at = ?5, x = ?6, y = ?7`,
     )
-      .bind(repo, pr, scenario, jpg, Date.now())
+      .bind(repo, pr, scenario, jpg, Date.now(), cursor?.x ?? null, cursor?.y ?? null)
       .run();
     return new Response(null, { status: 204 });
   }
@@ -55,8 +57,9 @@ export async function handleLivePost(request: Request, env: Env) {
   return new Response(null, { status: 204 });
 }
 
-// What the dashboard gets: the state, when it last changed, and where each scenario's latest frame is.
-export type LiveView = { live: (Live & { at: number }) | null; frames: Record<string, { url: string; at: number }> };
+// What the dashboard gets: the state, when it last changed, and where each scenario's latest frame is,
+// with the cursor drawn over that frame.
+export type LiveView = { live: (Live & { at: number }) | null; frames: Record<string, { url: string; at: number; cursor?: LiveCursor }> };
 
 export async function getLive(env: Env, repo: string, pr: number, api = "/api"): Promise<LiveView> {
   const since = Date.now() - LIVE_LASTS;
@@ -64,13 +67,20 @@ export async function getLive(env: Env, repo: string, pr: number, api = "/api"):
     env.DB.prepare("SELECT data, updated_at FROM live WHERE repo = ?1 AND pr = ?2 AND updated_at > ?3")
       .bind(repo, pr, since)
       .first<{ data: string; updated_at: number }>(),
-    env.DB.prepare("SELECT scenario, at FROM live_frames WHERE repo = ?1 AND pr = ?2").bind(repo, pr).all<{ scenario: string; at: number }>(),
+    env.DB.prepare("SELECT scenario, at, x, y FROM live_frames WHERE repo = ?1 AND pr = ?2")
+      .bind(repo, pr)
+      .all<{ scenario: string; at: number; x: number | null; y: number | null }>(),
   ]);
   if (!row) return { live: null, frames: {} };
   const base = `${api}/pulls/${repo}/${pr}/live`;
   return {
     live: { ...(JSON.parse(row.data) as Live), at: row.updated_at },
-    frames: Object.fromEntries(frames.results.map((f) => [f.scenario, { url: `${base}/${encodeURIComponent(f.scenario)}.jpg?at=${f.at}`, at: f.at }])),
+    frames: Object.fromEntries(
+      frames.results.map((f) => [
+        f.scenario,
+        { url: `${base}/${encodeURIComponent(f.scenario)}.jpg?at=${f.at}`, at: f.at, ...(f.x !== null && f.y !== null && { cursor: { x: f.x, y: f.y } }) },
+      ]),
+    ),
   };
 }
 
