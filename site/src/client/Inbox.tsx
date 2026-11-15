@@ -2,7 +2,7 @@ import { Check, CircleCheck, CircleDashed, CircleX, Inbox as InboxIcon, ListFilt
 import { Component, createRef, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { NOTHING_CHECKED } from "../../../src/runfile";
 import type { PullView } from "../worker/runs";
-import { ago, installed, movingName, plural, prefetch, titleName, type Ask, type Load, type Route, type useAsk } from "./lib";
+import { ago, DEMO, installed, movingName, plural, prefetch, titleName, type Ask, type Load, type Route, type useAsk } from "./lib";
 import { Backdrop, bone, focus, iconButton, kindOf, Link, Mark, outline, PageTitle, Pips, plain, popover, sha7, soft, solid, useDismiss, useSheetDrag } from "./ui";
 
 type AskedOf = ReturnType<typeof useAsk>[0];
@@ -605,9 +605,13 @@ export function Inbox({ pulls, onRefresh, repo, onRepo, filter, onFilter, go, as
     <main className="mx-auto max-w-6xl px-4 pb-8 sm:px-8 md:py-7">
       <PageTitle
         aside={
-          inRepo.length > 0 && (
-            <FilterMenu filter={filter} onFilter={narrow} open={filterOpen} onOpen={setFilterOpen} repos={repos} repo={repo} onRepo={onRepo} />
-          )
+          <>
+            {/* The sidebar says it on a wider screen. */}
+            {DEMO && <span className="shrink-0 text-[13px] text-faint md:hidden">Sample data</span>}
+            {inRepo.length > 0 && (
+              <FilterMenu filter={filter} onFilter={narrow} open={filterOpen} onOpen={setFilterOpen} repos={repos} repo={repo} onRepo={onRepo} />
+            )}
+          </>
         }
       >
         Inbox
