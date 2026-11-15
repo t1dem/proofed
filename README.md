@@ -8,14 +8,14 @@ Built for the Kane CLI hackathon, November 2026.
 
 **Try it, no account:** [proofed.neptunescodm.workers.dev/try](https://proofed.neptunescodm.workers.dev/try). Pick one of four prepared pull requests. Proofed opens it on [t1dem/proofed-demo-store](https://github.com/t1dem/proofed-demo-store), a real repository, and the page follows the run: Kane in Chrome, the report, Claude's fix, Kane's re-check. One run goes at a time, 15 a day, 3 per visitor, because each one spends Kane credits and Claude's time.
 
-A run takes 8 to 14 minutes from the click to the fixed report. If you'd rather read than wait, here are all four changes on the demo store. #5 and #9 were opened from that page; #10 and #11 are the other two changes, opened by hand:
+A run takes 8 to 14 minutes from the click to the fixed report. If you'd rather read than wait, here are all four changes on the demo store. #5 and #9 were opened from that page; #11 and #12 are the other two changes, opened by hand:
 
 | Pull request | What Kane found | What happened next |
 |---|---|---|
 | [demo-store #5](https://github.com/t1dem/proofed-demo-store/pull/5) | The promo code `welcome10` typed in lowercase is rejected | Claude fixed it on the first attempt ([`c242f6c`](https://github.com/t1dem/proofed-demo-store/commit/c242f6c)), Kane confirmed |
 | [demo-store #9](https://github.com/t1dem/proofed-demo-store/pull/9) | The confirmation page charges €13.00 instead of €17.90 | Kane didn't confirm Claude's first attempt; the second passed ([`f9fa5a6`](https://github.com/t1dem/proofed-demo-store/commit/f9fa5a6)) |
 | [demo-store #11](https://github.com/t1dem/proofed-demo-store/pull/11) | The + button in the bag leaves the quantity at 1 | Claude fixed it on the first attempt ([`9999a0d`](https://github.com/t1dem/proofed-demo-store/commit/9999a0d)), Kane confirmed; 8.5 minutes in all |
-| [demo-store #10](https://github.com/t1dem/proofed-demo-store/pull/10) | A €44.50 bag ships free, though free shipping starts at €50 | Claude fixed it on the first attempt ([`23eb54b`](https://github.com/t1dem/proofed-demo-store/commit/23eb54b)), Kane confirmed; 10.5 minutes in all |
+| [demo-store #12](https://github.com/t1dem/proofed-demo-store/pull/12) | A €44.50 bag ships free, though free shipping starts at €50 | Claude fixed it on the first attempt ([`f54f1b5`](https://github.com/t1dem/proofed-demo-store/commit/f54f1b5)), Kane confirmed; 8.5 minutes in all |
 
 **The dashboard without signing in:** [/app?demo](https://proofed.neptunescodm.workers.dev/app?demo). The pull requests of `t1dem/proofed` and `t1dem/proofed-demo-store` in it are copied from GitHub. The `sample-coffee-store` repository is made up, to show every state at once, and is labelled "Sample data".
 
