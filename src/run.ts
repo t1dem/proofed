@@ -138,6 +138,8 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     const recorded = recorder.stop();
     const frames = recorded.frames.filter((f) => f.time >= start);
     const outcome = outcomeOf(kane.end, kane.steps);
+    // Kane left without a verdict: all it said goes to the log, where the cause can be read later.
+    if (!kane.end) log(`Kane exited with code ${kane.exitCode} and no verdict${kane.timedOut ? " (cut off by Proofed's time limit)" : ""}. Its stderr:\n${kane.stderr.trim() || "(empty)"}`);
     // Kane's reason for such a pass is "Objective completed"; the report, the run file and the fixer show ours.
     const end = kane.end && outcome === "unsure" && kane.end.status === "passed" ? { ...kane.end, reason: NOTHING_CHECKED } : kane.end;
     log(`→ ${outcome}${end?.reason ? `: ${end.reason}` : ""} (${frames.length} frames)`);

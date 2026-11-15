@@ -256,10 +256,10 @@ const KANE_CUT = 80;
 export const plain = (remark: string) => {
   let text = remark.replace(/^[a-z_]+:\s+/, "");
   const cut = text.length >= KANE_CUT;
-  text = text
-    .replace(/^[A-Z_]+\([a-z_]+,\s*['"]?/, "")
-    .replace(/['"]?\)$/, "")
-    .replace(/^PRIMARY:\s*/, "");
+  // Only a raw call ends in its own bracket: "Clicking Bag (3)" keeps its.
+  const call = /^[A-Z_]+\([a-z_]+,\s*['"]?/;
+  if (call.test(text)) text = text.replace(call, "").replace(/['"]?\)$/, "");
+  text = text.replace(/^PRIMARY:\s*/, "");
   if (cut) text = `${text.replace(/\s+\S*$/, "")}…`;
   // A repository name ("t1dem/proofed …") keeps its case.
   return /^\S*\//.test(text) ? text : text.charAt(0).toUpperCase() + text.slice(1);
