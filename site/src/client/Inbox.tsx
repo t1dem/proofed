@@ -348,9 +348,11 @@ class Glide extends Component<{ children: ReactNode }> {
     this.placed = placed;
   }
 
+  // Its own stacking context: a lifted row stays above the other rows but never above what lies
+  // outside the list, such as the filter menu open over it or the bars on a phone.
   render() {
     return (
-      <div ref={this.box} className="contents">
+      <div ref={this.box} className="isolate">
         {this.props.children}
       </div>
     );
