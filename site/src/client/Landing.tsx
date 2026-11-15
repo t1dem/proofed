@@ -60,6 +60,12 @@ function Hero() {
         >
           See a real PR
         </a>
+        <a
+          href="/try"
+          className="inline-flex min-h-12 items-center rounded-full border border-ink/25 px-6 font-medium transition hover:border-ink"
+        >
+          Break it yourself
+        </a>
       </div>
       <p className="mt-5 text-[15px] text-muted">Runs in your own GitHub Actions, with your TestMu and Claude keys.</p>
       <HeroClip />

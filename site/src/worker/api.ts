@@ -41,6 +41,30 @@ const json = (data: unknown, status = 200) => Response.json(data, { status });
 const WORKFLOW = "proofed.yml";
 const CLIP_TYPES = { mp4: "video/mp4", gif: "image/gif", jpg: "image/jpeg" };
 
+// "/clip/<owner>/<repo>/pr-<n>/<run>/<file>": a clip on the repo's proofed-clips branch.
+export const CLIP_PATH = /^\/clip\/([^/]+\/[^/]+)\/(pr-\d+\/[\w.-]+\/[\w.-]+\.(mp4|gif|jpg))$/;
+
+// Without a token only a public repository's clips are there to read.
+export async function serveClip(request: Request, token: string | undefined, repoName: string, file: string, ext: string) {
+  // raw.githubusercontent.com takes the app's token and answers Range requests, which video seeking needs.
+  const range = request.headers.get("range");
+  const res = await fetch(`https://raw.githubusercontent.com/${repoName}/proofed-clips/${file}`, {
+    headers: { ...(token && { authorization: `token ${token}` }), ...(range && { range }) },
+  });
+  if (!res.ok) return json({ error: "That clip isn't on the proofed-clips branch." }, res.status === 404 ? 404 : 502);
+  const headers = new Headers({
+    "content-type": CLIP_TYPES[ext as keyof typeof CLIP_TYPES],
+    "accept-ranges": "bytes",
+    // A clip's folder is named after its commit and run, so its bytes never change.
+    "cache-control": "private, max-age=31536000, immutable",
+  });
+  for (const name of ["content-length", "content-range"]) {
+    const value = res.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  return new Response(res.body, { status: res.status, headers });
+}
+
 type Installation = { id: number; account: { login: string } };
 type InstallationRepo = { id: number; full_name: string; html_url: string; private: boolean };
 
@@ -237,28 +261,12 @@ export async function handleApi(request: Request, env: Env, path: string) {
     return json(pulls.map((p) => ({ ...p, paused: paused.has(p.repo) })));
   }
 
-  const clip = /^\/api\/clip\/([^/]+\/[^/]+)\/(pr-\d+\/[\w.-]+\/[\w.-]+\.(mp4|gif|jpg))$/.exec(path);
+  const clip = CLIP_PATH.exec(path.slice("/api".length));
   if (clip && request.method === "GET") {
     const [, repoName = "", file = "", ext = ""] = clip;
     const repo = (await listRepos(env, token)).find((r) => r.full_name === repoName);
     if (!repo) return json({ error: "Proofed isn't installed on that repository." }, 404);
-    // raw.githubusercontent.com takes the app's token and answers Range requests, which video seeking needs.
-    const range = request.headers.get("range");
-    const res = await fetch(`https://raw.githubusercontent.com/${repoName}/proofed-clips/${file}`, {
-      headers: { authorization: `token ${await installationToken(env, repo.installationId)}`, ...(range && { range }) },
-    });
-    if (!res.ok) return json({ error: "That clip isn't on the proofed-clips branch." }, res.status === 404 ? 404 : 502);
-    const headers = new Headers({
-      "content-type": CLIP_TYPES[ext as keyof typeof CLIP_TYPES],
-      "accept-ranges": "bytes",
-      // A clip's folder is named after its commit and run, so its bytes never change.
-      "cache-control": "private, max-age=31536000, immutable",
-    });
-    for (const name of ["content-length", "content-range"]) {
-      const value = res.headers.get(name);
-      if (value) headers.set(name, value);
-    }
-    return new Response(res.body, { status: res.status, headers });
+    return serveClip(request, await installationToken(env, repo.installationId), repoName, file, ext);
   }
 
   // A run as it goes, while the pull request is busy: its state, and each scenario's latest frame.

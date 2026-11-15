@@ -3,6 +3,7 @@ import { handleApi } from "./api";
 import { callback, login, logout } from "./auth";
 import { handleLivePost } from "./live";
 import type { AppEnv } from "./github";
+import { handleTry } from "./try";
 import { handleWebhook } from "./webhook";
 
 export type Env = AppEnv & {
@@ -12,6 +13,9 @@ export type Env = AppEnv & {
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
   SECRETS_KEY: string;
+  // "Break it yourself" (try.ts): the demo repository visitors open prepared pull requests on, and how many a day.
+  TRY_REPO: string;
+  TRY_DAILY: string;
 };
 
 export default {
@@ -36,6 +40,13 @@ export default {
       return handleLivePost(request, env).catch((e: unknown) => {
         console.error(pathname, e);
         return Response.json({ error: "Couldn't keep that." }, { status: 500 });
+      });
+    }
+    // Public: no session (try.ts says what keeps it narrow).
+    if (pathname === "/api/try" || pathname.startsWith("/api/try/")) {
+      return handleTry(request, env, pathname).catch((e: unknown) => {
+        console.error(pathname, e);
+        return Response.json({ error: "Something went wrong talking to GitHub. Try again." }, { status: 502 });
       });
     }
     if (pathname.startsWith("/api/")) {

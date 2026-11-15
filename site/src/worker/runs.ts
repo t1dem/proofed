@@ -97,16 +97,17 @@ type RunRow = { repo: string; pr: number; key: string; data: string; created_at:
 
 // Clip links point at github.com, which a private repo only serves to someone signed in there; the
 // dashboard can't send those cookies, so it asks the Worker for the clip instead (see /api/clip).
-const viaWorker = (url: string | undefined) => {
+// `api` is where this reader's API lives: "/api" for someone signed in, "/api/try" for a visitor of /try.
+const viaWorker = (url: string | undefined, api: string) => {
   const match = url && /^https:\/\/github\.com\/([^/]+\/[^/]+)\/raw\/proofed-clips\/(.+)$/.exec(url);
-  return match ? `/api/clip/${match[1]}/${match[2]}` : url;
+  return match ? `${api}/clip/${match[1]}/${match[2]}` : url;
 };
 
-function toRun(row: RunRow): Run {
+function toRun(row: RunRow, api = "/api"): Run {
   const file = JSON.parse(row.data) as RunFile;
   const scenarios = file.scenarios.map((s) => ({
     ...s,
-    clip: s.clip && { mp4: viaWorker(s.clip.mp4), gif: viaWorker(s.clip.gif), jpg: viaWorker(s.clip.jpg) },
+    clip: s.clip && { mp4: viaWorker(s.clip.mp4, api), gif: viaWorker(s.clip.gif, api), jpg: viaWorker(s.clip.jpg, api) },
   }));
   return { ...file, scenarios, key: row.key, at: row.created_at };
 }
@@ -167,12 +168,12 @@ export async function listPulls(env: Env, repos: string[]): Promise<PullView[]> 
 
 export type PullDetail = { pull: PullView; runs: Run[] };
 
-export async function getPull(env: Env, repo: string, pr: number): Promise<PullDetail | undefined> {
+export async function getPull(env: Env, repo: string, pr: number, api = "/api"): Promise<PullDetail | undefined> {
   const [report, runs] = await Promise.all([
     env.DB.prepare("SELECT * FROM reports WHERE repo = ?1 AND pr = ?2").bind(repo, pr).first<ReportRow>(),
     env.DB.prepare("SELECT * FROM runs WHERE repo = ?1 AND pr = ?2 ORDER BY created_at DESC LIMIT 20").bind(repo, pr).all<RunRow>(),
   ]);
   if (!report) return undefined;
-  const all = runs.results.map(toRun);
+  const all = runs.results.map((r) => toRun(r, api));
   return { pull: toPull(report, all[0]), runs: all };
 }
