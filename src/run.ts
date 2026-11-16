@@ -4,6 +4,7 @@ import { stopping } from "./children.ts";
 import { launchChrome } from "./chrome.ts";
 import { makeClip } from "./clip.ts";
 import { live } from "./live.ts";
+import { NOT_SIGNED_IN } from "./kaneauth.ts";
 import { log as logLine } from "./log.ts";
 import { runKane, type RunEnd, type Step } from "./kane.ts";
 import { NOTHING_CHECKED } from "./runfile.ts";
@@ -36,6 +37,8 @@ export type ScenarioResult = {
   seconds?: number;
   // What the runs before this one took (an automatic retry, a second run of a doubted failure); `end` holds only the last.
   earlierCredits?: number;
+  // Kane refused to start for want of a login: an error a retry can't fix.
+  notSignedIn?: boolean;
 };
 
 // Failures of the browser plumbing rather than of the app: the run is retried, never reported as a bug.
@@ -124,7 +127,7 @@ export async function runScenario(scenario: Scenario, o: RunOptions): Promise<Sc
     return runOnce(scenario, o);
   };
   const settle = async (result: ScenarioResult) => {
-    for (let i = 2; i <= (o.attempts ?? 2) && result.outcome === "error" && !stopping(); i++) {
+    for (let i = 2; i <= (o.attempts ?? 2) && result.outcome === "error" && !result.notSignedIn && !stopping(); i++) {
       result = await again(result, result.error ?? "infra error");
     }
     return result;
@@ -215,6 +218,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
       end,
       clip,
       ...(outcome === "error" && { error }),
+      ...(!kane.end && NOT_SIGNED_IN.test(kane.stderr) && { notSignedIn: true }),
     };
   } finally {
     clearInterval(stills);

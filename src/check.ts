@@ -9,6 +9,7 @@ import { CACHE_FILE, DEFAULT_CREDITS, cacheKey, estimate, readCache, writeCache,
 import { findBase, localChanges, mergeBaseOf, repoRoot } from "./changes.ts";
 import { killChildren, stopChildren } from "./children.ts";
 import { findChrome } from "./chrome.ts";
+import { kaneLogin, LOGIN_FIX } from "./kaneauth.ts";
 import { setLog } from "./log.ts";
 import { runAll } from "./pipeline.ts";
 import { colorOn, LiveView, PlainView, type Plan, type Stream, type View } from "./render.ts";
@@ -61,6 +62,9 @@ export function makeView(flags: Flags, io: Io): View {
   return new PlainView(io.stdout, { color: colorOn(io.env, false), err: io.stderr });
 }
 
+const notSignedIn = (message = "Kane CLI is not signed in, so it can't run the scenarios. Nothing was built or run.") =>
+  new SetupError("kane_not_signed_in", message, `${LOGIN_FIX}, then run the check again.`);
+
 const fromNote = (s: Setting) => (s.from.startsWith("--") ? "" : ` (url from ${s.from})`);
 
 // Flags that say where the app and the scenarios are and how to run, so a printed command runs
@@ -70,6 +74,7 @@ function rerunFlags(flags: Flags) {
     ["--url", flags.url],
     ["--serve", flags.serve],
     ["--build", flags.build],
+    ["--install", flags.install],
     ["--serve-timeout", flags.serveTimeout?.toString()],
     ["--base", flags.base],
     ["--scenarios", flags.scenarios],
@@ -127,7 +132,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     if (doc.dryRun && flags.json) {
       view.close();
     } else if (doc.dryRun) {
-      for (const d of doc.scenarios) view.info(`${d.cached ? "cached:   " : "would run:"} ${d.id} (${d.name})${d.cached ? "" : `, about ${d.estimatedCredits} credits`}`);
+      for (const d of doc.scenarios) view.info(`${d.cached ? "cached:   " : "would run:"} ${d.id} (${d.name})${d.cached ? "" : `, about ${Math.round((d.estimatedCredits ?? 0) * 100) / 100} credits`}`);
       view.info(`${doc.summary}. Dry run: nothing ran, no credits spent.`);
       view.info(doc.next);
       view.close();
@@ -160,7 +165,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     if (!text && loaded.missing) throw scenariosMissing(dir, flags, io, "check");
     if (!text && loaded.errors.length) {
       const [first] = loaded.errors;
-      throw new SetupError("scenario_invalid", loaded.errors.map((e) => `${e.file}: ${e.message}`).join("\n"), `Fix the frontmatter of ${first!.file} (see proofed list).`);
+      throw new SetupError("scenario_invalid", loaded.errors.map((e) => `${e.file}: ${e.message}`).join("\n"), `Correct the frontmatter of ${first!.file} (see proofed list).`);
     }
     const all = loaded.scenarios;
 
@@ -208,7 +213,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       }
     }
 
-    const target = resolveTarget({ flags: { url: flags.url, serve: flags.serve, build: flags.build }, env: io.env, cwd: io.cwd });
+    const target = resolveTarget({ flags: { url: flags.url, serve: flags.serve, build: flags.build, install: flags.install }, env: io.env, cwd: io.cwd });
     const url = target.url?.value;
     if (url !== undefined && !isHttpUrl(url)) {
       throw new SetupError("url_invalid", `"${url}" (${target.url!.from}) is not an http(s) URL.`, "Pass a full URL, e.g. --url http://localhost:5173");
@@ -270,6 +275,8 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     if (!url) {
       throw new SetupError("no_url", "Proofed doesn't know where the app runs.", `Pass --url http://localhost:5173 (and --serve "npm run dev" to have Proofed start it), set PROOFED_URL, or write .proofed/config.json: { "url": "http://localhost:5173", "serve": "npm run dev" }`);
     }
+    const login = await kaneLogin(kane.path, io.env);
+    if (login.state === "not_signed_in") throw notSignedIn();
 
     ensureOut(out);
     const runLog = join(out, "run.log");
@@ -300,6 +307,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
         url,
         serve: target.serve.value,
         build: target.build?.value,
+        install: target.install,
         cwd: target.dir,
         logFile,
         timeoutSeconds: flags.serveTimeout ?? 60,
@@ -330,6 +338,8 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       writeCache(cacheFile, cache);
     };
     const results = await runAll(toRun, out, plan.concurrency, { baseUrl: url, headless: !flags.headed, onEvent });
+    // A login can run out between whoami and the runs; running the check again wouldn't help then either.
+    if (results.some((r) => r.notSignedIn)) throw notSignedIn("Kane CLI refused to run a scenario: it is not signed in. The scenarios it refused weren't checked.");
     const byId = new Map(results.map((r) => [r.scenario.id, r]));
     return docOf(selected.map((s) => {
       const r = byId.get(s.id);

@@ -14,6 +14,7 @@ const APP = {
   url: { type: "string" },
   serve: { type: "string" },
   build: { type: "string" },
+  install: { type: "string" },
 } as const;
 
 export const FLAGS = {
@@ -47,6 +48,7 @@ export type Flags = {
   url?: string;
   serve?: string;
   build?: string;
+  install?: string;
   base?: string;
   only?: string[];
   all: boolean;
@@ -152,6 +154,7 @@ function parseFlags(command: Command, args: string[]) {
     url: str("url"),
     serve: str("serve"),
     build: str("build"),
+    install: str("install"),
     base: str("base"),
     only,
     all: on("all"),
@@ -174,6 +177,7 @@ const EXAMPLES: Record<string, string> = {
   url: "http://localhost:5173",
   serve: '"npm run dev"',
   build: '"npm run build"',
+  install: '"npm install"',
   base: "origin/main",
   only: "free-shipping,checkout",
   out: ".proofed-out",

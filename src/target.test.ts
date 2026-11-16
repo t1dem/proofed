@@ -61,6 +61,7 @@ test("flags win over the environment, the config file and the workflow, each val
     assert.deepEqual(fromWorkflow.url, { value: "http://localhost:4173", from: ".github/workflows/proofed.yml" });
     assert.equal(fromWorkflow.serve?.value, "pnpm preview --port 4173");
     assert.equal(fromWorkflow.build?.value, "pnpm build");
+    assert.deepEqual(fromWorkflow.install, { value: "pnpm install --frozen-lockfile", from: ".github/workflows/proofed.yml" });
 
     mkdirSync(join(cwd, ".proofed"));
     writeFileSync(join(cwd, ".proofed/config.json"), JSON.stringify({ url: "http://localhost:5173", serve: "npm run dev" }));
@@ -69,6 +70,7 @@ test("flags win over the environment, the config file and the workflow, each val
     assert.deepEqual(fromConfig.serve, { value: "npm run dev", from: ".proofed/config.json" });
     // The workflow's build is for the workflow's serve, not for the config file's.
     assert.equal(fromConfig.build, undefined);
+    assert.equal(fromConfig.install, undefined);
 
     const fromFlags = resolveTarget({ flags: { url: "http://localhost:1", build: "make" }, env: {}, cwd });
     assert.deepEqual(fromFlags.url, { value: "http://localhost:1", from: "--url" });
