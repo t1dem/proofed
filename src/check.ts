@@ -14,7 +14,7 @@ import { runAll } from "./pipeline.ts";
 import { colorOn, LiveView, PlainView, type Plan, type Stream, type View } from "./render.ts";
 import { askedScenario } from "./requests.ts";
 import { buildDoc, errorDoc, quote, sameCommand, scenarioDoc, type Doc, type ErrorDoc, type Item, type RerunContext, type Skipped } from "./result.ts";
-import type { RunEvent, ScenarioResult } from "./run.ts";
+import { creditsOf, type RunEvent, type ScenarioResult } from "./run.ts";
 import { affectedBy, readScenarios, type Scenario } from "./scenarios.ts";
 import { answers, startApp, type RunningApp } from "./serve.ts";
 import { SetupError } from "./setuperror.ts";
@@ -215,8 +215,6 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     }
     const baseId = base?.rev ? mergeBaseOf(io.cwd, base.rev) : "";
     let appState: "started" | "reused" | undefined;
-    // What the attempts before an automatic retry took, per scenario.
-    const retried = new Map<string, number>();
 
     const cacheFile = join(out, CACHE_FILE);
     const cache = readCache(cacheFile);
@@ -318,13 +316,11 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     const cacheable = !(appState === "reused" && target.build);
     const onEvent = (e: RunEvent) => {
       view.event(e);
-      if (e.type === "retry" && e.credits) retried.set(e.id, (retried.get(e.id) ?? 0) + e.credits);
       if (e.type !== "finished") return;
       finished.set(e.id, e.result);
       const key = keys.get(e.id);
       if (!key) return;
-      const credits = e.result.end?.credits_consumed;
-      if (credits !== undefined) cache.last[e.id] = { credits: credits + (retried.get(e.id) ?? 0) };
+      if (e.result.end?.credits_consumed !== undefined) cache.last[e.id] = { credits: creditsOf(e.result) };
       if (e.result.outcome === "passed" && cacheable) {
         const clip = e.result.clip && { ...(e.result.clip.mp4 && { mp4: resolve(e.result.clip.mp4) }), jpg: resolve(e.result.clip.jpg) };
         cache.passes[e.id] = { key, passedAt: new Date().toISOString(), seconds: e.result.seconds, ...(clip && { clip }) } satisfies CachedPass;
@@ -337,7 +333,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     const byId = new Map(results.map((r) => [r.scenario.id, r]));
     return docOf(selected.map((s) => {
       const r = byId.get(s.id);
-      return r ? { scenario: s, result: r, extraCredits: retried.get(s.id) } : items.get(s.id)!;
+      return r ? { scenario: s, result: r } : items.get(s.id)!;
     }));
   }
 }

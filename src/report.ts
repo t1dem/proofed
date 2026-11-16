@@ -3,7 +3,7 @@ import { BLANK_PAGE, FAILED_CHECK_ACTION, FAILED_CHECK_REASON, runMarker } from 
 import type { Step } from "./kane.ts";
 import { describeFixer, type Fixer } from "./models.ts";
 import { nothingAsked } from "./requests.ts";
-import { scenarioDoubted, unchecked, type ScenarioResult } from "./run.ts";
+import { creditsOf, scenarioDoubted, unchecked, type ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
 
 export type ClipLinks = { gif?: string; mp4?: string; jpg?: string };
@@ -296,7 +296,7 @@ function compose(
   const errored = results.filter((r) => r.outcome === "error");
   const unsure = results.filter((r) => r.outcome === "unsure");
   const passed = results.filter((r) => r.outcome === "passed");
-  const credits = all.reduce((sum, r) => sum + (r.end?.credits_consumed ?? 0), written?.credits ?? 0);
+  const credits = all.reduce((sum, r) => sum + creditsOf(r), written?.credits ?? 0);
   const repaired: Repaired[] =
     fix?.status === "fixed" && previous
       ? passed.flatMap((after) => {

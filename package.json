@@ -1,6 +1,6 @@
 {
   "name": "proofed-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Check web app scenarios in Chrome with Kane CLI before you call a change done.",
   "repository": {
     "type": "git",

@@ -8,7 +8,7 @@ import { log } from "./log.ts";
 import { crashResult, findCrashes } from "./precheck.ts";
 import { buildReport, outdated, postsNew, type ClipLinks, type FixNote, type ReportData, type Written } from "./report.ts";
 import { nothingAsked } from "./requests.ts";
-import { scenarioDoubted, runScenario, type RunEvent, type ScenarioResult } from "./run.ts";
+import { creditsOf, scenarioDoubted, runScenario, type RunEvent, type ScenarioResult } from "./run.ts";
 import { FAILED_CHECK_ACTION, FAILED_CHECK_REASON, RUN_FILE, type RunFile } from "./runfile.ts";
 import { affectedBy, loadScenariosOr, type Scenario } from "./scenarios.ts";
 
@@ -157,7 +157,7 @@ export function runFile({ sha, results, skipped, runUrl, fix }: PublishInput, cl
         .slice(-30)
         .map((s) => ({ remark: s.remark.slice(0, 200), ...(s.status === "failed" && { failed: true }), ...(s.at !== undefined && { at: s.at }) })),
       clip: clips.get(r.scenario.id),
-      credits: r.end?.credits_consumed,
+      credits: r.end?.credits_consumed === undefined ? undefined : creditsOf(r),
       seconds: r.seconds,
     })),
     fix: fix && {

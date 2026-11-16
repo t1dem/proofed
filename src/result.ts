@@ -3,7 +3,7 @@
 import { resolve } from "node:path";
 import type { CachedPass } from "./cache.ts";
 import type { ScenarioResult } from "./run.ts";
-import { scenarioDoubted, unchecked } from "./run.ts";
+import { creditsOf, scenarioDoubted, unchecked } from "./run.ts";
 import { FAILED_CHECK_ACTION } from "./runfile.ts";
 import type { Scenario } from "./scenarios.ts";
 import type { SetupError } from "./setuperror.ts";
@@ -14,8 +14,7 @@ export const outcomeOf = (r: ScenarioResult): Outcome => (r.outcome === "unsure"
 
 // A scenario of this check: run now, a pass kept from before, or (--dry-run) one that would run.
 export type Item =
-  // `extraCredits`: what the attempts before an automatic retry took; the result holds only the last.
-  | { scenario: Scenario; result: ScenarioResult; extraCredits?: number }
+  | { scenario: Scenario; result: ScenarioResult }
   | { scenario: Scenario; cached: CachedPass }
   | { scenario: Scenario; estimate: number };
 
@@ -142,7 +141,7 @@ export function scenarioDoc(item: Item, ctx: RerunContext): ScenarioDoc {
       .map((step) => ({ remark: step.remark.slice(0, 200), ...(step.status === "failed" && { failed: true as const }) })),
     ...(r.pageError && { pageError: r.pageError }),
     ...(r.clip && { clip: { ...(r.clip.mp4 && { mp4: resolve(r.clip.mp4) }), jpg: resolve(r.clip.jpg) } }),
-    credits: round((r.end?.credits_consumed ?? 0) + (item.extraCredits ?? 0)),
+    credits: round(creditsOf(r)),
     ...(r.seconds !== undefined && { seconds: r.seconds }),
     rerun,
   };

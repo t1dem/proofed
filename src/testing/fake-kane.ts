@@ -7,11 +7,12 @@
 //   [fake:pass]        asserts and passes          [fake:fail]       a product bug
 //   [fake:noassert]    passes without an assert    [fake:automation] blames the scenario text
 //   [fake:refuted]     fails an assert but blames the scenario
+//   [fake:flaky]       the same on the first run of an objective in FAKE_KANE_LOG, a pass after
 //   [fake:error]       exits without a run_end     [fake:hang]       never finishes (with a child)
 // [delay:ms] (FAKE_KANE_DELAY_MS) is the pause between steps, [credits:n] (FAKE_KANE_CREDITS) the
 // credits it reports. Every call is appended to FAKE_KANE_LOG as a JSON line.
 import { spawn } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { connectCdp } from "../cdp.ts";
 
 const args = process.argv.slice(2);
@@ -38,7 +39,12 @@ const option = (name: string) => {
   return i === -1 ? undefined : args[i + 1];
 };
 const marker = (name: string) => new RegExp(`\\[${name}:([\\w.]+)\\]`).exec(objective)?.[1];
-const mode = marker("fake") ?? process.env.FAKE_KANE_MODE ?? "pass";
+const asked = marker("fake") ?? process.env.FAKE_KANE_MODE ?? "pass";
+const ranBefore = () =>
+  readFileSync(process.env.FAKE_KANE_LOG ?? "", "utf8")
+    .split("\n")
+    .filter((line) => line && (JSON.parse(line) as { args?: string[] }).args?.[1] === objective).length > 1;
+const mode = asked === "flaky" ? (ranBefore() ? "pass" : "refuted") : asked;
 const delay = Number(marker("delay") ?? process.env.FAKE_KANE_DELAY_MS ?? 50);
 const credits = Number(marker("credits") ?? process.env.FAKE_KANE_CREDITS ?? 7);
 const url = option("--url") ?? "about:blank";

@@ -3,7 +3,7 @@
 // agents and logs: no escape codes and no redraw, one line per event, a heartbeat at least every 30
 // seconds, then the same details. Colour is drawn by hand; there are no runtime dependencies.
 import { FAILED_CHECK_REASON } from "./runfile.ts";
-import type { RunEvent } from "./run.ts";
+import { creditsOf, type RunEvent } from "./run.ts";
 import { outcomeOf, type Doc, type ErrorDoc, type Outcome, type ScenarioDoc } from "./result.ts";
 
 export type Stream = { write(s: string): unknown; columns?: number; rows?: number; isTTY?: boolean };
@@ -175,7 +175,7 @@ export class Board {
     if (e.type === "step" && e.step.remark) Object.assign(row, { remark: e.step.remark, retry: undefined });
     if (e.type === "retry") Object.assign(row, { retry: e.error, remark: undefined });
     if (e.type === "finished") {
-      Object.assign(row, { state: "done", outcome: outcomeOf(e.result), credits: e.result.end?.credits_consumed ?? 0, seconds: e.result.seconds ?? 0 });
+      Object.assign(row, { state: "done", outcome: outcomeOf(e.result), credits: Math.round(creditsOf(e.result) * 100) / 100, seconds: e.result.seconds ?? 0 });
     }
   }
   running() {

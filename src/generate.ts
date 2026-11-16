@@ -10,7 +10,7 @@ import { DEFAULT_FIXER, type Fixer } from "./models.ts";
 import { ctx, env, isBroken, publish, readEvent, runAll } from "./pipeline.ts";
 import { pushHead } from "./push.ts";
 import { readReportData, type Written } from "./report.ts";
-import { unchecked, type ScenarioResult } from "./run.ts";
+import { creditsOf, unchecked, type ScenarioResult } from "./run.ts";
 import { loadScenarios, parseScenario, type Scenario } from "./scenarios.ts";
 
 const MAX_SCENARIOS = 5;
@@ -140,7 +140,7 @@ async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Wr
   for (const r of fresh) if (r.outcome !== "passed") dropped.push({ name: r.scenario.name, why: why(r) });
   for (const file of files) if (!kept.some((r) => r.scenario.file === file)) rmSync(file, { force: true });
   const stockResults = results.slice(0, stock.length);
-  const credits = (rs: ScenarioResult[]) => Math.round(rs.reduce((sum, r) => sum + (r.end?.credits_consumed ?? 0), 0));
+  const credits = (rs: ScenarioResult[]) => Math.round(rs.reduce((sum, r) => sum + creditsOf(r), 0));
   const droppedCredits = credits(fresh.filter((r) => r.outcome !== "passed"));
   console.log(`Kane credits: ${credits(results)} in all, ${droppedCredits} of them on the dropped scenarios.`);
   if (kept.length === 0) return { results: stockResults, written: { status: "written", kept: [], dropped, credits: droppedCredits }, sha: headSha };
