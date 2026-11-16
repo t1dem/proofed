@@ -257,16 +257,16 @@ Node 22.18+ runs the checkout's TypeScript directly. The GitHub Action needs no 
 `pnpm typecheck` and `pnpm test` check the source. `pnpm check:package` builds a tarball, checks its
 contents, installs it into a temporary prefix and runs its version and help. It removes its temp files.
 
-To release, confirm the version in `package.json` (currently `0.1.2`); published versions cannot be reused. From a clean checkout with Node 22.18+:
+To release, confirm the version in `package.json` (currently `0.1.3`); published versions cannot be reused. From a clean checkout with Node 22.18+:
 
 ```sh
 pnpm install --frozen-lockfile
 npm login --registry=https://registry.npmjs.org/
 npm whoami --registry=https://registry.npmjs.org/
 npm publish --access public --registry=https://registry.npmjs.org/
-npm view proofed-cli@0.1.2 version bin engines dist.tarball --registry=https://registry.npmjs.org/
-npx --yes proofed-cli@0.1.2 --version
-npx --yes proofed-cli@0.1.2 --help
+npm view proofed-cli@0.1.3 version bin engines dist.tarball --registry=https://registry.npmjs.org/
+npx --yes proofed-cli@0.1.3 --version
+npx --yes proofed-cli@0.1.3 --help
 ```
 
 Use the chosen version in the last three commands. `npm publish` runs typecheck, tests and the package
