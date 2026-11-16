@@ -13,6 +13,10 @@ When a flow breaks, Claude Code fixes it, and the fix is pushed only after Kane 
 
 <sub>Built for the Kane CLI hackathon, November 2026.</sub>
 
+<br>
+
+<img src="docs/devices.png" width="880" alt="The Proofed dashboard on a laptop and on a phone: pull requests grouped into Needs you, Kane is checking, Claude is fixing and Passed">
+
 </div>
 
 <br>
@@ -63,8 +67,6 @@ If you'd rather read than wait, all four changes have already run:
 - Kane doesn't record video, so Proofed records Chrome itself. The clip cuts the waiting, shows where Kane clicked and zooms in on what it checks.
 - When Kane blames the test rather than the code, the scenario shows as "not checked", never as a pass.
 - Nothing is pushed until Kane has seen a fix pass. The commit's `Fixed-by:` line names the model.
-
-<img src="docs/dashboard.jpg" alt="The Proofed dashboard: pull requests grouped into Needs you, Kane is checking, Claude is fixing and Passed">
 
 ## Scenarios
 
