@@ -4,18 +4,23 @@
   "private": true,
   "type": "module",
   "bin": {
-    "proofed": "src/proofed.ts"
+    "proofed": "bin/proofed.cjs"
   },
   "engines": {
     "node": ">=24"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test src/*.test.ts"
+    "test": "node --test src/*.test.ts",
+    "prepare": "node scripts/prepare.cjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2"
   },
-  "packageManager": "pnpm@10.20.0"
+  "packageManager": "pnpm@10.20.0",
+  "files": [
+    "bin/",
+    "dist/"
+  ]
 }

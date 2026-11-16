@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import { askClaude } from "./claude.ts";
 import { editComment, findReport, setStatus } from "./github.ts";
 import { putBack } from "./guard.ts";
+import { describeFailure } from "./fixprompt.ts";
 import { live } from "./live.ts";
 import { DEFAULT_FIXER, describeFixer, type Fixer } from "./models.ts";
 import { changedFiles, ctx, env, pickScenarios, publish, putReport, readEvent, runAll } from "./pipeline.ts";
@@ -78,19 +79,9 @@ live.track(scenariosFor(data.failures.map((f) => f.id)));
 
 function prompt(failures: FailureData[], feedback: string) {
   const diff = git("diff", `${base}...HEAD`).slice(0, 40_000);
-  // A failure without steps is a page that crashed while loading: Kane never ran (see precheck.ts).
-  const described = failures
-    .map(
-      (f) => `### Scenario "${f.name}" (${f.file || "asked for on the PR"})
-Objective checked in Chrome:
-${f.objective}
+  const described = failures.map(describeFailure).join("\n\n");
 
-What went wrong: ${f.reason}
-${f.diagnosis ? `Diagnosis: ${f.diagnosis}\n` : ""}${f.steps.length ? `\nKane's steps:\n${f.steps.join("\n")}` : ""}`,
-    )
-    .join("\n\n");
-
-  return `This pull request broke a user flow. Proofed checked the scenarios below in a real Chrome (with Kane CLI, an AI browser agent) against this branch, and they failed.
+  return `${failures.some((f) => f.failedCheck) ? "A scenario's check did not hold on the page. Kane believes the scenario is out of date; that opinion does not establish whether the app change was intended." : "This pull request broke a user flow."} Proofed checked the scenarios below in a real Chrome (with Kane CLI, an AI browser agent) against this branch, and they failed.
 
 ${described}
 
@@ -99,7 +90,7 @@ The pull request changes this (git diff ${base.slice(0, 7)}...HEAD):
 ${diff}
 \`\`\`
 ${feedback ? `\nA previous fix attempt didn't work:\n${feedback}\n` : ""}
-Find the cause in the application code and fix it with the smallest change that keeps what the PR set out to do.
+${failures.some((f) => f.failedCheck) ? "Kane's opinion is not proof that the scenario is wrong. If the app change was intended, stop and explain that the scenario needs review. Otherwise fix the app. Do not make a check pass by changing its expectations." : "Find the cause in the application code and fix it with the smallest change that keeps what the PR set out to do."}
 Don't edit anything under .proofed/, don't change the scenario expectations, and don't commit.
 You may run \`${buildCommand}\` to check that your change builds (it runs \`${env("PROOFED_BUILD")}\` ${appDir === "." ? "at the repo root" : `in \`${appDir}\``}).
 End your answer with one line in English that starts with "SUMMARY:". It goes into the pull request as is, so it says only what was wrong in the code and what you changed, nothing about tools, builds, tests or permissions.`;

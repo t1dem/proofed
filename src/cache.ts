@@ -19,8 +19,8 @@ export type CachedPass = {
 export type Cache = { version: 1; passes: Record<string, CachedPass>; last: Record<string, { credits: number }> };
 
 export const CACHE_FILE = "cache.json";
-// Until a scenario has run once, the estimate takes the middle of Kane's usual 20 to 30.
-export const DEFAULT_CREDITS = 25;
+// The demo-store runs reported 27 to 30 credits without accounting for the balance change.
+export const DEFAULT_CREDITS = 30;
 
 export function readCache(file: string): Cache {
   try {

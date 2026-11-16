@@ -5,7 +5,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Flags } from "./args.ts";
-import { CACHE_FILE, cacheKey, estimate, readCache, writeCache, type CachedPass } from "./cache.ts";
+import { CACHE_FILE, DEFAULT_CREDITS, cacheKey, estimate, readCache, writeCache, type CachedPass } from "./cache.ts";
 import { findBase, localChanges, mergeBaseOf, repoRoot } from "./changes.ts";
 import { killChildren, stopChildren } from "./children.ts";
 import { findChrome } from "./chrome.ts";
@@ -106,12 +106,12 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       process.exit(130);
     }
     view.close();
-    io.stderr.write(`\nInterrupted (${signal}): stopping Kane, Chrome and the app.\n`);
+    io.stderr.write(`\nInterrupted (${signal}): stopping Kane, Chrome and the app. Kane may have spent credits before reporting them.\n`);
     interrupted = (async () => {
       await stopChildren();
       await app?.stop();
       const done = selected.filter((s) => finished.has(s.id)).map((s) => scenarioDoc({ scenario: s, result: finished.get(s.id)! }, rerun));
-      write(errorDoc(new SetupError("interrupted", `Stopped by ${signal} before the check finished.`, "Run the check again and let it finish; passes so far are cached."), 130, done));
+      write(errorDoc(new SetupError("interrupted", `Stopped by ${signal} before the check finished. Kane may have spent credits before reporting them.`, "Run the check again and let it finish; passes so far are cached."), 130, done));
       return 130;
     })();
   };
@@ -229,7 +229,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
         const hit = cache.passes[s.id];
         if (hit?.key === key) items.set(s.id, { scenario: s, cached: hit });
       }
-      if (!items.has(s.id)) items.set(s.id, { scenario: s, estimate: s.file ? estimate(cache, s.id) : 25 });
+      if (!items.has(s.id)) items.set(s.id, { scenario: s, estimate: s.file ? estimate(cache, s.id) : DEFAULT_CREDITS });
     }
     const toRun = selected.filter((s) => "estimate" in items.get(s.id)!);
     const cachedPasses = selected.flatMap((s) => {

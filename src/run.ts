@@ -77,6 +77,8 @@ export function outcomeOf(end: RunEnd | undefined, steps: Step[]): Outcome {
 // An unsure run where Kane said "passed": nothing was checked, as opposed to Kane doubting the test.
 export const unchecked = (r: ScenarioResult) => r.outcome === "unsure" && r.end?.status === "passed";
 
+export const scenarioDoubted = (r: ScenarioResult) => r.outcome === "failed" && r.end?.verdict?.family === "automation_bug";
+
 // Kane is good at reaching a goal, so on its own it routes around a broken button (a key press, another
 // link) and passes. A user who clicks the button and gets the wrong screen has found a bug.
 const NO_WORKAROUNDS =

@@ -3,7 +3,8 @@
 import { resolve } from "node:path";
 import type { CachedPass } from "./cache.ts";
 import type { ScenarioResult } from "./run.ts";
-import { unchecked } from "./run.ts";
+import { scenarioDoubted, unchecked } from "./run.ts";
+import { FAILED_CHECK_ACTION } from "./runfile.ts";
 import type { Scenario } from "./scenarios.ts";
 import type { SetupError } from "./setuperror.ts";
 
@@ -31,6 +32,8 @@ export type ScenarioDoc = {
   reason?: string;
   // Only for not_checked: Kane asserted nothing, or Kane thinks the scenario text itself is wrong.
   notChecked?: "nothing_asserted" | "scenario_doubted";
+  // A failed check that Kane blames on the scenario, rather than the app. Diagnosis is Kane's opinion.
+  failedCheck?: "scenario_doubted";
   diagnosis?: string;
   suggestion?: string;
   failedStep?: string;
@@ -130,7 +133,8 @@ export function scenarioDoc(item: Item, ctx: RerunContext): ScenarioDoc {
     ...(reason && { reason }),
     ...(outcome === "not_checked" && { notChecked: unchecked(r) ? "nothing_asserted" : "scenario_doubted" }),
     ...(outcome !== "passed" && verdict?.root_cause && { diagnosis: verdict.root_cause }),
-    ...(outcome !== "passed" && verdict?.suggestion && { suggestion: verdict.suggestion }),
+    ...(scenarioDoubted(r) && { failedCheck: "scenario_doubted" as const }),
+    ...(scenarioDoubted(r) ? { suggestion: FAILED_CHECK_ACTION } : outcome !== "passed" && verdict?.suggestion && { suggestion: verdict.suggestion }),
     ...(outcome !== "passed" && failedStep && { failedStep }),
     steps: r.steps
       .filter((step) => step.status !== "running" && step.remark)
@@ -188,7 +192,9 @@ export function buildDoc(input: DocInput): Doc {
     next = would ? `Run it for real: ${sameCommand(input.rerun)}` : "Nothing would run.";
   } else if (counts.failed > 0) {
     summary = `${counts.failed} of ${scenarios.length} broke: ${names(of("failed"))}`;
-    next = `Fix the failed scenarios, then run: ${rerun}`;
+    next = scenarios.some((d) => d.failedCheck)
+      ? `${FAILED_CHECK_ACTION} Then run: ${rerun}`
+      : `Fix the failed scenarios, then run: ${rerun}`;
   } else if (counts.error > 0) {
     summary = `Kane couldn't finish: ${names(of("error"))}${counts.not_checked ? `; not checked: ${names(of("not_checked"))}` : ""}`;
     next = `Run them again: ${rerun}`;

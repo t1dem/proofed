@@ -10,6 +10,11 @@ Usage
   proofed <command> --help       The flags of one command
   proofed --version
 
+Install and update (Node 24 or newer, macOS and Linux)
+  curl -fsSL https://raw.githubusercontent.com/t1dem/proofed/main/install.sh | sh
+  Update: run it again. Uninstall: the same with "sh -s -- --uninstall".
+  With npm: npm install -g --allow-scripts=github:t1dem/proofed github:t1dem/proofed
+
 Usual runs, in the app's repo
   proofed check                  url and serve come from the Proofed workflow, if the repo has one
   proofed check --url http://localhost:5173 --serve "npm run dev"
@@ -17,14 +22,16 @@ Usual runs, in the app's repo
   proofed check --only free-shipping
 
 Time and credits
-  A scenario takes 1 to 4 minutes; 3 run at a time. Each Kane run costs 20 to 30 Kane credits.
+  A scenario takes 1 to 4 minutes; 3 run at a time. A first run is estimated at 30 Kane credits.
+  Credits are what Kane reported, not the account balance change, which can be slightly higher.
+  An interrupted run can spend credits before Kane reports them.
   A passed scenario isn't run again (0 credits, shown as "cached") until its file, the URL, or a
   changed file in its paths changes. --dry-run shows what would run and the estimate, for free.
   --no-cache runs them anyway.
 
 Outcomes
   passed        Kane checked what the scenario says, and it held
-  failed        Kane saw the app do something else: a bug to fix
+  failed        A scenario's check did not hold on the page. Review the failure and fix it.
   not_checked   Kane asserted nothing, or thinks the scenario text is wrong. Not a pass.
   error         Kane couldn't finish, even on one automatic retry (browser or service trouble).
                 Says nothing about the app.
@@ -40,7 +47,9 @@ For AI agents
   After changing UI code, run: proofed check --json
   Give the command a timeout of at least 10 minutes, and don't interrupt it.
   stdout is one JSON document (progress goes to stderr); see proofed check --help.
-  Fix every scenario whose outcome is "failed", then run its "rerun" command: only it runs again.
+  On "failed", read reason and diagnosis, then run "rerun" after fixing the cause.
+  failedCheck: "scenario_doubted" means the check failed but Kane believes it is out of date.
+  Diagnosis is Kane's opinion. If the app change was intended, update the scenario; otherwise fix the app.
   Never treat "not_checked" as a pass: fix the scenario or tell the user why Kane doubts it.
   On "error", run the "rerun" command once more. On exit 3, do what error.fix says.`;
 
@@ -79,8 +88,13 @@ JSON (also written to <out>/result.json)
   app ("started" | "reused"), credits, estimatedCredits, seconds, next, rerun (re-runs
   everything that didn't pass),
   skipped [{id, name, why}], scenarios [{id, name, file, outcome, cached, cachedAt, objective,
-  reason, notChecked ("nothing_asserted" | "scenario_doubted"), diagnosis, suggestion,
+  reason, notChecked ("nothing_asserted" | "scenario_doubted"), failedCheck ("scenario_doubted"),
+  diagnosis (Kane's opinion), suggestion,
   failedStep, steps [{remark, failed}], pageError, clip {mp4, jpg}, credits, seconds, rerun}]
+  failedCheck is only set on failed checks Kane blames on the scenario. suggestion gives the
+  conditional next step: if the app change was intended, update the scenario; otherwise fix the app.
+  credits is the sum Kane reported, not the balance change; the balance can drop slightly more.
+  First-run estimate: 30 credits. An interrupted run can spend credits before reporting them.
   Proofed couldn't run: {ok: false, exitCode: 3, error: {code, message, fix}}
   Interrupted: the same shape with exitCode 130 and scenarios [...] for what had finished
 

@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { describeFailure } from "./fixprompt.ts";
+import { runFile } from "./pipeline.ts";
+import { refuted } from "./testing/results.ts";
+import { FAILED_CHECK_ACTION, FAILED_CHECK_REASON } from "./runfile.ts";
 import { blockedReport } from "./blocked.ts";
 import { addRun, alreadyReported, buildReport, fixRequested, outdated, postsNew, readReportData, WORKING, type ReportData } from "./report.ts";
 import { crashResult } from "./precheck.ts";
@@ -282,4 +286,24 @@ test("a run where nothing broke but a scenario wasn't confirmed isn't a pass in 
   assert.match(second, /1111111 \? not confirmed → 2222222 ✓/);
   // Still the same to a merge: nothing is known to be broken.
   assert.equal(postsNew(first, buildReport({ sha: "1111111aaaa", results: [unsure], skipped: [], clips: new Map(), fixEnabled: true }), false), false);
+});
+
+test("a refuted check carries Kane's opinion and the conditional next step through the report and fixer", () => {
+  const input = { sha: "abc1234", results: [refuted().result], skipped: [], clips: new Map(), fixEnabled: true };
+  const body = buildReport(input);
+  assert.ok(body.includes(FAILED_CHECK_REASON));
+  assert.ok(body.includes(FAILED_CHECK_ACTION));
+  assert.match(body, /\*\*Kane's opinion:\*\* The test used the wrong/);
+  assert.doesNotMatch(body, /What Kane saw|Update the test expectation/);
+  const failure = readReportData(body)!.failures[0]!;
+  assert.equal(failure.failedCheck, "scenario_doubted");
+  const prompt = describeFailure(failure);
+  assert.ok(prompt.includes(FAILED_CHECK_ACTION));
+  assert.match(prompt, /Kane's opinion: The test used the wrong/);
+  const file = runFile({ ...input, repo: undefined, pr: undefined, outDir: "/out", runUrl: undefined }, new Map());
+  assert.equal(file.scenarios[0]!.failedCheck, "scenario_doubted");
+  assert.equal(file.scenarios[0]!.suggestion, FAILED_CHECK_ACTION);
+  assert.ok(file.scenarios[0]!.reason?.includes(FAILED_CHECK_REASON));
+  assert.ok(file.scenarios[0]!.reason?.includes(FAILED_CHECK_ACTION));
+  assert.match(file.scenarios[0]!.diagnosis!, /^Kane's opinion:/);
 });

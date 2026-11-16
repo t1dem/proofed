@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildDoc, exitCodeOf, rerunCommand, type Item } from "./result.ts";
-import { NOTHING_CHECKED } from "./runfile.ts";
-import { ran as result, scenario } from "./testing/results.ts";
+import { FAILED_CHECK_ACTION, NOTHING_CHECKED } from "./runfile.ts";
+import { ran as result, refuted, scenario } from "./testing/results.ts";
 
 const input = (items: Item[]) => ({ items, skipped: [{ id: "checkout", name: "Checkout", why: "the change does not touch its paths" }], base: "origin/main", changedFiles: 2, url: "http://localhost:4173", seconds: 74, out: "/out", rerun: { flags: ["--json"] }, estimatedCredits: 50 });
 
@@ -69,4 +69,17 @@ test("a cached pass costs nothing and says since when", () => {
 
 test("the re-run of a free-text check repeats the text, quoted for a shell", () => {
   assert.equal(rerunCommand(["asked"], { text: "the kettle's price is €45", flags: [] }), `proofed check 'the kettle'\\''s price is €45'`);
+});
+
+test("a refuted check keeps the failure and gives a conditional next step instead of Kane's suggestion", () => {
+  const doc = buildDoc(input([refuted()]));
+  const failed = doc.scenarios[0]!;
+  assert.equal(doc.exitCode, 1);
+  assert.equal(failed.outcome, "failed");
+  assert.equal(failed.failedCheck, "scenario_doubted");
+  assert.equal(failed.notChecked, undefined);
+  assert.match(failed.diagnosis!, /^The test used the wrong/);
+  assert.equal(failed.suggestion, FAILED_CHECK_ACTION);
+  assert.equal(doc.next, `${FAILED_CHECK_ACTION} Then run: ${failed.rerun}`);
+  assert.doesNotMatch(JSON.stringify(doc), /Update the test expectation/);
 });

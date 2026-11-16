@@ -23,3 +23,13 @@ export function ran(id: string, outcome: Outcome, end?: Partial<RunEnd>, extra: 
     },
   };
 }
+
+export const refuted = () => ran("free-shipping", "failed", {
+  reason: 'Final verification failed: "shipping is now Free and the total is €51.00."',
+  credits_consumed: 27.42,
+  verdict: {
+    family: "automation_bug",
+    root_cause: "The test used the wrong free-shipping threshold. The cart subtotal was €51.00, below the €60.00 threshold shown by the store.",
+    suggestion: "Update the test expectation: shipping should remain €4.90 at a €51.00 subtotal.",
+  },
+}, { name: "Free shipping from €50" });

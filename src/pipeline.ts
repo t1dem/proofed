@@ -8,8 +8,8 @@ import { log } from "./log.ts";
 import { crashResult, findCrashes } from "./precheck.ts";
 import { buildReport, outdated, postsNew, type ClipLinks, type FixNote, type ReportData, type Written } from "./report.ts";
 import { nothingAsked } from "./requests.ts";
-import { runScenario, type RunEvent, type ScenarioResult } from "./run.ts";
-import { RUN_FILE, type RunFile } from "./runfile.ts";
+import { scenarioDoubted, runScenario, type RunEvent, type ScenarioResult } from "./run.ts";
+import { FAILED_CHECK_ACTION, FAILED_CHECK_REASON, RUN_FILE, type RunFile } from "./runfile.ts";
 import { affectedBy, loadScenariosOr, type Scenario } from "./scenarios.ts";
 
 export const env = (name: string, fallback?: string) => {
@@ -139,7 +139,7 @@ type PublishInput = {
 
 // The dashboard's copy of the run. Steps are capped like the comment's, so the file stays small.
 // A description that asked for nothing isn't in it, as it isn't in the comment's count.
-function runFile({ sha, results, skipped, runUrl, fix }: PublishInput, clips: Map<string, ClipLinks>): RunFile {
+export function runFile({ sha, results, skipped, runUrl, fix }: PublishInput, clips: Map<string, ClipLinks>): RunFile {
   return {
     sha,
     runUrl,
@@ -148,9 +148,10 @@ function runFile({ sha, results, skipped, runUrl, fix }: PublishInput, clips: Ma
       id: r.scenario.id,
       name: r.scenario.name,
       outcome: r.outcome,
-      reason: (r.outcome === "passed" ? r.end?.summary || r.end?.reason : r.end?.reason || r.error) || undefined,
-      diagnosis: r.outcome === "passed" ? undefined : r.end?.verdict?.root_cause,
-      suggestion: r.end?.verdict?.suggestion,
+      reason: scenarioDoubted(r) ? `${r.end?.reason ?? ""} ${FAILED_CHECK_REASON} ${FAILED_CHECK_ACTION}` : (r.outcome === "passed" ? r.end?.summary || r.end?.reason : r.end?.reason || r.error) || undefined,
+      ...(scenarioDoubted(r) && { failedCheck: "scenario_doubted" as const }),
+      diagnosis: scenarioDoubted(r) ? `Kane's opinion: ${r.end?.verdict?.root_cause ?? ""}` : r.outcome === "passed" ? undefined : r.end?.verdict?.root_cause,
+      suggestion: scenarioDoubted(r) ? FAILED_CHECK_ACTION : r.end?.verdict?.suggestion,
       steps: r.steps
         .filter((s) => s.status !== "running" && s.remark)
         .slice(-30)

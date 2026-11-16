@@ -6,6 +6,7 @@
 // What it does is picked by a marker in the objective, else FAKE_KANE_MODE:
 //   [fake:pass]        asserts and passes          [fake:fail]       a product bug
 //   [fake:noassert]    passes without an assert    [fake:automation] blames the scenario text
+//   [fake:refuted]     fails an assert but blames the scenario
 //   [fake:error]       exits without a run_end     [fake:hang]       never finishes (with a child)
 // [delay:ms] (FAKE_KANE_DELAY_MS) is the pause between steps, [credits:n] (FAKE_KANE_CREDITS) the
 // credits it reports. Every call is appended to FAKE_KANE_LOG as a JSON line.
@@ -92,6 +93,18 @@ if (mode === "hang") {
     status: "failed",
     reason: "The scenario asks for a Checkout button, and the page has none.",
     verdict: { family: "automation_bug", root_cause: "The objective names a button the app never had.", suggestion: "Name the button the page shows." },
+  });
+} else if (mode === "refuted") {
+  await step("assert: shipping is €4.90 and the total is €49.40.");
+  await step("assert: shipping is now Free and the total is €51.00.", "failed");
+  end({
+    status: "failed",
+    reason: 'Final verification failed: "shipping is now Free and the total is €51.00."',
+    verdict: {
+      family: "automation_bug",
+      root_cause: "The test used the wrong free-shipping threshold. The cart subtotal was €51.00, below the €60.00 threshold shown by the store.",
+      suggestion: "Update the test expectation: shipping should remain €4.90 at a €51.00 subtotal.",
+    },
   });
 } else if (mode === "fail") {
   await step("analyze: reading the bag");

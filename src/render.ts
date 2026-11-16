@@ -2,6 +2,7 @@
 // one line per scenario redrawn in place, then what broke. Anywhere else (PlainView), for coding
 // agents and logs: no escape codes and no redraw, one line per event, a heartbeat at least every 30
 // seconds, then the same details. Colour is drawn by hand; there are no runtime dependencies.
+import { FAILED_CHECK_REASON } from "./runfile.ts";
 import type { RunEvent } from "./run.ts";
 import { outcomeOf, type Doc, type ErrorDoc, type Outcome, type ScenarioDoc } from "./result.ts";
 
@@ -58,7 +59,7 @@ export function truncate(s: string, max: number) {
 export const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
 export const duration = (seconds: number) => (seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`);
 const num = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
-export const credits = (n: number) => `${num(n)} credit${n === 1 ? "" : "s"}`;
+export const credits = (n: number) => n === 0 ? "no credits reported" : `${num(n)} credit${n === 1 ? "" : "s"}`;
 
 // "14:05" today, "Nov 14 14:05" before.
 export function since(iso: string, now = Date.now()) {
@@ -89,8 +90,9 @@ export function details(d: ScenarioDoc, c: Palette) {
   if (d.notChecked) field("Why", NOT_CHECKED[d.notChecked]);
   if (o === "error") field("Why", "Kane couldn't finish the run. It says nothing about the app; run it again.");
   field("Kane saw", d.reason);
-  field("Diagnosis", d.diagnosis);
-  field("Suggestion", d.suggestion);
+  if (d.failedCheck) field("Why", FAILED_CHECK_REASON);
+  field(d.failedCheck ? "Kane thinks" : "Diagnosis", d.diagnosis);
+  field(d.failedCheck ? "Next" : "Suggestion", d.suggestion);
   field("Failed step", d.failedStep);
   field("Page error", d.pageError);
   field("Clip", d.clip?.mp4 ?? d.clip?.jpg);
@@ -115,6 +117,7 @@ export function ending(doc: Doc, c: Palette) {
   const glyph = doc.exitCode === 1 ? c.red("✗") : doc.exitCode === 2 ? c.yellow("?") : c.green("✓");
   const tally = parts.length ? parts.join(", ") : doc.summary;
   lines.push("", `${glyph} ${c.bold(tally)}${c.dim(` · ${credits(doc.credits)} · ${duration(doc.seconds)}`)}`);
+  lines.push("Credits are Kane's report; balance may drop slightly more.");
   if (parts.length && doc.exitCode !== 0) lines.push(doc.summary);
   if (doc.rerun) lines.push(`Re-run what broke: ${c.bold(doc.rerun)}`);
   return lines;

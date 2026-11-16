@@ -36,13 +36,13 @@ test("a scenario without paths depends on every changed file", () => {
   assert.notEqual(cacheKey(s, "http://x/", ["README.md"], (f) => files[f]), key);
 });
 
-test("the cache file round-trips, and the estimate falls back to 25 credits", () => {
+test("the cache file round-trips, and the estimate falls back to 30 credits", () => {
   const dir = mkdtempSync(join(tmpdir(), "proofed-cache-"));
   try {
     const file = join(dir, "cache.json");
     const empty = readCache(file);
     assert.deepEqual(empty, { version: 1, passes: {}, last: {} });
-    assert.equal(estimate(empty, "promo"), 25);
+    assert.equal(estimate(empty, "promo"), 30);
     writeCache(file, { version: 1, passes: { promo: { key: "k", passedAt: "2026-11-16T10:00:00.000Z" } }, last: { promo: { credits: 27 } } });
     const back = readCache(file);
     assert.equal(back.passes.promo?.key, "k");

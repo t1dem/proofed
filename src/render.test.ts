@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildDoc } from "./result.ts";
 import { colorOn, ending, LiveView, palette, PlainView, since, stripAnsi, textWidth, truncate, type Plan } from "./render.ts";
-import { ran } from "./testing/results.ts";
+import { ran, refuted } from "./testing/results.ts";
 
 const sink = (columns?: number) => {
   let text = "";
@@ -77,6 +77,7 @@ test("the plain view: one line per event, a heartbeat, then the details and the 
       "  Scenario    .proofed/scenarios/free-shipping.md",
       "",
       "✗ 1 passed, 1 failed · 52 credits · 1m 14s",
+      "Credits are Kane's report; balance may drop slightly more.",
       "1 of 2 broke: Free shipping from €50",
       "Re-run what broke: proofed check --only free-shipping",
       "",
@@ -145,4 +146,26 @@ test("a build that fails leaves no scenario rows, and nothing is drawn after the
   // A resize after the end must not erase the error above the prompt.
   view.draw();
   assert.equal(out.text, closed);
+});
+
+test("both views label Kane's opinion on a refuted check and give a conditional next step", () => {
+  const disputed = buildDoc({ items: [refuted()], skipped: [], base: null, changedFiles: null, url: null, seconds: 122, out: "/out", rerun: { flags: [] }, estimatedCredits: 30 });
+  for (const View of [PlainView, LiveView]) {
+    const out = sink(160);
+    const view = new View(out, { color: false });
+    view.done(disputed);
+    assert.match(out.text, /✗ Free shipping from €50 failed/);
+    assert.match(out.text, /Why +The scenario's check did not hold on the page\. Kane believes the scenario is out of date\./);
+    assert.match(out.text, /Kane thinks +The test used the wrong/);
+    assert.match(out.text, /Next +If the change in the app was intended, update the scenario; otherwise fix the app\./);
+    assert.doesNotMatch(out.text, /Suggestion|Update the test expectation/);
+  }
+});
+
+test("zero reported credits does not claim an unfinished run was free", () => {
+  const interrupted = buildDoc({ items: [ran("x", "error")], skipped: [], base: null, changedFiles: null, url: null, seconds: 11, out: "/out", rerun: { flags: [] }, estimatedCredits: 30 });
+  const text = ending(interrupted, palette(false)).join("\n");
+  assert.match(text, /no credits reported/);
+  assert.match(text, /balance may drop slightly more/);
+  assert.doesNotMatch(text, /0 credits/);
 });

@@ -233,7 +233,7 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.equal(dry.code, 0);
       const doc = json(dry);
       assert.equal(doc.dryRun, true);
-      assert.deepEqual(doc.scenarios.map((s) => [s.id, s.outcome, s.estimatedCredits]), [["pass", "would_run", 25]]);
+      assert.deepEqual(doc.scenarios.map((s) => [s.id, s.outcome, s.estimatedCredits]), [["pass", "would_run", 30]]);
       assert.deepEqual(doc.skipped, [{ id: "other", name: "Scenario other", why: "the change does not touch its paths" }]);
       // With --json, stderr carries no second copy of what the document says.
       assert.doesNotMatch(dry.stderr, /would run:/);
@@ -263,6 +263,28 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     }
   });
 
+  test("a failed assert Kane blames on the scenario is a failure in JSON and the terminal", async () => {
+    const r = repo({ shipping: { mode: "refuted", credits: 27.42 } });
+    const port = await freePort();
+    const args = ["check", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`];
+    try {
+      const plain = await cli(r, args);
+      assert.equal(plain.code, 1, plain.stderr);
+      assert.match(plain.stdout, /Kane thinks +The test used the wrong/);
+      assert.match(plain.stdout, /otherwise fix the app/);
+      assert.doesNotMatch(plain.stdout, /Update the test expectation/);
+      const ran = await cli(r, [...args, "--json"]);
+      assert.equal(ran.code, 1, ran.stderr);
+      const doc = json(ran);
+      assert.equal(doc.scenarios[0]!.failedCheck, "scenario_doubted");
+      assert.equal(doc.counts.failed, 1);
+      assert.match(doc.next, /If the change in the app was intended/);
+      assert.equal(doc.credits, 27.42);
+    } finally {
+      r.cleanup();
+    }
+  });
+
   // SIGHUP is a closed terminal tab or a dropped SSH session.
   for (const signal of ["SIGINT", "SIGHUP"] as const) test(`${signal} stops Kane and its children, every Chrome and the app, and exits 130`, async () => {
     const r = repo({ stuck: { mode: "hang" } });
@@ -282,6 +304,7 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       const ran = await done;
       assert.equal(ran.code, 130);
       assert.equal(json<ErrorDoc>(ran).error.code, "interrupted");
+      assert.match(json<ErrorDoc>(ran).error.message, /may have spent credits before reporting them/);
       assert.ok(!alive(kane), "fake Kane is gone");
       assert.ok(!alive(child), "its child is gone");
       // Chrome's helpers may take a moment after the main process.
