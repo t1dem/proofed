@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Step } from "./kane.ts";
-import { focusWords, kaneObjective, outcomeOf } from "./run.ts";
+import { focusWords, kaneError, kaneObjective, outcomeOf } from "./run.ts";
 
 test("a failed check is located by the words of its quoted expectation", () => {
   const words = focusWords({ type: "run_end", status: "failed", reason: "The bag shows “That code doesn’t work,” leaving no discount." });
@@ -17,6 +17,24 @@ test("Kane is told not to route around a step that misbehaves", () => {
 test("a passed run is located by the values Kane read off the page", () => {
   const words = focusWords({ type: "run_end", status: "passed", final_state: { url: "http://localhost/cart", shipping: "Free", total: "€51.00" } });
   assert.deepEqual(words, ["free", "€51.00"]);
+});
+
+test("Kane's error line is the reason, not the hints printed after it", () => {
+  const stderr = [
+    "",
+    "Update available: 0.10.3 → 0.10.4 — run `npm install -g @testmuai/kane-cli@latest` to update",
+    "",
+    'error: profile "hackathon" (prod) has no project/folder configured AND no TMS credentials were available to auto-configure one.',
+    "",
+    "discover IDs:",
+    '  kane-cli projects list --search "<keyword>" --limit 10',
+    "",
+    "set them:",
+    "  kane-cli config project <project-id>",
+    "  kane-cli config folder <folder-id>",
+  ].join("\n");
+  assert.equal(kaneError(stderr), 'profile "hackathon" (prod) has no project/folder configured AND no TMS credentials were available to auto-configure one.');
+  assert.equal(kaneError("one\ntwo\nthree\nfour\nfive\nsix"), "two\nthree\nfour\nfive\nsix");
 });
 
 // Steps and verdicts as Kane reported them on PR #3, after the fix.

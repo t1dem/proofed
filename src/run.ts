@@ -44,6 +44,14 @@ export type ScenarioResult = {
 // Failures of the browser plumbing rather than of the app: the run is retried, never reported as a bug.
 const INFRA = /Screenshot failed|TimeoutError|TargetClosedError|has been closed|ECONNREFUSED|ECONNRESET|socket hang up|Project and folder must be configured/i;
 
+// What Kane said when it left without a verdict. Kane puts the cause on an "error:" line and its
+// hints after it, so the last lines alone can start in the middle of a hint.
+export function kaneError(stderr: string) {
+  const lines = stderr.trim().split("\n");
+  const cause = lines.findLast((l) => /^\s*(?:error|fatal)\b/i.test(l));
+  return cause ? cause.trim().replace(/^(?:error|fatal):\s*/i, "") : lines.slice(-5).join("\n");
+}
+
 // Words of what the run checked last: the quoted expectation of a failed check, or the values
 // Kane read off the page when it passed. The clip ends zoomed on the element that holds them.
 const STOP = new Set(["that", "this", "with", "from", "have", "after", "then", "should", "shows", "page", "into", "when", "each", "there", "them", "than", "what", "which", "only", "also", "visible", "displayed"]);
@@ -197,7 +205,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     log(`→ ${outcome}${end?.reason ? `: ${end.reason}` : ""} (${frames.length} frames)`);
     const error = kane.timedOut
       ? "Kane stopped responding and the run was cut off"
-      : (kane.end?.reason ?? kane.stderr.trim().split("\n").slice(-5).join("\n"));
+      : (kane.end?.reason ?? kaneError(kane.stderr));
     const film = { frames, actions: recorded.actions, focus: focusRect };
     writeFileSync(join(dir, "film.json"), JSON.stringify(film));
     // A step starts when Kane announces it (the "running" event), not when it reports it done.

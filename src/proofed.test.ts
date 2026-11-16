@@ -226,7 +226,7 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.ok(Date.now() - started < 10_000, "it took seconds, not a build and a run");
       assert.equal(existsSync(join(r.dir, "tmp/built")), false, "nothing was built");
       assert.ok(await portFree(port), "the app was never started");
-      assert.deepEqual(calls(r).map((c) => c.args?.[0]), ["whoami"]);
+      assert.deepEqual(calls(r).map((c) => c.args?.[0]), ["balance"]);
 
       const plain = await cli(r, args.filter((a) => a !== "--json"), { FAKE_KANE_SIGNED_IN: "0", LT_USERNAME: "", LT_ACCESS_KEY: "" });
       assert.equal(plain.code, 3);
@@ -234,11 +234,44 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.match(plain.stderr, /Fix kane-cli login/);
       assert.doesNotMatch(plain.stdout + plain.stderr, /Fix Fix|run it again/);
 
-      // Keys in the environment are what Kane runs with; whoami isn't asked.
+      // With keys in the environment, balance is asked with them; the fake Kane takes them and refuses the run itself.
       const keys = await cli(r, args, { FAKE_KANE_SIGNED_IN: "0", LT_USERNAME: "u", LT_ACCESS_KEY: "k" });
       assert.equal(json<ErrorDoc>(keys).error.code, "kane_not_signed_in", "the fake Kane refuses the run itself");
-      assert.equal(calls(r).filter((c) => c.args?.[0] === "whoami").length, 2);
+      assert.deepEqual(calls(r).filter((c) => c.args?.[0] === "balance").at(-1)!.args, ["balance", "--username", "u", "--access-key", "k"]);
       assert.equal(runs(r).length, 2, "one run per scenario, and no retry");
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  test("with keys TestMu rejects, check stops before the build with exit 3 and says to fix the keys", async () => {
+    const r = repo({ one: { mode: "pass" }, two: { mode: "pass" } });
+    const port = await freePort();
+    const args = ["check", "--json", "--url", `http://127.0.0.1:${port}`, "--build", "node -e \"require('fs').writeFileSync('tmp/built', '')\"", "--serve", `node server.cjs ${port}`];
+    const bad = { FAKE_KANE_KEYS: "rejected", LT_USERNAME: "made-up", LT_ACCESS_KEY: "made-up" };
+    try {
+      const started = Date.now();
+      const ran = await cli(r, args, bad);
+      assert.equal(ran.code, 3, ran.stderr);
+      const e = json<ErrorDoc>(ran);
+      assert.equal(e.error.code, "kane_keys_rejected");
+      assert.match(e.error.message, /^Kane rejected LT_USERNAME and LT_ACCESS_KEY \(Credit balance request failed: 401 .*authentication failed.*\), so Kane can't run the scenarios\. Nothing was built or run\.$/);
+      assert.match(e.error.fix, /^LT_USERNAME and LT_ACCESS_KEY: copy both again from TestMu/);
+      assert.doesNotMatch(`${e.error.message} ${e.error.fix}`, /run it again|retry|Update available/i);
+      assert.ok(Date.now() - started < 10_000, "it took seconds, not a build and a run");
+      assert.equal(existsSync(join(r.dir, "tmp/built")), false, "nothing was built");
+      assert.ok(await portFree(port), "the app was never started");
+      assert.equal(runs(r).length, 0);
+
+      const plain = await cli(r, args.filter((a) => a !== "--json"), bad);
+      assert.equal(plain.code, 3);
+      assert.match(plain.stderr, /✗ Kane rejected LT_USERNAME and LT_ACCESS_KEY/);
+      assert.match(plain.stderr, /Fix LT_USERNAME and LT_ACCESS_KEY: copy both again/);
+
+      const doctor = json<{ checks: { name: string; status: string; fix?: string }[] }>(await cli(r, ["doctor", "--json"], bad));
+      const login = doctor.checks.find((c) => c.name === "Kane login")!;
+      assert.equal(login.status, "fail");
+      assert.match(login.fix!, /^LT_USERNAME and LT_ACCESS_KEY/);
     } finally {
       r.cleanup();
     }
@@ -449,10 +482,15 @@ describe("proofed list and doctor", () => {
       assert.equal(by["Kane CLI"]!.status, "ok");
       assert.match(by["Kane CLI"]!.detail, /0\.10\.4/);
       assert.deepEqual([by["Kane login"]!.status, by["Kane login"]!.fix], ["fail", "kane-cli login (or export LT_USERNAME and LT_ACCESS_KEY from TestMu: Settings → Keys)"]);
-      assert.match(by.Credits!.detail, /^1234 available/);
+      assert.equal(by.Credits!.status, "warn");
       assert.equal(by.App!.status, "fail");
       assert.equal(doc.exitCode, 3);
-      assert.deepEqual(calls(r).map((c) => c.args?.[0]).sort(), ["--version", "balance", "whoami"]);
+      assert.deepEqual(calls(r).map((c) => c.args?.[0]).sort(), ["--version", "balance"]);
+
+      const signedIn = json<{ checks: { name: string; status: string; detail: string }[] }>(await cli(r, ["doctor", "--json"]));
+      const credits = signedIn.checks.find((c) => c.name === "Credits")!;
+      assert.deepEqual([signedIn.checks.find((c) => c.name === "Kane login")!.status, credits.status], ["ok", "ok"]);
+      assert.match(credits.detail, /^1234 available/);
     } finally {
       r.cleanup();
     }

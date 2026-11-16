@@ -1,5 +1,5 @@
 // `proofed doctor`: whether `proofed check` can run here, and the exact fix for what can't. It only
-// calls Kane's free commands (--version, whoami, balance); no run, no credits.
+// calls Kane's free commands (--version, balance); no run, no credits.
 import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
 import { promisify } from "node:util";
@@ -9,7 +9,7 @@ import { scenariosDirOf, type Io } from "./check.ts";
 import { findBase } from "./changes.ts";
 import { findChrome } from "./chrome.ts";
 import { depsMissing, installCommand } from "./deps.ts";
-import { kaneCredentials, kaneLogin, LOGIN_FIX } from "./kaneauth.ts";
+import { KEYS_FIX, kaneLogin, LOGIN_FIX } from "./kaneauth.ts";
 import { colorOn, palette, stripAnsi } from "./render.ts";
 import { readScenarios } from "./scenarios.ts";
 import { answers } from "./serve.ts";
@@ -59,21 +59,19 @@ export async function doctorChecks(flags: Flags, io: Io): Promise<DoctorCheck[]>
   for (const e of loaded.errors) add("Scenario", "fail", `${e.file}: ${e.message}`, `Correct the frontmatter of ${e.file}: --- name, paths, url --- then the objective.`);
 
   const found = findKane(io.env);
-  const creds = kaneCredentials(io.env);
   if (!found.path) {
     add("Kane CLI", "fail", `not found (${found.from})`, io.env.KANE_CLI ? "Point KANE_CLI at the kane-cli binary, or unset it." : "npm install -g @testmuai/kane-cli");
   } else {
-    const [version, login, balance] = await Promise.all([
-      kane(found.path, ["--version"], io.env),
-      kaneLogin(found.path, io.env),
-      kane(found.path, ["balance", ...creds], io.env),
-    ]);
+    const [version, login] = await Promise.all([kane(found.path, ["--version"], io.env), kaneLogin(found.path, io.env)]);
     add("Kane CLI", "ok", `${found.path}, ${/\d+\.\d+\.\d+\S*/.exec(version.text)?.[0] ?? "version unknown"}`);
     if (login.state === "not_signed_in") add("Kane login", "fail", login.detail, LOGIN_FIX);
-    else if (login.state === "unknown") add("Kane login", "warn", login.detail, "kane-cli whoami");
+    else if (login.state === "keys_rejected") add("Kane login", "fail", login.detail, KEYS_FIX);
+    else if (login.state === "unknown") add("Kane login", "warn", login.detail, "kane-cli balance");
     else add("Kane login", "ok", login.detail);
-    const left = /credits:\s*([\d.,]+)/i.exec(balance.text)?.[1];
-    if (balance.ok && left) {
+    const left = /credits:\s*([\d.,]+)/i.exec(login.balance ?? "")?.[1];
+    if (login.state === "not_signed_in" || login.state === "keys_rejected") {
+      add("Credits", "warn", "unknown until Kane accepts the login");
+    } else if (left) {
       const n = Number(left.replace(/,/g, ""));
       add("Credits", n >= DEFAULT_CREDITS ? "ok" : "warn", `${Math.floor(n)} available; a first run is estimated at ${DEFAULT_CREDITS} credits`, n >= DEFAULT_CREDITS ? undefined : "Top up your TestMu account before running scenarios.");
     } else {
