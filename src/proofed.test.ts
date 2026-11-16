@@ -1,0 +1,305 @@
+// `proofed` end to end, with the fake Kane (src/testing/fake-kane.ts) in place of kane-cli, a tiny
+// app served by node:http, and a temp git repo for the app's code. Real Chrome, no credits.
+import assert from "node:assert/strict";
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, test } from "node:test";
+import { findChrome } from "./chrome.ts";
+import type { Doc, ErrorDoc } from "./result.ts";
+
+const CLI = new URL("./proofed.ts", import.meta.url).pathname;
+const FAKE_KANE = new URL("./testing/fake-kane.ts", import.meta.url).pathname;
+const noChrome = findChrome() ? false : "Chrome not found; set CHROME_PATH to run the end-to-end tests";
+
+const APP = `const http = require("node:http");
+http.createServer((req, res) => {
+  res.writeHead(200, { "content-type": "text/html" });
+  res.end("<!doctype html><title>Shop</title><h1>Shop</h1><button>Add to bag</button>");
+}).listen(Number(process.argv[2]), "127.0.0.1");
+`;
+
+// Markers tell the fake Kane what to do (see fake-kane.ts).
+type Spec = { mode: string; paths?: string[]; credits?: number };
+
+function repo(scenarios: Record<string, Spec>) {
+  const dir = mkdtempSync(join(tmpdir(), "proofed-e2e-"));
+  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd: dir, stdio: "ignore" });
+  mkdirSync(join(dir, ".proofed/scenarios"), { recursive: true });
+  mkdirSync(join(dir, "src"));
+  mkdirSync(join(dir, "tmp"));
+  writeFileSync(join(dir, ".gitignore"), "tmp\n");
+  writeFileSync(join(dir, "server.cjs"), APP);
+  writeFileSync(join(dir, "src/app.js"), "export const price = 1;\n");
+  writeFileSync(join(dir, "README.md"), "app\n");
+  for (const [id, s] of Object.entries(scenarios)) {
+    const head = `---\nname: Scenario ${id}\npaths: [${(s.paths ?? ["src/**"]).join(", ")}]\nurl: /\n---\n`;
+    writeFileSync(join(dir, `.proofed/scenarios/${id}.md`), `${head}Check the page. [fake:${s.mode}] [delay:20] [credits:${s.credits ?? 7}]\n`);
+  }
+  git("init", "-q", "-b", "main");
+  git("add", "-A");
+  git("commit", "-qm", "init");
+  // The change under test, uncommitted as a coding agent leaves it.
+  writeFileSync(join(dir, "src/app.js"), "export const price = 2;\n");
+  return {
+    dir,
+    git,
+    log: join(dir, "tmp/kane-calls.ndjson"),
+    out: join(dir, "tmp/out"),
+    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+  };
+}
+type Repo = ReturnType<typeof repo>;
+
+const calls = (r: Repo) =>
+  existsSync(r.log) ? readFileSync(r.log, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as { pid: number; args?: string[]; child?: number }) : [];
+const runs = (r: Repo) => calls(r).filter((c) => c.args?.[0] === "run");
+
+async function freePort() {
+  const server: Server = createServer();
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as { port: number }).port;
+  await new Promise((r) => server.close(r));
+  return port;
+}
+
+const portFree = (port: number) =>
+  new Promise<boolean>((resolve) => {
+    const server = createServer();
+    server.once("error", () => resolve(false));
+    server.listen(port, "127.0.0.1", () => server.close(() => resolve(true)));
+  });
+
+function env(r: Repo, extra: NodeJS.ProcessEnv = {}) {
+  const { NO_COLOR, FORCE_COLOR, PROOFED_URL, PROOFED_SERVE, PROOFED_BUILD, PROOFED_OUT, PROOFED_SCENARIOS, ...rest } = process.env;
+  // TMPDIR: each Chrome's profile goes there, so the test can tell its Chromes from any other.
+  return { ...rest, KANE_CLI: FAKE_KANE, FAKE_KANE_LOG: r.log, TMPDIR: join(r.dir, "tmp"), ...extra };
+}
+
+type Ran = { code: number | null; stdout: string; stderr: string };
+
+function cli(r: Repo, args: string[], extra: NodeJS.ProcessEnv = {}, onSpawn?: (p: ReturnType<typeof spawn>) => void) {
+  const proc = spawn(process.execPath, [CLI, ...args, "--out", r.out], { cwd: r.dir, env: env(r, extra), stdio: ["ignore", "pipe", "pipe"] });
+  onSpawn?.(proc);
+  let stdout = "";
+  let stderr = "";
+  proc.stdout.on("data", (d) => (stdout += d));
+  proc.stderr.on("data", (d) => (stderr += d));
+  return new Promise<Ran>((resolve) => proc.on("close", (code) => resolve({ code, stdout, stderr })));
+}
+
+// stdout must be exactly one JSON document.
+const json = <T = Doc>(ran: Ran) => {
+  assert.match(ran.stdout, /^\{[\s\S]*\}\n$/, `stdout isn't only JSON:\n${ran.stdout}\n--- stderr:\n${ran.stderr}`);
+  return JSON.parse(ran.stdout) as T;
+};
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, timeout: 240_000 }, () => {
+  test("--json: pass, fail, not checked twice and error, as one JSON document", async () => {
+    const r = repo({ pass: { mode: "pass" }, fail: { mode: "fail", credits: 27 }, vague: { mode: "noassert" }, doubted: { mode: "automation" }, broken: { mode: "error" } });
+    const port = await freePort();
+    try {
+      const ran = await cli(r, ["check", "--json", "--concurrency", "5", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`]);
+      assert.equal(ran.code, 1, ran.stderr);
+      const doc = json(ran);
+      assert.equal(doc.exitCode, 1);
+      assert.deepEqual(doc.counts, { passed: 1, failed: 1, not_checked: 2, error: 1, skipped: 0 });
+      const by = Object.fromEntries(doc.scenarios.map((s) => [s.id, s]));
+      assert.equal(by.pass!.outcome, "passed");
+      assert.ok(by.pass!.clip?.mp4 && existsSync(by.pass!.clip.mp4), "a clip of the real page");
+      assert.equal(by.fail!.outcome, "failed");
+      assert.equal(by.fail!.diagnosis, "The free shipping threshold is €40, not €50.");
+      assert.equal(by.fail!.failedStep, "assert: shipping is €4.90");
+      assert.deepEqual([by.vague!.outcome, by.vague!.notChecked], ["not_checked", "nothing_asserted"]);
+      assert.deepEqual([by.doubted!.outcome, by.doubted!.notChecked], ["not_checked", "scenario_doubted"]);
+      assert.equal(by.broken!.outcome, "error");
+      assert.equal(doc.credits, 7 + 27 + 7 + 7);
+      assert.match(doc.rerun!, /^proofed check --only (broken|doubted|fail|vague)(,(broken|doubted|fail|vague)){3} /);
+      // The progress went to stderr, the same document to result.json, and the clips stay out of git.
+      assert.match(ran.stderr, /started pass: Scenario pass/);
+      assert.deepEqual(JSON.parse(readFileSync(join(r.out, "result.json"), "utf8")), doc);
+      assert.equal(readFileSync(join(r.out, ".gitignore"), "utf8"), "*\n");
+      // An error is tried twice, like in CI.
+      assert.equal(runs(r).length, 6);
+      assert.ok(await portFree(port), "the app is stopped at the end");
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  test("exit 0 for a pass, without ffmpeg, in plain output", async () => {
+    const r = repo({ pass: { mode: "pass" } });
+    const port = await freePort();
+    // A PATH with node and git but no ffmpeg: no clip, and the verdict still holds.
+    const bin = join(r.dir, "tmp/bin");
+    mkdirSync(bin);
+    symlinkSync(process.execPath, join(bin, "node"));
+    symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(bin, "git"));
+    try {
+      const ran = await cli(r, ["check", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`], { PATH: bin });
+      assert.equal(ran.code, 0, ran.stdout + ran.stderr);
+      assert.doesNotMatch(ran.stdout, /\x1b/);
+      assert.match(ran.stdout, /Time: about 1 to 4 minutes per scenario, 3 at a time/);
+      assert.match(ran.stdout, /^\[0:\d\d\] passed pass: Scenario pass/m);
+      assert.match(ran.stdout, /✓ 1 passed · 7 credits/);
+      const doc = JSON.parse(readFileSync(join(r.out, "result.json"), "utf8")) as Doc;
+      assert.equal(doc.scenarios[0]!.outcome, "passed");
+      assert.equal(doc.scenarios[0]!.clip?.mp4, undefined);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  test("exit 2 when nothing failed but something wasn't checked, 3 when Proofed can't run", async () => {
+    const r = repo({ vague: { mode: "noassert" }, broken: { mode: "error" } });
+    const port = await freePort();
+    const app = spawn(process.execPath, ["server.cjs", String(port)], { cwd: r.dir, stdio: "ignore" });
+    try {
+      const url = `http://127.0.0.1:${port}`;
+      while (!(await fetch(url).then(() => true, () => false))) await new Promise((res) => setTimeout(res, 100));
+      const two = await cli(r, ["check", "--json", "--url", url]);
+      assert.equal(two.code, 2);
+      assert.equal(json(two).exitCode, 2);
+
+      const unknown = await cli(r, ["check", "--json", "--url", url, "--only", "nope"]);
+      assert.equal(unknown.code, 3);
+      const e = json<ErrorDoc>(unknown);
+      assert.equal(e.error.code, "unknown_scenario");
+      assert.match(e.error.message, /Scenarios: broken, vague/);
+
+      const down = await cli(r, ["check", "--json", "--url", "http://127.0.0.1:9"]);
+      assert.equal(down.code, 3);
+      assert.equal(json<ErrorDoc>(down).error.code, "app_not_reachable");
+      assert.match(json<ErrorDoc>(down).error.fix, /--serve/);
+
+      const noKane = await cli(r, ["check", "--json", "--url", url], { KANE_CLI: join(r.dir, "missing-kane") });
+      assert.equal(noKane.code, 3);
+      assert.equal(json<ErrorDoc>(noKane).error.code, "kane_missing");
+      assert.equal(runs(r).length, 3, "only the first check ran Kane: once, and the error once more");
+    } finally {
+      app.kill();
+      r.cleanup();
+    }
+  });
+
+  test("a pass is cached until a file in its paths changes", async () => {
+    const r = repo({ pricing: { mode: "pass", paths: ["src/app.js"] } });
+    const port = await freePort();
+    const check = () => cli(r, ["check", "--json", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`]);
+    try {
+      const first = json(await check());
+      assert.equal(first.credits, 7);
+      assert.equal(runs(r).length, 1);
+
+      writeFileSync(join(r.dir, "README.md"), "edited, outside the scenario's paths\n");
+      const second = json(await check());
+      assert.deepEqual([second.exitCode, second.credits, second.scenarios[0]!.cached], [0, 0, true]);
+      assert.ok(second.scenarios[0]!.cachedAt);
+      assert.equal(runs(r).length, 1, "the cached pass didn't call Kane");
+
+      writeFileSync(join(r.dir, "src/app.js"), "export const price = 3;\n");
+      const third = json(await check());
+      assert.deepEqual([third.credits, third.scenarios[0]!.cached], [7, false]);
+      assert.equal(runs(r).length, 2);
+
+      const forced = json(await cli(r, ["check", "--json", "--no-cache", "--dry-run", "--url", `http://127.0.0.1:${port}`]));
+      assert.equal(forced.scenarios[0]!.outcome, "would_run");
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  test("--dry-run and a change that touches nothing never call Kane", async () => {
+    const r = repo({ pass: { mode: "pass" }, other: { mode: "pass", paths: ["lib/**"] } });
+    try {
+      const dry = await cli(r, ["check", "--json", "--dry-run", "--url", "http://127.0.0.1:9"]);
+      assert.equal(dry.code, 0);
+      const doc = json(dry);
+      assert.equal(doc.dryRun, true);
+      assert.deepEqual(doc.scenarios.map((s) => [s.id, s.outcome, s.estimatedCredits]), [["pass", "would_run", 25]]);
+      assert.deepEqual(doc.skipped, [{ id: "other", name: "Scenario other", why: "the change does not touch its paths" }]);
+
+      r.git("commit", "-qam", "the change");
+      const none = await cli(r, ["check", "--url", "http://127.0.0.1:9"]);
+      assert.equal(none.code, 0);
+      assert.equal(none.stdout, "Nothing changed against main. Use --all to run every scenario.\n");
+      assert.equal(runs(r).length, 0);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  test("Ctrl-C stops Kane and its children, every Chrome and the app, and exits 130", async () => {
+    const r = repo({ stuck: { mode: "hang" } });
+    const port = await freePort();
+    try {
+      let cli_pid = 0;
+      const done = cli(r, ["check", "--json", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`], {}, (p) => (cli_pid = p.pid!));
+      const deadline = Date.now() + 60_000;
+      while (!calls(r).some((c) => c.child) && Date.now() < deadline) await new Promise((res) => setTimeout(res, 100));
+      const kane = runs(r)[0]!.pid;
+      const child = calls(r).find((c) => c.child)!.child!;
+      const chromes = () => execFileSync("ps", ["-A", "-o", "pid=,command="], { encoding: "utf8" }).split("\n").filter((l) => l.includes(join(r.dir, "tmp")) && /chrom/i.test(l));
+      assert.ok(chromes().length > 0, "Chrome is running before the interrupt");
+      assert.ok(!(await portFree(port)), "the app is up before the interrupt");
+
+      process.kill(cli_pid, "SIGINT");
+      const ran = await done;
+      assert.equal(ran.code, 130);
+      assert.equal(json<ErrorDoc>(ran).error.code, "interrupted");
+      assert.ok(!alive(kane), "fake Kane is gone");
+      assert.ok(!alive(child), "its child is gone");
+      // Chrome's helpers may take a moment after the main process.
+      for (let i = 0; i < 20 && chromes().length; i++) await new Promise((res) => setTimeout(res, 100));
+      assert.deepEqual(chromes(), []);
+      assert.ok(await portFree(port), "the app is stopped");
+    } finally {
+      r.cleanup();
+    }
+  });
+});
+
+describe("proofed list and doctor", () => {
+  test("list shows each scenario and a file that doesn't parse", async () => {
+    const r = repo({ pricing: { mode: "pass", paths: ["src/app.js"] }, docs: { mode: "pass", paths: ["docs/**"] } });
+    writeFileSync(join(r.dir, ".proofed/scenarios/bad.md"), "no frontmatter\n");
+    try {
+      const ran = await cli(r, ["list", "--json"]);
+      assert.equal(ran.code, 3);
+      const doc = json<{ scenarios: { id: string; touched: boolean }[]; errors: { file: string; message: string }[] }>(ran);
+      assert.deepEqual(doc.scenarios.map((s) => [s.id, s.touched]), [["docs", false], ["pricing", true]]);
+      assert.deepEqual(doc.errors, [{ file: ".proofed/scenarios/bad.md", message: "missing frontmatter" }]);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  test("doctor reports each check with a fix, using only Kane's free commands", async () => {
+    const r = repo({ pass: { mode: "pass" } });
+    try {
+      const ran = await cli(r, ["doctor", "--json"], { FAKE_KANE_SIGNED_IN: "0" });
+      const doc = json<{ exitCode: number; checks: { name: string; status: string; detail: string; fix?: string }[] }>(ran);
+      const by = Object.fromEntries(doc.checks.map((c) => [c.name, c]));
+      assert.equal(by["Kane CLI"]!.status, "ok");
+      assert.match(by["Kane CLI"]!.detail, /0\.10\.4/);
+      assert.deepEqual([by["Kane login"]!.status, by["Kane login"]!.fix], ["fail", "kane-cli login (or export LT_USERNAME and LT_ACCESS_KEY from TestMu: Settings → Keys)"]);
+      assert.match(by.Credits!.detail, /^1234 available/);
+      assert.equal(by.App!.status, "fail");
+      assert.equal(doc.exitCode, 3);
+      assert.deepEqual(calls(r).map((c) => c.args?.[0]).sort(), ["--version", "balance", "whoami"]);
+    } finally {
+      r.cleanup();
+    }
+  });
+});

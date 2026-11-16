@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { connectCdp, type Cdp, type ExceptionDetails } from "./cdp.ts";
 import { launchChrome } from "./chrome.ts";
+import { log } from "./log.ts";
 import type { ScenarioResult } from "./run.ts";
 import { BLANK_PAGE } from "./runfile.ts";
 import type { Scenario } from "./scenarios.ts";
@@ -59,10 +60,10 @@ export async function findCrashes(urls: string[], dir: string) {
       }),
     );
     cdp.close();
-    console.log(`Checked ${urls.length} start page(s) for a crash on load in ${seconds(started)} s (Chrome took ${seconds(started, opened)} s to start)`);
+    log(`Checked ${urls.length} start page(s) for a crash on load in ${seconds(started)} s (Chrome took ${seconds(started, opened)} s to start)`);
   } catch (e) {
     // The check is only a shortcut: without it, Kane runs every scenario as it always did.
-    console.log(`Couldn't check the pages before Kane: ${e instanceof Error ? e.message : e}`);
+    log(`Couldn't check the pages before Kane: ${e instanceof Error ? e.message : e}`);
   } finally {
     chrome?.close();
   }

@@ -4,10 +4,11 @@ import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editComment, listReports, minimize, postComment, publishClips, repoFromEnv, setStatus, type Repo } from "./github.ts";
 import { live } from "./live.ts";
+import { log } from "./log.ts";
 import { crashResult, findCrashes } from "./precheck.ts";
 import { buildReport, outdated, postsNew, type ClipLinks, type FixNote, type ReportData, type Written } from "./report.ts";
 import { nothingAsked } from "./requests.ts";
-import { runScenario, type ScenarioResult } from "./run.ts";
+import { runScenario, type RunEvent, type ScenarioResult } from "./run.ts";
 import { RUN_FILE, type RunFile } from "./runfile.ts";
 import { affectedBy, loadScenariosOr, type Scenario } from "./scenarios.ts";
 
@@ -52,10 +53,18 @@ export function pickScenarios({ changed, only, rev }: { changed?: string[]; only
   return { selected, skipped: all.filter((s) => !selected.includes(s)).map((s) => s.name) };
 }
 
+type RunAllOptions = {
+  baseUrl?: string;
+  headless?: boolean;
+  onEvent?: (event: RunEvent) => void;
+};
+
 // Every scenario gets its own Chrome, so they can run side by side; Kane is mostly waiting on its backend.
 // A start page that crashes while loading fails its scenarios without Kane (see precheck.ts).
-export async function runAll(scenarios: Scenario[], outDir: string, concurrency = Number(process.env.PROOFED_CONCURRENCY) || 3) {
-  const baseUrl = env("PROOFED_URL");
+export async function runAll(scenarios: Scenario[], outDir: string, concurrency = Number(process.env.PROOFED_CONCURRENCY) || 3, o: RunAllOptions = {}) {
+  const baseUrl = o.baseUrl ?? env("PROOFED_URL");
+  const emit = o.onEvent ?? (() => {});
+  for (const s of scenarios) emit({ type: "waiting", id: s.id });
   const urlOf = (s: Scenario) => new URL(s.url, baseUrl).href;
   live.track(scenarios);
   const checking = Date.now();
@@ -68,22 +77,28 @@ export async function runAll(scenarios: Scenario[], outDir: string, concurrency 
       const scenario = scenarios[i]!;
       const crash = crashes.get(urlOf(scenario));
       if (crash) {
-        console.log(`✗ ${scenario.name}: ${urlOf(scenario)} crashed while loading (${crash.error}); Kane not run`);
-        const result = crashResult(scenario, crash);
-        results[i] = { ...result, seconds: checkSeconds };
+        log(`✗ ${scenario.name}: ${urlOf(scenario)} crashed while loading (${crash.error}); Kane not run`);
+        const result = { ...crashResult(scenario, crash), seconds: checkSeconds };
+        results[i] = result;
         live.scenario(scenario.id, { status: result.outcome });
+        emit({ type: "finished", id: scenario.id, result });
         continue;
       }
-      console.log(`▶ ${scenario.name}`);
+      log(`▶ ${scenario.name}`);
+      emit({ type: "started", id: scenario.id });
       const started = Date.now();
       const result = await runScenario(scenario, {
         baseUrl,
         outDir,
         username: process.env.LT_USERNAME,
         accessKey: process.env.LT_ACCESS_KEY,
+        headless: o.headless,
+        onEvent: o.onEvent,
       });
-      results[i] = { ...result, seconds: Math.round((Date.now() - started) / 1000) };
+      const timed = { ...result, seconds: Math.round((Date.now() - started) / 1000) };
+      results[i] = timed;
       live.scenario(scenario.id, { status: result.outcome });
+      emit({ type: "finished", id: scenario.id, result: timed });
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, scenarios.length) }, worker));

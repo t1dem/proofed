@@ -1,7 +1,11 @@
 {
   "name": "proofed",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "proofed": "src/proofed.ts"
+  },
   "engines": {
     "node": ">=24"
   },

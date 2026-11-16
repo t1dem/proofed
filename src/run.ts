@@ -1,8 +1,10 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { stopping } from "./children.ts";
 import { launchChrome } from "./chrome.ts";
 import { makeClip } from "./clip.ts";
 import { live } from "./live.ts";
+import { log as logLine } from "./log.ts";
 import { runKane, type RunEnd, type Step } from "./kane.ts";
 import { NOTHING_CHECKED } from "./runfile.ts";
 import { startRecorder, type Rect } from "./recorder.ts";
@@ -80,6 +82,14 @@ export function kaneObjective(objective: string) {
   return `${objective}\n\n${NO_WORKAROUNDS}`;
 }
 
+// What a run reports as it goes, for a terminal to draw (src/proofed.ts). The PR check doesn't listen.
+export type RunEvent =
+  | { type: "waiting"; id: string }
+  | { type: "started"; id: string }
+  | { type: "step"; id: string; step: Step }
+  | { type: "retry"; id: string; error: string }
+  | { type: "finished"; id: string; result: ScenarioResult };
+
 type RunOptions = {
   baseUrl: string;
   outDir: string;
@@ -87,19 +97,21 @@ type RunOptions = {
   accessKey?: string;
   headless?: boolean;
   attempts?: number;
+  onEvent?: (event: RunEvent) => void;
 };
 
 export async function runScenario(scenario: Scenario, o: RunOptions): Promise<ScenarioResult> {
   let result = await runOnce(scenario, o);
-  for (let i = 2; i <= (o.attempts ?? 2) && result.outcome === "error"; i++) {
-    console.log(`[${scenario.id}] ${result.error ?? "infra error"}; retrying`);
+  for (let i = 2; i <= (o.attempts ?? 2) && result.outcome === "error" && !stopping(); i++) {
+    logLine(`[${scenario.id}] ${result.error ?? "infra error"}; retrying`);
+    o.onEvent?.({ type: "retry", id: scenario.id, error: result.error ?? "infra error" });
     result = await runOnce(scenario, o);
   }
   return result;
 }
 
 async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResult> {
-  const log = (line: string) => console.log(`[${scenario.id}] ${line}`);
+  const log = (line: string) => logLine(`[${scenario.id}] ${line}`);
   const dir = join(o.outDir, scenario.id);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
@@ -134,6 +146,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
       accessKey: o.accessKey,
       onStep: (s) => {
         live.step(scenario.id, s);
+        o.onEvent?.({ type: "step", id: scenario.id, step: s });
         if (s.status !== "running" && s.remark) log(`${s.status === "failed" ? "✗" : "·"} ${s.remark}`);
       },
       onEnd: (end) => (focus = recorder.locate(focusWords(end))),

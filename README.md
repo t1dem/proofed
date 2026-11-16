@@ -96,6 +96,70 @@ Comment on a PR. Only people with write access can run them.
 
 The repo's model is set in the [dashboard](https://proofed.neptunescodm.workers.dev/app). Without it, fixes use Haiku 5.5 at xhigh effort.
 
+## Locally and from an AI agent
+
+`proofed check` runs the same check on your machine, against the change you haven't pushed yet: the scenarios its files touch, in Chrome, with Kane CLI. A coding agent can run it before it says a UI change is done.
+
+It needs Node 24 or later, Chrome, [Kane CLI](https://www.npmjs.com/package/@testmuai/kane-cli) signed in (`kane-cli login`) and ffmpeg for the clips.
+
+```sh
+git clone https://github.com/t1dem/proofed && cd proofed && npm link
+```
+
+In the app's repo:
+
+| Command | What it does |
+|---|---|
+| `proofed doctor` | Checks Node, Git, the scenarios, Kane CLI and its login, credits, Chrome, ffmpeg and the app, each with a fix |
+| `proofed list` | Every scenario, whether the change touches it and whether its pass is cached |
+| `proofed check` | Runs the scenarios the change touches; `proofed check "the cart total updates"` checks just that |
+
+The change is everything since the merge base with the default branch (`origin/HEAD`, else `origin/main`, or `--base`), uncommitted and untracked files included. The URL and the commands that build and serve the app come from `--url`, `--build` and `--serve`, then `PROOFED_URL`, `PROOFED_BUILD` and `PROOFED_SERVE`, then `.proofed/config.json`, then the Proofed step of the repo's workflow. In a repo that already runs Proofed on its PRs, `proofed check` needs no flags. If the app isn't running, Proofed starts it and stops it at the end.
+
+A passed scenario isn't run again until its file, the URL or a changed file in its `paths` changes. `--dry-run` shows what would run and the credit estimate, for free. In a terminal the scenarios update in place; in a pipe each event is one line, with a "still running" line at least every 30 seconds. From a run on the demo store with a stand-in for Kane, so the times are short:
+
+```
+Proofed: checking 3 of 3 scenario(s), --all, at http://localhost:4173.
+Estimate: about 75 Kane credits.
+Time: about 1 to 4 minutes per scenario, 3 at a time, so 1 to 4 minutes in all. Do not interrupt: let it finish.
+url http://localhost:4173 from .github/workflows/proofed.yml
+The app answers at http://localhost:4173; using it as it is.
+[0:01] started checkout: Place an order
+[0:01] started free-shipping: Free shipping from €50
+[0:01] started promo-code: Promo code total
+[0:08] passed checkout: Place an order (0:08, 24 credits)
+[0:09] passed promo-code: Promo code total (0:08, 24 credits)
+[0:10] failed free-shipping: Free shipping from €50 (0:09, 24 credits)
+
+✗ Free shipping from €50 failed after 0:09
+  Kane saw    Shipping shows “Free” for a €44.50 bag.
+  Diagnosis   The free shipping threshold is €40, not €50.
+  Suggestion  Compare against 50 in shipping().
+  Failed step assert: shipping is €4.90
+  Clip        /home/me/store/.proofed-out/free-shipping/clip.mp4
+  Scenario    /home/me/store/.proofed/scenarios/free-shipping.md
+
+✗ 2 passed, 1 failed · 72 credits · 10s
+1 of 3 broke: Free shipping from €50
+Re-run what broke: proofed check --only free-shipping
+```
+
+`--json` prints one JSON document on stdout and the progress on stderr. Every run also writes it to `.proofed-out/result.json`, next to the clips; the folder has its own `.gitignore`. The exit code is 0 when everything checked passed, 1 when a scenario failed, 2 when nothing failed but something wasn't checked, 3 when the check couldn't start (the message says why and how to fix it) and 130 on Ctrl-C, which stops Kane, Chrome and the app first.
+
+For an agent, add this to the app's `AGENTS.md` or `CLAUDE.md`:
+
+```md
+## Checking UI changes
+
+After changing UI code, run `proofed check --json` with a timeout of at least 10 minutes, and
+don't interrupt it. stdout is one JSON document. Exit 0: everything checked passed.
+- `failed`: read the scenario's `reason` and `diagnosis`, fix the code, run its `rerun` command.
+- `not_checked` is not a pass: fix the scenario or tell the user why Kane doubts it.
+- `error`: run its `rerun` command once more. Exit 3: do what `error.fix` says.
+Each run costs Kane credits; `proofed check --dry-run --json` shows what would run, for free.
+To check one thing without a scenario: `proofed check "the cart total updates" --json`.
+```
+
 ## Setup
 
 1. Sign in at [proofed.neptunescodm.workers.dev](https://proofed.neptunescodm.workers.dev/app) and save your TestMu and Claude keys.
