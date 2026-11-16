@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { adopt } from "./children.ts";
 
 export type Step = { step: number; status: "running" | "done" | "failed"; remark: string; ts: string };
 
@@ -71,6 +72,7 @@ export function runKane(o: KaneOptions): Promise<KaneResult> {
       // Already gone.
     }
   };
+  const release = adopt({ kill: killGroup, exited: new Promise((r) => proc.once("exit", r)) });
 
   const steps: Step[] = [];
   let end: RunEnd | undefined;
@@ -114,6 +116,7 @@ export function runKane(o: KaneOptions): Promise<KaneResult> {
       // Let the last lines (run_end) through, but don't wait on a stream an orphan keeps open.
       await Promise.race([drained, new Promise((r) => setTimeout(r, 2000))]);
       killGroup("SIGKILL");
+      release();
       resolve({ steps, end, exitCode, stderr, timedOut });
     }),
   );

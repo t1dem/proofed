@@ -31,3 +31,17 @@ test("a pass counts only when Kane asserted something on the page", () => {
   assert.equal(outcomeOf({ ...pass, status: "failed", verdict: { family: "application_issue" } }, looked), "failed");
   assert.equal(outcomeOf({ ...pass, status: "failed", verdict: { family: "automation_bug" } }, looked), "unsure");
 });
+
+// The real run on demo-store with the free shipping threshold moved to €60: every step done, the
+// last assert false, and Kane's verdict "The test expectation uses the wrong free-shipping threshold".
+test("a check the page refuted is a failure, whatever Kane thinks of the scenario", () => {
+  const steps = [
+    step("navigate: Navigate to http://localhost:4173/"),
+    step("assert: shipping is €4.90 and the total is €49.40"),
+    step("analyze: the total is €51.00"),
+    step("assert: shipping is now Free and the total is €51.00", "failed"),
+  ];
+  const end = { ...pass, status: "failed", reason: 'Final verification failed: "shipping is now Free and the total is €51.00"' };
+  assert.equal(outcomeOf({ ...end, verdict: { family: "automation_bug" } }, steps), "failed");
+  assert.equal(outcomeOf({ ...end, verdict: { family: "automation_bug" } }, [...steps.slice(0, 3), step("click: Click “Apply”", "failed")]), "unsure");
+});

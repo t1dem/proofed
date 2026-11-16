@@ -1,15 +1,18 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { stopping } from "./children.ts";
 import { launchChrome } from "./chrome.ts";
 import { makeClip } from "./clip.ts";
 import { live } from "./live.ts";
+import { log as logLine } from "./log.ts";
 import { runKane, type RunEnd, type Step } from "./kane.ts";
 import { NOTHING_CHECKED } from "./runfile.ts";
 import { startRecorder, type Rect } from "./recorder.ts";
 import type { Scenario } from "./scenarios.ts";
 
 // "unsure": the run says nothing about the code. Either Kane decided the test itself looks wrong
-// (verdict family automation_bug), or it reported a pass without checking anything (see outcomeOf).
+// before it could check the page (verdict family automation_bug, no failed assert), or it reported
+// a pass without checking anything (see outcomeOf).
 // Worth showing, not worth blocking a merge over, and never counted as a pass.
 export type Outcome = "passed" | "failed" | "unsure" | "error";
 
@@ -59,15 +62,22 @@ export { NOTHING_CHECKED };
 // Only an assert compares the page with what the scenario expects.
 const checked = (steps: Step[]) => steps.some((s) => s.status === "done" && /^assert:/i.test(s.remark));
 
+// Kane read the page and the scenario's own check came out false. When the app is wrong all over
+// (a changed threshold shown in its banner too), Kane sides with the app and blames the test; the
+// scenario is what the app was meant to do, so that is a failure.
+const refuted = (steps: Step[]) => steps.some((s) => s.status === "failed" && /^assert:/i.test(s.remark));
+
 export function outcomeOf(end: RunEnd | undefined, steps: Step[]): Outcome {
   if (!end || INFRA.test(end.reason ?? "")) return "error";
   // A vague objective lets Kane open the page, wait, and call that a pass.
   if (end.status === "passed") return checked(steps) ? "passed" : "unsure";
-  return end.verdict?.family === "automation_bug" ? "unsure" : "failed";
+  return end.verdict?.family === "automation_bug" && !refuted(steps) ? "unsure" : "failed";
 }
 
 // An unsure run where Kane said "passed": nothing was checked, as opposed to Kane doubting the test.
 export const unchecked = (r: ScenarioResult) => r.outcome === "unsure" && r.end?.status === "passed";
+
+export const scenarioDoubted = (r: ScenarioResult) => r.outcome === "failed" && r.end?.verdict?.family === "automation_bug";
 
 // Kane is good at reaching a goal, so on its own it routes around a broken button (a key press, another
 // link) and passes. A user who clicks the button and gets the wrong screen has found a bug.
@@ -80,6 +90,14 @@ export function kaneObjective(objective: string) {
   return `${objective}\n\n${NO_WORKAROUNDS}`;
 }
 
+// What a run reports as it goes, for a terminal to draw (src/proofed.ts). The PR check doesn't listen.
+export type RunEvent =
+  | { type: "waiting"; id: string }
+  | { type: "started"; id: string }
+  | { type: "step"; id: string; step: Step }
+  | { type: "retry"; id: string; error: string; credits?: number }
+  | { type: "finished"; id: string; result: ScenarioResult };
+
 type RunOptions = {
   baseUrl: string;
   outDir: string;
@@ -87,19 +105,21 @@ type RunOptions = {
   accessKey?: string;
   headless?: boolean;
   attempts?: number;
+  onEvent?: (event: RunEvent) => void;
 };
 
 export async function runScenario(scenario: Scenario, o: RunOptions): Promise<ScenarioResult> {
   let result = await runOnce(scenario, o);
-  for (let i = 2; i <= (o.attempts ?? 2) && result.outcome === "error"; i++) {
-    console.log(`[${scenario.id}] ${result.error ?? "infra error"}; retrying`);
+  for (let i = 2; i <= (o.attempts ?? 2) && result.outcome === "error" && !stopping(); i++) {
+    logLine(`[${scenario.id}] ${result.error ?? "infra error"}; retrying`);
+    o.onEvent?.({ type: "retry", id: scenario.id, error: result.error ?? "infra error", credits: result.end?.credits_consumed });
     result = await runOnce(scenario, o);
   }
   return result;
 }
 
 async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResult> {
-  const log = (line: string) => console.log(`[${scenario.id}] ${line}`);
+  const log = (line: string) => logLine(`[${scenario.id}] ${line}`);
   const dir = join(o.outDir, scenario.id);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
@@ -134,6 +154,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
       accessKey: o.accessKey,
       onStep: (s) => {
         live.step(scenario.id, s);
+        o.onEvent?.({ type: "step", id: scenario.id, step: s });
         if (s.status !== "running" && s.remark) log(`${s.status === "failed" ? "✗" : "·"} ${s.remark}`);
       },
       onEnd: (end) => (focus = recorder.locate(focusWords(end))),

@@ -96,13 +96,93 @@ Comment on a PR. Only people with write access can run them.
 
 The repo's model is set in the [dashboard](https://proofed.neptunescodm.workers.dev/app). Without it, fixes use Haiku 5.5 at xhigh effort.
 
+## Locally and from an AI agent
+
+`proofed check` runs the same check on your machine, against the change you haven't pushed yet: the scenarios its files touch, in Chrome, with Kane CLI. A coding agent can run it before it says a UI change is done.
+
+It needs Node 24 or later, Chrome, [Kane CLI](https://www.npmjs.com/package/@testmuai/kane-cli) signed in (`kane-cli login`) and ffmpeg for the clips.
+
+Install the registry package with one manager:
+
+| | npm | pnpm | bun |
+|---|---|---|---|
+| Install | `npm install -g proofed-cli` | `pnpm add -g proofed-cli` | `bun add -g proofed-cli` |
+| Run without installing | `npx proofed-cli` | `pnpm dlx proofed-cli` | `bunx proofed-cli` |
+| Update | `npm install -g proofed-cli@latest` | `pnpm add -g proofed-cli@latest` | `bun add -g proofed-cli@latest` |
+| Uninstall | `npm uninstall -g proofed-cli` | `pnpm remove -g proofed-cli` | `bun remove -g proofed-cli` |
+
+The command is `proofed`; `proofed doctor` says what else is missing. It runs on Node 24 or later with any of the three, bun included, and an older Node gets an error that says so. The package is built JavaScript with no dependencies and no install scripts. From a clone, `npm link` runs the TypeScript source instead.
+
+In the app's repo:
+
+| Command | What it does |
+|---|---|
+| `proofed doctor` | Checks Node, Git, the scenarios, Kane CLI and its login, credits, Chrome, ffmpeg and the app, each with a fix |
+| `proofed list` | Every scenario, whether the change touches it and whether its pass is cached |
+| `proofed check` | Runs the scenarios the change touches; `proofed check "the cart total updates"` checks just that |
+
+The change is everything since the merge base with the default branch (`origin/HEAD`, else `origin/main`, or `--base`), uncommitted and untracked files included. The URL and the commands that build and serve the app come from `--url`, `--build` and `--serve`, then `PROOFED_URL`, `PROOFED_BUILD` and `PROOFED_SERVE`, then `.proofed/config.json`, then the Proofed step of the repo's workflow. In a repo that already runs Proofed on its PRs, `proofed check` needs no flags. If the app isn't running, Proofed builds and starts it, and stops it at the end. If something already answers at the URL and a build is configured, the check stops rather than test what may be an old build; `--reuse` tests it anyway.
+
+A passed scenario isn't run again until its file, the URL, the base commit or a changed file in its `paths` changes. `--dry-run` shows what would run and the credit estimate, for free. In a terminal the scenarios update in place; in a pipe each event is one line, with a "still running" line at least every 30 seconds. From a real run on the demo store with the free shipping threshold changed to €60. Shown with the current CLI wording and first-run estimate; paths are relative:
+
+```
+Proofed: checking 1 of 3 scenario(s), --only, at http://localhost:4173.
+Estimate: about 30 Kane credits.
+Time: about 1 to 4 minutes per scenario, 3 at a time, so 1 to 4 minutes in all. Do not interrupt: let it finish.
+Building the app: pnpm build
+Starting the app: pnpm preview --port 4173
+Started the app in 1 s (build from --build, serve from --serve); its output is in .proofed-out/serve.log
+[0:01] started free-shipping: Free shipping from €50
+[0:26] still running: free-shipping 0:25 at "click: Clicking Add House Espresso to bag"
+[0:51] still running: free-shipping 0:50 at "Step 7"
+[1:16] still running: free-shipping 1:15 at "Step 11"
+[1:41] still running: free-shipping 1:41 at "assert: shipping is now Free and the total is €51.00."
+[2:01] failed free-shipping: Free shipping from €50 (2:00, 27.4 credits)
+
+✗ Free shipping from €50 failed after 2:00
+  Kane saw    Final verification failed: "shipping is now Free and the total is €51.00."
+  Why         The scenario's check did not hold on the page. Kane believes the scenario is out of date.
+  Kane thinks The test used the wrong free-shipping threshold. The cart subtotal after adding one more Paper Filters was €51.00, which is still below the €60.00 threshold shown by the store.
+  Next        If the change in the app was intended, update the scenario; otherwise fix the app.
+  Failed step assert: shipping is now Free and the total is €51.00.
+  Clip        .proofed-out/free-shipping/clip.mp4
+  Scenario    .proofed/scenarios/free-shipping.md
+
+✗ 1 failed · 27.4 credits · 2m 2s
+Credits are Kane's report; balance may drop slightly more.
+1 of 1 broke: Free shipping from €50
+Re-run what broke: proofed check --only free-shipping --url http://localhost:4173 --serve 'pnpm preview --port 4173' --build 'pnpm build'
+```
+
+A first run is estimated at 30 Kane credits per scenario. Later estimates use the last reported cost. Credits are what Kane reported for the runs; the account balance can drop slightly more. An interrupted run can spend credits before Kane reports them.
+
+`--json` prints one JSON document on stdout and the progress on stderr. Every run also writes it to `.proofed-out/result.json`, next to the clips; the folder has its own `.gitignore`. The exit code is 0 when everything checked passed, 1 when a scenario failed, 2 when nothing failed but something wasn't checked, 3 when the check couldn't start (the message says why and how to fix it) and 130 on Ctrl-C or a closed terminal, which stops Kane, Chrome and the app first.
+
+`failedCheck: "scenario_doubted"` means a scenario's check failed, but Kane believes it is out of date. `diagnosis` is Kane's opinion; `suggestion` and `next` say to update the scenario if the app change was intended, otherwise fix the app. This stays a failure (exit 1). `notChecked: "scenario_doubted"` is used when Kane doubted the scenario without a failed check (exit 2).
+
+For an agent, add this to the app's `AGENTS.md` or `CLAUDE.md`:
+
+```md
+## Checking UI changes
+
+After changing UI code, run `proofed check --json` with a timeout of at least 10 minutes, and
+don't interrupt it. stdout is one JSON document. Exit 0: everything checked passed.
+- `failed`: read `reason` and `diagnosis`, fix the cause, run `rerun`.
+  With `failedCheck: "scenario_doubted"`, diagnosis is Kane's opinion. If the app change was
+  intended, update the scenario; otherwise fix the app.
+- `not_checked` is not a pass: fix the scenario or tell the user why Kane doubts it.
+- `error`: run its `rerun` command once more. Exit 3: do what `error.fix` says.
+Each run costs Kane credits; `proofed check --dry-run --json` shows what would run, for free.
+To check one thing without a scenario: `proofed check "the cart total updates" --json`.
+```
+
 ## Setup
 
 1. Sign in at [proofed.neptunescodm.workers.dev](https://proofed.neptunescodm.workers.dev/app) and save your TestMu and Claude keys.
 2. Install the GitHub App on a repo. Proofed opens a PR with the workflow and puts the keys into the repo's secrets.
 3. On that PR, Claude writes up to five scenarios for the app's main flows. Only the ones Kane saw pass are committed.
 
-A scenario takes about a minute and 20–30 Kane credits. A fix attempt re-runs only the scenarios that broke.
+A scenario takes 1 to 4 minutes. The first-run estimate is 30 Kane credits. A fix attempt re-runs only the scenarios that broke.
 
 <details>
 <summary><b>Setting it up by hand</b></summary>
@@ -147,7 +227,7 @@ jobs:
 
 ## Limits
 
-- **Kane's verdict on the same failure varies.** On [#6](https://github.com/t1dem/proofed-demo-store/pull/6) the check that [#9](https://github.com/t1dem/proofed-demo-store/pull/9) reports as a break came back twice as "the test may be wrong". Proofed shows such a run as not confirmed and starts no fix.
+- **Kane's verdict on the same failure varies.** On [#6](https://github.com/t1dem/proofed-demo-store/pull/6) the check that [#9](https://github.com/t1dem/proofed-demo-store/pull/9) reports as a break came back twice as "the test may be wrong". Without a failed check, Proofed shows such a run as not confirmed and starts no fix. A failed `assert:` stays a failure even when Kane blames the scenario.
 - **Fixes need Claude's usage limit to have room.** On [#7](https://github.com/t1dem/proofed-demo-store/pull/7) and [#8](https://github.com/t1dem/proofed-demo-store/pull/8) it ran out: Kane caught the break, no fix followed, and the report says so.
 - **Only flows with a scenario are checked.** A scenario whose `paths` miss a file isn't picked when that file changes.
 - **Slow next to unit tests.** One to four minutes of Kane per scenario, plus a build and a re-check per fix attempt.
@@ -166,7 +246,26 @@ Each fix is a few lines, found by a run that went wrong.
 
 ## Code
 
-TypeScript that Node 24 runs directly, no build step. `pnpm test` runs the unit tests.
+Node 24+ runs the checkout's TypeScript directly. The GitHub Action needs no build or package install.
+`pnpm build` emits the CLI and its imports to `dist/` for npm. `npm pack` builds it automatically.
+`pnpm typecheck` and `pnpm test` check the source. `pnpm check:package` builds a tarball, checks its
+contents, installs it into a temporary prefix and runs its version and help. It removes its temp files.
+
+To release, confirm the version in `package.json` (currently `0.1.0`); published versions cannot be reused. From a clean checkout with Node 24+:
+
+```sh
+pnpm install --frozen-lockfile
+npm login --registry=https://registry.npmjs.org/
+npm whoami --registry=https://registry.npmjs.org/
+npm publish --access public --registry=https://registry.npmjs.org/
+npm view proofed-cli@0.1.0 version bin engines dist.tarball --registry=https://registry.npmjs.org/
+npx --yes proofed-cli@0.1.0 --version
+npx --yes proofed-cli@0.1.0 --help
+```
+
+Use the chosen version in the last three commands. `npm publish` runs typecheck, tests and the package
+check before packing a fresh build. Complete npm's sign-in and two-factor prompts when asked.
+Publishing is manual; no release workflow runs on pushes or pull requests.
 
 | File | What it does |
 |---|---|
@@ -176,3 +275,7 @@ TypeScript that Node 24 runs directly, no build step. `pnpm test` runs the unit 
 | `src/generate.ts` | The setup PR's first scenarios |
 | `src/mode.ts` | Decides what an event asks for |
 | `site/` | The dashboard, `/try` and the Cloudflare Worker behind them |
+
+## License
+
+[MIT](LICENSE)

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, matchesGlob } from "node:path";
 
 export type Scenario = {
@@ -53,6 +53,23 @@ export function loadScenarios(dir: string) {
     .filter((f) => f.endsWith(".md"))
     .sort()
     .map((f) => parseScenario(join(dir, f), readFileSync(join(dir, f), "utf8")));
+}
+
+// Every file that parses, and what's wrong with each one that doesn't: `proofed list` and
+// `proofed doctor` show a broken file next to the good ones instead of stopping at it.
+export function readScenarios(dir: string) {
+  const scenarios: Scenario[] = [];
+  const errors: { file: string; message: string }[] = [];
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) return { missing: true, scenarios, errors };
+  for (const f of readdirSync(dir).filter((f) => f.endsWith(".md")).sort()) {
+    const file = join(dir, f);
+    try {
+      scenarios.push(parseScenario(file, readFileSync(file, "utf8")));
+    } catch (e) {
+      errors.push({ file, message: (e instanceof Error ? e.message : String(e)).replace(`${file}: `, "") });
+    }
+  }
+  return { missing: false, scenarios, errors };
 }
 
 // A PR opened before Proofed was added has no scenarios on its branch; they're read from the base

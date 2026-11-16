@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { adopt, stopping } from "./children.ts";
+import { log } from "./log.ts";
 
 const candidates = [
   process.env.CHROME_PATH,
@@ -11,8 +13,10 @@ const candidates = [
   "/usr/bin/chromium",
 ];
 
+export const findChrome = () => candidates.find((p): p is string => !!p && existsSync(p));
+
 const chromePath = () => {
-  const found = candidates.find((p): p is string => !!p && existsSync(p));
+  const found = findChrome();
   if (!found) throw new Error("Chrome not found; set CHROME_PATH");
   return found;
 };
@@ -25,8 +29,8 @@ export async function launchChrome({ headless = true } = {}) {
     try {
       return await startChrome(headless);
     } catch (e) {
-      if (attempt >= 2) throw e;
-      console.log(`${e instanceof Error ? e.message : e}; starting Chrome again`);
+      if (attempt >= 2 || stopping()) throw e;
+      log(`${e instanceof Error ? e.message : e}; starting Chrome again`);
     }
   }
 }
@@ -49,7 +53,17 @@ async function startChrome(headless: boolean) {
     { stdio: "ignore" },
   );
   let exited: number | null | undefined;
-  proc.on("exit", (code) => (exited = code));
+  const release = adopt({ kill: (signal) => proc.kill(signal), exited: new Promise((r) => proc.once("exit", r)) });
+  proc.on("exit", (code) => {
+    exited = code;
+    release();
+    // A profile is a few megabytes, one per Chrome; a laptop keeps its temp folder.
+    try {
+      rmSync(profile, { recursive: true, force: true, maxRetries: 2 });
+    } catch {
+      // A helper still writing into it; the OS cleans the temp folder eventually.
+    }
+  });
 
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline && exited === undefined) {

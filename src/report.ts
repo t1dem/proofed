@@ -1,9 +1,9 @@
 import { MARKER, OLD_MARKER } from "./github.ts";
-import { BLANK_PAGE, runMarker } from "./runfile.ts";
+import { BLANK_PAGE, FAILED_CHECK_ACTION, FAILED_CHECK_REASON, runMarker } from "./runfile.ts";
 import type { Step } from "./kane.ts";
 import { describeFixer, type Fixer } from "./models.ts";
 import { nothingAsked } from "./requests.ts";
-import { unchecked, type ScenarioResult } from "./run.ts";
+import { scenarioDoubted, unchecked, type ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
 
 export type ClipLinks = { gif?: string; mp4?: string; jpg?: string };
@@ -18,6 +18,7 @@ export type FailureData = {
   objective: string;
   reason: string;
   diagnosis: string;
+  failedCheck?: "scenario_doubted";
   steps: string[];
   clip?: ClipLinks;
 };
@@ -364,9 +365,11 @@ function compose(
     // A page that crashed on load never reached Kane: the error is the browser's, not Kane's reading.
     const seen = r.pageError
       ? `\n\n**Browser console error:** ${code(r.pageError)}`
-      : diagnosis && diagnosis !== reason
-        ? `\n\n**What Kane saw:** ${diagnosis}`
-        : "";
+      : scenarioDoubted(r)
+        ? `\n\n${FAILED_CHECK_REASON}\n\n**Kane's opinion:** ${diagnosis}\n\n${FAILED_CHECK_ACTION}`
+        : diagnosis && diagnosis !== reason
+          ? `\n\n**What Kane saw:** ${diagnosis}`
+          : "";
     sections.push(
       `#### ✗ ${r.scenario.name}\n\n${quote(reason)}${clip(clips.get(r.scenario.id)) || screenshot(clips.get(r.scenario.id), r.scenario.url)}` +
         seen +
@@ -423,6 +426,7 @@ function compose(
       objective: r.scenario.objective,
       reason: r.end?.reason ?? "",
       diagnosis: r.end?.verdict?.root_cause ?? r.end?.summary ?? "",
+      ...(scenarioDoubted(r) && { failedCheck: "scenario_doubted" as const }),
       steps: kaneSteps(r.steps, storedSteps).steps.map((s) => `${s.failed ? "✗" : "·"} ${s.text}`),
       clip: storedClip(clips.get(r.scenario.id)),
     })),

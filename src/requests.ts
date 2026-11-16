@@ -45,15 +45,24 @@ const MAY_ASK_NOTHING =
 // The description asked for nothing Kane could check: not a result of the PR, only a line under the report.
 export const nothingAsked = (r: ScenarioResult) => r.scenario.id === "asked-in-description" && r.outcome === "unsure";
 
-export function askedScenario(where: "description" | "comment", text: string): Scenario {
+const NAMES = {
+  description: "What the PR description asks",
+  comment: "What the /proofed comment asks",
+  terminal: "What you asked to check",
+};
+
+// "terminal": `proofed check "<text>"`, run by a person or a coding agent on their own machine.
+export function askedScenario(where: keyof typeof NAMES, text: string): Scenario {
   return {
-    id: `asked-in-${where}`,
+    id: where === "terminal" ? "asked" : `asked-in-${where}`,
     file: "",
-    name: where === "description" ? "What the PR description asks" : "What the /proofed comment asks",
+    name: NAMES[where],
     paths: [],
     url: "/",
     objective:
-      `The author of this pull request asked for this to be checked:\n\n${text}\n\n` +
+      (where === "terminal"
+        ? `The developer of this app asked for this to be checked:\n\n${text}\n\n`
+        : `The author of this pull request asked for this to be checked:\n\n${text}\n\n`) +
       "Open the app and check exactly that in the browser, the way a user would. It passes only if what they " +
       "asked about actually works; the page loading is not enough." +
       (where === "description" ? ` ${MAY_ASK_NOTHING}` : ""),
