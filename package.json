@@ -17,6 +17,7 @@
     "chrome",
     "kane"
   ],
+  "license": "MIT",
   "type": "module",
   "bin": {
     "proofed": "bin/proofed.cjs"

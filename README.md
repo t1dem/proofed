@@ -251,8 +251,7 @@ Node 24+ runs the checkout's TypeScript directly. The GitHub Action needs no bui
 `pnpm typecheck` and `pnpm test` check the source. `pnpm check:package` builds a tarball, checks its
 contents, installs it into a temporary prefix and runs its version and help. It removes its temp files.
 
-To release, first choose a license and add its file and package metadata. Confirm the version in
-`package.json` (currently `0.1.0`); published versions cannot be reused. From a clean checkout with Node 24+:
+To release, confirm the version in `package.json` (currently `0.1.0`); published versions cannot be reused. From a clean checkout with Node 24+:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -276,3 +275,7 @@ Publishing is manual; no release workflow runs on pushes or pull requests.
 | `src/generate.ts` | The setup PR's first scenarios |
 | `src/mode.ts` | Decides what an event asks for |
 | `site/` | The dashboard, `/try` and the Cloudflare Worker behind them |
+
+## License
+
+[MIT](LICENSE)
