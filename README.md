@@ -44,7 +44,7 @@ When a flow breaks, Claude Code fixes it, and the fix is pushed only after Kane 
 
 If you'd rather read than wait, all four changes have already run:
 
-| Pull request | What Kane found | What happened next |
+| PR | What Kane found | What happened next |
 |---|---|---|
 | [#5](https://github.com/t1dem/proofed-demo-store/pull/5) | The promo code `welcome10` in lowercase is rejected | Fixed on the first attempt ([`c242f6c`](https://github.com/t1dem/proofed-demo-store/commit/c242f6c)) |
 | [#9](https://github.com/t1dem/proofed-demo-store/pull/9) | The confirmation page charges €13.00 instead of €17.90 | Kane rejected the first attempt, the second passed ([`f9fa5a6`](https://github.com/t1dem/proofed-demo-store/commit/f9fa5a6)) |
