@@ -11,7 +11,8 @@ import { startRecorder, type Rect } from "./recorder.ts";
 import type { Scenario } from "./scenarios.ts";
 
 // "unsure": the run says nothing about the code. Either Kane decided the test itself looks wrong
-// (verdict family automation_bug), or it reported a pass without checking anything (see outcomeOf).
+// before it could check the page (verdict family automation_bug, no failed assert), or it reported
+// a pass without checking anything (see outcomeOf).
 // Worth showing, not worth blocking a merge over, and never counted as a pass.
 export type Outcome = "passed" | "failed" | "unsure" | "error";
 
@@ -61,11 +62,16 @@ export { NOTHING_CHECKED };
 // Only an assert compares the page with what the scenario expects.
 const checked = (steps: Step[]) => steps.some((s) => s.status === "done" && /^assert:/i.test(s.remark));
 
+// Kane read the page and the scenario's own check came out false. When the app is wrong all over
+// (a changed threshold shown in its banner too), Kane sides with the app and blames the test; the
+// scenario is what the app was meant to do, so that is a failure.
+const refuted = (steps: Step[]) => steps.some((s) => s.status === "failed" && /^assert:/i.test(s.remark));
+
 export function outcomeOf(end: RunEnd | undefined, steps: Step[]): Outcome {
   if (!end || INFRA.test(end.reason ?? "")) return "error";
   // A vague objective lets Kane open the page, wait, and call that a pass.
   if (end.status === "passed") return checked(steps) ? "passed" : "unsure";
-  return end.verdict?.family === "automation_bug" ? "unsure" : "failed";
+  return end.verdict?.family === "automation_bug" && !refuted(steps) ? "unsure" : "failed";
 }
 
 // An unsure run where Kane said "passed": nothing was checked, as opposed to Kane doubting the test.
