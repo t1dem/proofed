@@ -34,6 +34,8 @@ Time and credits
 Outcomes
   passed        Kane checked what the scenario says, and it held
   failed        A scenario's check did not hold on the page. Review the failure and fix it.
+                When Kane blames the scenario for it, the scenario is run a second time, at
+                its cost again, and the second run is the result.
   not_checked   Kane asserted nothing, or thinks the scenario text is wrong. Not a pass.
   error         Kane couldn't finish, even on one automatic retry (browser or service trouble).
                 Says nothing about the app.

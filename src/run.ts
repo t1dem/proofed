@@ -34,6 +34,8 @@ export type ScenarioResult = {
   pageError?: string;
   // Wall time of the run, retries included.
   seconds?: number;
+  // What the runs before this one took (an automatic retry, a second run of a doubted failure); `end` holds only the last.
+  earlierCredits?: number;
 };
 
 // Failures of the browser plumbing rather than of the app: the run is retried, never reported as a bug.
@@ -64,7 +66,7 @@ const checked = (steps: Step[]) => steps.some((s) => s.status === "done" && /^as
 
 // Kane read the page and the scenario's own check came out false. When the app is wrong all over
 // (a changed threshold shown in its banner too), Kane sides with the app and blames the test; the
-// scenario is what the app was meant to do, so that is a failure.
+// scenario is what the app was meant to do, so that is a failure. runScenario runs it a second time.
 const refuted = (steps: Step[]) => steps.some((s) => s.status === "failed" && /^assert:/i.test(s.remark));
 
 export function outcomeOf(end: RunEnd | undefined, steps: Step[]): Outcome {
@@ -78,6 +80,11 @@ export function outcomeOf(end: RunEnd | undefined, steps: Step[]): Outcome {
 export const unchecked = (r: ScenarioResult) => r.outcome === "unsure" && r.end?.status === "passed";
 
 export const scenarioDoubted = (r: ScenarioResult) => r.outcome === "failed" && r.end?.verdict?.family === "automation_bug";
+
+// All the credits a scenario took, the runs before the last one included.
+export const creditsOf = (r: ScenarioResult) => (r.end?.credits_consumed ?? 0) + (r.earlierCredits ?? 0);
+
+const RECHECK = "the check failed, but Kane blames the scenario; running it once more to be sure";
 
 // Kane is good at reaching a goal, so on its own it routes around a broken button (a key press, another
 // link) and passes. A user who clicks the button and gets the wrong screen has found a bug.
@@ -95,7 +102,7 @@ export type RunEvent =
   | { type: "waiting"; id: string }
   | { type: "started"; id: string }
   | { type: "step"; id: string; step: Step }
-  | { type: "retry"; id: string; error: string; credits?: number }
+  | { type: "retry"; id: string; error: string }
   | { type: "finished"; id: string; result: ScenarioResult };
 
 type RunOptions = {
@@ -109,13 +116,27 @@ type RunOptions = {
 };
 
 export async function runScenario(scenario: Scenario, o: RunOptions): Promise<ScenarioResult> {
-  let result = await runOnce(scenario, o);
-  for (let i = 2; i <= (o.attempts ?? 2) && result.outcome === "error" && !stopping(); i++) {
-    logLine(`[${scenario.id}] ${result.error ?? "infra error"}; retrying`);
-    o.onEvent?.({ type: "retry", id: scenario.id, error: result.error ?? "infra error", credits: result.end?.credits_consumed });
-    result = await runOnce(scenario, o);
+  let earlier = 0;
+  const again = (last: ScenarioResult, why: string) => {
+    earlier += last.end?.credits_consumed ?? 0;
+    logLine(`[${scenario.id}] ${why}`);
+    o.onEvent?.({ type: "retry", id: scenario.id, error: why });
+    return runOnce(scenario, o);
+  };
+  const settle = async (result: ScenarioResult) => {
+    for (let i = 2; i <= (o.attempts ?? 2) && result.outcome === "error" && !stopping(); i++) {
+      result = await again(result, result.error ?? "infra error");
+    }
+    return result;
+  };
+  let result = await settle(await runOnce(scenario, o));
+  // Kane gives the same verdict for a wrong value all over the app and for a page it misread (a
+  // heading that is there, reported as not visible). A wrong value is wrong again on a second
+  // run; a misreading rarely is. So the second run decides, whatever it comes to.
+  if (scenarioDoubted(result) && !stopping()) {
+    result = await settle(await again(result, RECHECK));
   }
-  return result;
+  return earlier ? { ...result, earlierCredits: earlier } : result;
 }
 
 async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResult> {

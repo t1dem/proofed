@@ -263,6 +263,23 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     }
   });
 
+  test("a failed assert Kane blames on the scenario is run again, and a pass on the second run is the result", async () => {
+    const r = repo({ heading: { mode: "flaky", credits: 15 } });
+    const port = await freePort();
+    try {
+      const ran = await cli(r, ["check", "--json", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`]);
+      assert.equal(ran.code, 0, ran.stderr);
+      const doc = json(ran);
+      assert.equal(doc.scenarios[0]!.outcome, "passed");
+      assert.equal(doc.scenarios[0]!.failedCheck, undefined);
+      assert.equal(doc.credits, 30);
+      assert.match(ran.stderr, /retrying heading: the check failed, but Kane blames the scenario/);
+      assert.equal(runs(r).length, 2);
+    } finally {
+      r.cleanup();
+    }
+  });
+
   test("a failed assert Kane blames on the scenario is a failure in JSON and the terminal", async () => {
     const r = repo({ shipping: { mode: "refuted", credits: 27.42 } });
     const port = await freePort();
@@ -279,7 +296,9 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.equal(doc.scenarios[0]!.failedCheck, "scenario_doubted");
       assert.equal(doc.counts.failed, 1);
       assert.match(doc.next, /If the change in the app was intended/);
-      assert.equal(doc.credits, 27.42);
+      // Both runs are paid for, and both were needed to call it a failure.
+      assert.equal(doc.credits, 54.84);
+      assert.equal(runs(r).length, 4);
     } finally {
       r.cleanup();
     }
