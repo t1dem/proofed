@@ -140,7 +140,7 @@ test("a build that fails leaves no scenario rows, and nothing is drawn after the
   const view = new LiveView(out, { color: false, now: () => 0 });
   view.plan(plan);
   view.phase("Building the app: pnpm build");
-  view.fail({ ok: false, exitCode: 3, error: { code: "build_failed", message: "The build failed.", fix: "Fix the build." } });
+  view.fail({ ok: false, exitCode: 3, error: { code: "build_failed", message: "The build failed.", fix: "Make the build pass." } });
   assert.doesNotMatch(stripAnsi(out.text), /waiting/);
   const closed = out.text;
   // A resize after the end must not erase the error above the prompt.

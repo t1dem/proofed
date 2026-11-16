@@ -7,11 +7,11 @@ import { join, resolve } from "node:path";
 import { SetupError } from "./setuperror.ts";
 
 export type Setting = { value: string; from: string };
-export type Target = { url?: Setting; serve?: Setting; build?: Setting; dir: string };
+export type Target = { url?: Setting; serve?: Setting; build?: Setting; install?: Setting; dir: string };
 
 type Layer = { from: (key: Key) => string; values: Partial<Record<Key, string>>; dir?: string };
-type Key = "url" | "serve" | "build";
-const KEYS: Key[] = ["url", "serve", "build"];
+type Key = "url" | "serve" | "build" | "install";
+const KEYS: Key[] = ["url", "serve", "build", "install"];
 
 export const CONFIG_FILE = ".proofed/config.json";
 
@@ -31,7 +31,7 @@ export function readConfig(cwd: string): Partial<Record<Key, string>> {
   try {
     data = JSON.parse(readFileSync(file, "utf8"));
   } catch (e) {
-    throw new SetupError("config_invalid", `${CONFIG_FILE} is not valid JSON: ${e instanceof Error ? e.message : e}`, `Fix ${CONFIG_FILE}; it holds { "url", "serve", "build" }.`);
+    throw new SetupError("config_invalid", `${CONFIG_FILE} is not valid JSON: ${e instanceof Error ? e.message : e}`, `Correct the JSON in ${CONFIG_FILE}; it holds { "url", "serve", "build", "install" }.`);
   }
   if (typeof data !== "object" || data === null) return {};
   const out: Partial<Record<Key, string>> = {};
@@ -108,10 +108,13 @@ export function resolveTarget({ flags, env, cwd }: Sources): Target {
   const workflow = readWorkflow(cwd);
   const layers: Layer[] = [
     { from: (k) => `--${k}`, values: flags },
-    { from: (k) => `PROOFED_${k.toUpperCase()}`, values: { url: env.PROOFED_URL?.trim(), serve: env.PROOFED_SERVE?.trim(), build: env.PROOFED_BUILD?.trim() } },
+    {
+      from: (k) => `PROOFED_${k.toUpperCase()}`,
+      values: { url: env.PROOFED_URL?.trim(), serve: env.PROOFED_SERVE?.trim(), build: env.PROOFED_BUILD?.trim(), install: env.PROOFED_INSTALL?.trim() },
+    },
     { from: () => CONFIG_FILE, values: readConfig(cwd) },
     ...(workflow
-      ? [{ from: () => workflow.file, values: { url: workflow.inputs.url, serve: workflow.inputs.serve, build: workflow.inputs.build }, dir: workflow.inputs["working-directory"] }]
+      ? [{ from: () => workflow.file, values: { url: workflow.inputs.url, serve: workflow.inputs.serve, build: workflow.inputs.build, install: workflow.inputs.install }, dir: workflow.inputs["working-directory"] }]
       : []),
   ];
   const pick = (key: Key, from = layers) => {
@@ -123,13 +126,16 @@ export function resolveTarget({ flags, env, cwd }: Sources): Target {
   };
   const url = pick("url");
   const serve = pick("serve");
-  // A build belongs with its serve command: the workflow's build is for the workflow's serve. One
-  // given as a flag or in the environment applies to whichever serve is used.
-  const build = pick("build", layers.slice(0, 2)) ?? (serve && pick("build", [serve.layer]));
+  // A build and an install belong with their serve command: the workflow's build is for the
+  // workflow's serve. One given as a flag or in the environment applies to whichever serve is used.
+  const withServe = (key: Key) => pick(key, layers.slice(0, 2)) ?? (serve && pick(key, [serve.layer]));
+  const build = withServe("build");
+  const install = withServe("install");
   return {
     url: url?.setting,
     serve: serve?.setting,
     build: build?.setting,
+    install: install?.setting,
     dir: resolve(cwd, serve?.layer.dir ?? "."),
   };
 }

@@ -1,6 +1,6 @@
 {
   "name": "proofed-cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Check web app scenarios in Chrome with Kane CLI before you call a change done.",
   "repository": {
     "type": "git",
@@ -23,7 +23,7 @@
     "proofed": "bin/proofed.cjs"
   },
   "engines": {
-    "node": ">=24"
+    "node": ">=22.18"
   },
   "scripts": {
     "build": "node --input-type=module -e 'import { rmSync } from \"node:fs\"; rmSync(\"dist\", { recursive: true, force: true });' && tsc -p tsconfig.build.json",

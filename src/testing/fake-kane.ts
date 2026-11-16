@@ -9,6 +9,7 @@
 //   [fake:refuted]     fails an assert but blames the scenario
 //   [fake:flaky]       the same on the first run of an objective in FAKE_KANE_LOG, a pass after
 //   [fake:error]       exits without a run_end     [fake:hang]       never finishes (with a child)
+//   [fake:signedout]   refuses to run, as kane-cli does without a login (so does FAKE_KANE_SIGNED_IN=0)
 // [delay:ms] (FAKE_KANE_DELAY_MS) is the pause between steps, [credits:n] (FAKE_KANE_CREDITS) the
 // credits it reports. Every call is appended to FAKE_KANE_LOG as a JSON line.
 import { spawn } from "node:child_process";
@@ -23,7 +24,12 @@ if (args[0] === "--version") {
   console.log("0.10.4");
   process.exit(0);
 }
-if (args[0] === "whoami") process.exit(process.env.FAKE_KANE_SIGNED_IN === "0" ? 1 : 0);
+if (args[0] === "whoami") {
+  // As kane-cli 0.10 answers: a box with the identity, exit 1 when there is none.
+  const signedIn = process.env.FAKE_KANE_SIGNED_IN !== "0";
+  console.log(signedIn ? " Identity\n  ✓ Authenticated\n  Token valid" : " Identity\n  ⚠ Not logged in\n  Token missing");
+  process.exit(signedIn ? 0 : 1);
+}
 if (args[0] === "balance") {
   console.log("Available credits: 1234.5");
   process.exit(0);
@@ -76,6 +82,12 @@ async function navigate() {
 }
 
 const end = (fields: object) => emit({ type: "run_end", duration: 1, credits_consumed: credits, ...fields });
+
+if (mode === "signedout" || process.env.FAKE_KANE_SIGNED_IN === "0") {
+  emit({ type: "stream_start", cli_version: "0.10.4", surface: "run", pid: process.pid, v: 1, ts: new Date().toISOString() });
+  console.error("Not authenticated. Run: kane-cli login --oauth, or kane-cli login --username <user> --access-key <key>");
+  process.exit(1);
+}
 
 await step(`navigate: Navigate to ${url}`);
 await navigate().catch((e: unknown) => console.error(`fake kane-cli: couldn't open ${url}: ${e}`));

@@ -4,7 +4,9 @@
 import { spawn } from "node:child_process";
 import { closeSync, openSync, readFileSync, writeSync } from "node:fs";
 import { adopt } from "./children.ts";
+import { depsMissing, installCommand, stampInstall } from "./deps.ts";
 import { SetupError } from "./setuperror.ts";
+import type { Setting } from "./target.ts";
 
 // Any HTTP answer below 500 means a server is there; a proxy in front of nothing gives 502.
 export async function answers(url: string, timeout = 2000) {
@@ -50,6 +52,8 @@ type AppOptions = {
   url: string;
   serve: string;
   build?: string;
+  // Runs first, when the dependencies are missing or out of date (deps.ts).
+  install?: Setting;
   cwd: string;
   logFile: string;
   timeoutSeconds: number;
@@ -59,12 +63,26 @@ type AppOptions = {
 export type RunningApp = { pid: number | undefined; stop: () => Promise<void> };
 
 export async function startApp(o: AppOptions): Promise<RunningApp> {
+  const missing = depsMissing(o.cwd);
+  if (missing) {
+    const install = installCommand(o.cwd, o.install);
+    o.onPhase?.(`Installing dependencies (${missing}): ${install.value}`);
+    const code = await start(install.value, o.cwd, o.logFile).exited;
+    if (code !== 0) {
+      throw new SetupError(
+        "install_failed",
+        `The install command exited with code ${code}: ${install.value} (from ${install.from}, in ${o.cwd})\n${tail(o.logFile)}`,
+        `Make it install, or set the command with --install "<command>". Full output: ${o.logFile}`,
+      );
+    }
+    stampInstall(o.cwd);
+  }
   if (o.build) {
     o.onPhase?.(`Building the app: ${o.build}`);
     const build = start(o.build, o.cwd, o.logFile);
     const code = await build.exited;
     if (code !== 0) {
-      throw new SetupError("build_failed", `The build command exited with code ${code}: ${o.build}\n${tail(o.logFile)}`, `Fix the build, or pass --build "<command>". Full output: ${o.logFile}`);
+      throw new SetupError("build_failed", `The build command exited with code ${code}: ${o.build}\n${tail(o.logFile)}`, `Make the build pass, or set another one with --build "<command>". Full output: ${o.logFile}`);
     }
   }
   o.onPhase?.(`Starting the app: ${o.serve}`);
@@ -82,7 +100,7 @@ export async function startApp(o: AppOptions): Promise<RunningApp> {
   while (!(await answers(o.url, 1000))) {
     if (exitCode !== undefined) {
       await stop();
-      throw new SetupError("serve_failed", `The serve command exited with code ${exitCode} before ${o.url} answered: ${o.serve}\n${tail(o.logFile)}`, `Fix the serve command, or pass --serve "<command>". Full output: ${o.logFile}`);
+      throw new SetupError("serve_failed", `The serve command exited with code ${exitCode} before ${o.url} answered: ${o.serve}\n${tail(o.logFile)}`, `Make the serve command start the app, or set another one with --serve "<command>". Full output: ${o.logFile}`);
     }
     if (Date.now() > deadline) {
       await stop();

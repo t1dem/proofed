@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { test } from "node:test";
 import { checkContents, checkPackage, type Packed } from "../scripts/check-package.ts";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
 const launcher = new URL("../bin/proofed.cjs", import.meta.url).pathname;
+const launcherVersion = new URL("../bin/node-version.cjs", import.meta.url).pathname;
+const require = createRequire(import.meta.url);
 
 test("the checkout launcher runs the CLI version and help", () => {
   const version = spawnSync(process.execPath, [launcher, "--version"], { encoding: "utf8" });
@@ -21,15 +24,20 @@ test("the checkout launcher runs the CLI version and help", () => {
 test("old Node is rejected before the launcher loads TypeScript", () => {
   const ran = spawnSync(process.execPath, ["-e", `Object.defineProperty(process.versions, "node", { value: "22.0.0" }); require(process.argv[1]);`, launcher], { encoding: "utf8" });
   assert.equal(ran.status, 3);
-  assert.match(ran.stderr, /Node 24 or newer is required \(found 22\.0\.0\)/);
-  assert.match(ran.stderr, /Install Node 24\+/);
+  assert.match(ran.stderr, /Node 22\.18 or newer is required \(found 22\.0\.0\)/);
+  assert.match(ran.stderr, /Install Node 22 or newer/);
   assert.doesNotMatch(ran.stderr, /ERR_UNSUPPORTED|SyntaxError/);
+});
+
+test("the Node gate takes 22.18 and later, and nothing older", () => {
+  const { supported } = require(launcherVersion) as { supported: (v: string) => boolean };
+  assert.deepEqual(["20.19.0", "22.0.0", "22.17.1", "22.18.0", "22.22.3", "24.0.0", "26.7.0"].map(supported), [false, false, false, true, true, true, true]);
 });
 
 test("Bun cannot bypass the Node requirement with its compatibility version", () => {
   const ran = spawnSync(process.execPath, ["-e", `Object.defineProperty(process.versions, "bun", { value: "1.3.14" }); require(process.argv[1]);`, launcher], { encoding: "utf8" });
   assert.equal(ran.status, 3);
-  assert.match(ran.stderr, /Install Node 24\+/);
+  assert.match(ran.stderr, /Install Node 22 or newer/);
   assert.match(ran.stderr, /put node on PATH/);
   assert.match(ran.stderr, /without --bun/);
 });
