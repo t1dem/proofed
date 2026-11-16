@@ -9,7 +9,7 @@ import { CACHE_FILE, DEFAULT_CREDITS, cacheKey, estimate, readCache, writeCache,
 import { findBase, localChanges, mergeBaseOf, repoRoot } from "./changes.ts";
 import { killChildren, stopChildren } from "./children.ts";
 import { findChrome } from "./chrome.ts";
-import { kaneLogin, LOGIN_FIX } from "./kaneauth.ts";
+import { KEYS_FIX, kaneLogin, LOGIN_FIX } from "./kaneauth.ts";
 import { setLog } from "./log.ts";
 import { runAll } from "./pipeline.ts";
 import { colorOn, LiveView, PlainView, type Plan, type Stream, type View } from "./render.ts";
@@ -64,6 +64,9 @@ export function makeView(flags: Flags, io: Io): View {
 
 const notSignedIn = (message = "Kane CLI is not signed in, so it can't run the scenarios. Nothing was built or run.") =>
   new SetupError("kane_not_signed_in", message, `${LOGIN_FIX}, then run the check again.`);
+
+const keysRejected = (detail: string) =>
+  new SetupError("kane_keys_rejected", `${detail}, so Kane can't run the scenarios. Nothing was built or run.`, `${KEYS_FIX}, then run the check again.`);
 
 const fromNote = (s: Setting) => (s.from.startsWith("--") ? "" : ` (url from ${s.from})`);
 
@@ -276,7 +279,8 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       throw new SetupError("no_url", "Proofed doesn't know where the app runs.", `Pass --url http://localhost:5173 (and --serve "npm run dev" to have Proofed start it), set PROOFED_URL, or write .proofed/config.json: { "url": "http://localhost:5173", "serve": "npm run dev" }`);
     }
     const login = await kaneLogin(kane.path, io.env);
-    if (login.state === "not_signed_in") throw notSignedIn();
+    if (login.state === "not_signed_in") throw notSignedIn(login.detail === "not signed in" ? undefined : `Kane CLI can't run the scenarios: ${login.detail}. Nothing was built or run.`);
+    if (login.state === "keys_rejected") throw keysRejected(login.detail);
 
     ensureOut(out);
     const runLog = join(out, "run.log");
@@ -338,7 +342,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       writeCache(cacheFile, cache);
     };
     const results = await runAll(toRun, out, plan.concurrency, { baseUrl: url, headless: !flags.headed, onEvent });
-    // A login can run out between whoami and the runs; running the check again wouldn't help then either.
+    // A login can run out between the login check and the runs; running the check again wouldn't help then either.
     if (results.some((r) => r.notSignedIn)) throw notSignedIn("Kane CLI refused to run a scenario: it is not signed in. The scenarios it refused weren't checked.");
     const byId = new Map(results.map((r) => [r.scenario.id, r]));
     return docOf(selected.map((s) => {

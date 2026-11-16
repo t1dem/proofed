@@ -56,7 +56,8 @@ For AI agents
   Diagnosis is Kane's opinion. If the app change was intended, update the scenario; otherwise fix the app.
   Never treat "not_checked" as a pass: fix the scenario or tell the user why Kane doubts it.
   On "error", run the "rerun" command once more. On exit 3, do what error.fix says; running the
-  same command again without that won't help. kane_not_signed_in needs the user: kane-cli login.`;
+  same command again without that won't help. kane_not_signed_in needs the user: kane-cli login;
+  kane_keys_rejected needs working LT_USERNAME and LT_ACCESS_KEY from the user.`;
 
 const CHECK = `proofed check [text] [flags]
 
@@ -106,8 +107,9 @@ JSON (also written to <out>/result.json)
   Proofed couldn't run: {ok: false, exitCode: 3, error: {code, message, fix}}
   Interrupted: the same shape with exitCode 130 and scenarios [...] for what had finished
 
-Before anything is built, the Kane login is checked (kane-cli whoami, free): without one the
-check stops with exit 3 and error.code "kane_not_signed_in".
+Before anything is built, the Kane login is checked with TestMu (kane-cli balance, free): without
+one the check stops with exit 3 and error.code "kane_not_signed_in"; with LT_USERNAME and
+LT_ACCESS_KEY that TestMu rejects, error.code "kane_keys_rejected".
 
 Exit codes: 0 passed, 1 failed, 2 not_checked or error, 3 couldn't run, 130 interrupted.`;
 
