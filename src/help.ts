@@ -6,11 +6,11 @@ It runs the plain-English scenarios in .proofed/scenarios/ that your local chang
 Usage
   proofed check [text] [flags]   Run the scenarios the local change touches, or check just [text]
   proofed list [flags]           Every scenario: does the change touch it, is a pass cached
-  proofed doctor [flags]         Is Kane CLI, Chrome, ffmpeg and the app ready
+  proofed doctor [flags]         Is Kane CLI (and its login), Chrome, ffmpeg and the app ready
   proofed <command> --help       The flags of one command
   proofed --version
 
-Install (macOS and Linux; Node 24+ is required, including with bun)
+Install (macOS and Linux; Node 22.18+ is required, including with bun)
   npm install -g proofed-cli    pnpm add -g proofed-cli    bun add -g proofed-cli
   Run without installing: npx proofed-cli | pnpm dlx proofed-cli | bunx proofed-cli
   Update: npm install -g proofed-cli@latest | pnpm add -g proofed-cli@latest | bun add -g proofed-cli@latest
@@ -44,7 +44,7 @@ Exit codes
   0    everything that ran passed, or nothing needed to run
   1    at least one scenario failed
   2    nothing failed, but at least one was not_checked or error
-  3    Proofed couldn't run: usage, setup, app not reachable
+  3    Proofed couldn't run: usage, setup (such as no Kane login), app not reachable
   130  interrupted
 
 For AI agents
@@ -55,7 +55,8 @@ For AI agents
   failedCheck: "scenario_doubted" means the check failed but Kane believes it is out of date.
   Diagnosis is Kane's opinion. If the app change was intended, update the scenario; otherwise fix the app.
   Never treat "not_checked" as a pass: fix the scenario or tell the user why Kane doubts it.
-  On "error", run the "rerun" command once more. On exit 3, do what error.fix says.`;
+  On "error", run the "rerun" command once more. On exit 3, do what error.fix says; running the
+  same command again without that won't help. kane_not_signed_in needs the user: kane-cli login.`;
 
 const CHECK = `proofed check [text] [flags]
 
@@ -74,6 +75,9 @@ Where the app is (flag, then env, then .proofed/config.json, then the Proofed wo
   --url <url>           Where it runs (env PROOFED_URL), e.g. http://localhost:5173
   --serve <cmd>         Starts it when the URL doesn't answer; stopped at the end (env PROOFED_SERVE)
   --build <cmd>         Runs before --serve (env PROOFED_BUILD)
+  --install <cmd>       Installs the app's dependencies before the build, when node_modules is
+                        missing or older than package.json or the lockfile (env PROOFED_INSTALL;
+                        default: the workflow's install, else the app's package manager)
   --reuse               With a build set, a URL that already answers stops the check (exit 3): it
                         may be an old build. --reuse tests what is running; its passes aren't cached
   --serve-timeout <s>   How long the URL gets to answer after --serve (default 60)
@@ -102,6 +106,9 @@ JSON (also written to <out>/result.json)
   Proofed couldn't run: {ok: false, exitCode: 3, error: {code, message, fix}}
   Interrupted: the same shape with exitCode 130 and scenarios [...] for what had finished
 
+Before anything is built, the Kane login is checked (kane-cli whoami, free): without one the
+check stops with exit 3 and error.code "kane_not_signed_in".
+
 Exit codes: 0 passed, 1 failed, 2 not_checked or error, 3 couldn't run, 130 interrupted.`;
 
 const LIST = `proofed list [flags]
@@ -123,8 +130,8 @@ Checks Node, git, the scenarios, Kane CLI (installed, signed in, credits left), 
 problem comes with the command or step that fixes it. Uses only Kane's free commands.
 Exit 0 when proofed check can run, else 3.
 
-  --url, --serve, --build   As for proofed check
-  --scenarios <dir>         Default .proofed/scenarios
-  --json                    {ok, exitCode, checks [{name, status: ok | warn | fail, detail, fix}]}`;
+  --url, --serve, --build, --install   As for proofed check
+  --scenarios <dir>                    Default .proofed/scenarios
+  --json                               {ok, exitCode, checks [{name, status: ok | warn | fail, detail, fix}]}`;
 
 export const helpText = (command?: Command) => (command === "check" ? CHECK : command === "list" ? LIST : command === "doctor" ? DOCTOR : MAIN);

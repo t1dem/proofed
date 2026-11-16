@@ -96,13 +96,25 @@ const json = <T = Doc>(ran: Ran) => {
   return JSON.parse(ran.stdout) as T;
 };
 
-const alive = (pid: number) => {
+const exists = (pid: number) => {
   try {
     process.kill(pid, 0);
     return true;
   } catch {
     return false;
   }
+};
+// Where nothing reaps orphans (a container whose first process isn't an init), a killed process
+// whose parent is gone stays a zombie: dead, though signal 0 still finds it. Killed processes also
+// take a moment to go, so this waits up to two seconds for one.
+const alive = async (pid: number) => {
+  for (let i = 0; i < 20; i++) {
+    if (!exists(pid)) return false;
+    const stat = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
+    if (stat === "" || stat.startsWith("Z")) return false;
+    await new Promise((res) => setTimeout(res, 100));
+  }
+  return true;
 };
 
 describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, timeout: 240_000 }, () => {
@@ -195,6 +207,83 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.equal(runs(r).length, 3, "only the first check ran Kane: once, and the error once more");
     } finally {
       app.kill();
+      r.cleanup();
+    }
+  });
+
+  test("without a Kane login, check stops before the build with exit 3 and the login command", async () => {
+    const r = repo({ one: { mode: "pass" }, two: { mode: "pass" } });
+    const port = await freePort();
+    const args = ["check", "--json", "--url", `http://127.0.0.1:${port}`, "--build", "node -e \"require('fs').writeFileSync('tmp/built', '')\"", "--serve", `node server.cjs ${port}`];
+    try {
+      const started = Date.now();
+      const ran = await cli(r, args, { FAKE_KANE_SIGNED_IN: "0", LT_USERNAME: "", LT_ACCESS_KEY: "" });
+      assert.equal(ran.code, 3, ran.stderr);
+      const e = json<ErrorDoc>(ran);
+      assert.equal(e.error.code, "kane_not_signed_in");
+      assert.match(e.error.fix, /^kane-cli login/);
+      assert.doesNotMatch(`${e.error.message} ${e.error.fix}`, /run it again|retry/i);
+      assert.ok(Date.now() - started < 10_000, "it took seconds, not a build and a run");
+      assert.equal(existsSync(join(r.dir, "tmp/built")), false, "nothing was built");
+      assert.ok(await portFree(port), "the app was never started");
+      assert.deepEqual(calls(r).map((c) => c.args?.[0]), ["whoami"]);
+
+      const plain = await cli(r, args.filter((a) => a !== "--json"), { FAKE_KANE_SIGNED_IN: "0", LT_USERNAME: "", LT_ACCESS_KEY: "" });
+      assert.equal(plain.code, 3);
+      assert.match(plain.stderr, /✗ Kane CLI is not signed in/);
+      assert.match(plain.stderr, /Fix kane-cli login/);
+      assert.doesNotMatch(plain.stdout + plain.stderr, /Fix Fix|run it again/);
+
+      // Keys in the environment are what Kane runs with; whoami isn't asked.
+      const keys = await cli(r, args, { FAKE_KANE_SIGNED_IN: "0", LT_USERNAME: "u", LT_ACCESS_KEY: "k" });
+      assert.equal(json<ErrorDoc>(keys).error.code, "kane_not_signed_in", "the fake Kane refuses the run itself");
+      assert.equal(calls(r).filter((c) => c.args?.[0] === "whoami").length, 2);
+      assert.equal(runs(r).length, 2, "one run per scenario, and no retry");
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  test("a run Kane refuses for want of a login is exit 3, not retried", async () => {
+    const r = repo({ expired: { mode: "signedout" } });
+    const port = await freePort();
+    try {
+      const ran = await cli(r, ["check", "--json", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`]);
+      assert.equal(ran.code, 3, ran.stderr);
+      assert.equal(json<ErrorDoc>(ran).error.code, "kane_not_signed_in");
+      assert.equal(runs(r).length, 1);
+      assert.doesNotMatch(ran.stderr, /retrying/);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  test("a fresh clone gets its dependencies installed before the build, and only then", async () => {
+    const r = repo({ pass: { mode: "pass" } });
+    const port = await freePort();
+    writeFileSync(join(r.dir, "package.json"), JSON.stringify({ name: "shop", private: true }));
+    const install = "node -e \"const fs = require('fs'); fs.mkdirSync('node_modules/dep', { recursive: true }); fs.appendFileSync('tmp/installs', 'x')\"";
+    const build = "node -e \"require('fs').accessSync('node_modules/dep')\"";
+    const args = ["check", "--json", "--no-cache", "--url", `http://127.0.0.1:${port}`, "--install", install, "--build", build, "--serve", `node server.cjs ${port}`];
+    const installs = () => (existsSync(join(r.dir, "tmp/installs")) ? readFileSync(join(r.dir, "tmp/installs"), "utf8").length : 0);
+    try {
+      const first = await cli(r, args);
+      assert.equal(first.code, 0, first.stderr);
+      assert.match(first.stderr, /Installing dependencies \(node_modules is missing\)/);
+      assert.equal(installs(), 1);
+
+      const second = await cli(r, args);
+      assert.equal(second.code, 0, second.stderr);
+      assert.doesNotMatch(second.stderr, /Installing dependencies/);
+      assert.equal(installs(), 1, "installed dependencies aren't installed again");
+
+      rmSync(join(r.dir, "node_modules"), { recursive: true });
+      const failing = await cli(r, [...args.slice(0, 5), "--install", "node -e \"process.exit(4)\"", ...args.slice(7)]);
+      assert.equal(failing.code, 3);
+      const e = json<ErrorDoc>(failing);
+      assert.equal(e.error.code, "install_failed");
+      assert.match(e.error.message, /exited with code 4/);
+    } finally {
       r.cleanup();
     }
   });
@@ -324,8 +413,8 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.equal(ran.code, 130);
       assert.equal(json<ErrorDoc>(ran).error.code, "interrupted");
       assert.match(json<ErrorDoc>(ran).error.message, /may have spent credits before reporting them/);
-      assert.ok(!alive(kane), "fake Kane is gone");
-      assert.ok(!alive(child), "its child is gone");
+      assert.ok(!(await alive(kane)), "fake Kane is gone");
+      assert.ok(!(await alive(child)), "its child is gone");
       // Chrome's helpers may take a moment after the main process.
       for (let i = 0; i < 20 && chromes().length; i++) await new Promise((res) => setTimeout(res, 100));
       assert.deepEqual(chromes(), []);
