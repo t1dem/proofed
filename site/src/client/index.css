@@ -174,3 +174,41 @@ html[data-app][data-theme="light"] {
     background: none;
   }
 }
+
+/* Landing hero picture: no frame, its edges fade into the paper. On a phone it sits under the buttons and
+   fades in from the top; on a wide screen it sits low on the right and fades from the left and the top too. */
+.hero-art {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 35%, #000 88%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 35%, #000 88%, transparent 100%);
+}
+@media (width >= 64rem) {
+  .hero-art {
+    -webkit-mask-image:
+      linear-gradient(to right, transparent 0%, #000 40%),
+      linear-gradient(to bottom, transparent 0%, #000 32%, #000 86%, transparent 100%);
+    -webkit-mask-composite: source-in;
+    mask-image:
+      linear-gradient(to right, transparent 0%, #000 40%),
+      linear-gradient(to bottom, transparent 0%, #000 32%, #000 86%, transparent 100%);
+    mask-composite: intersect;
+  }
+}
+
+/* The unticked "Fix with Claude" box in the replay asks to be ticked: a soft ring breathes around it. */
+.tick-hint {
+  animation: tick-hint 1.8s ease-in-out infinite;
+}
+@keyframes tick-hint {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(31 122 61 / 0);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgb(31 122 61 / 0.18);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tick-hint {
+    animation: none;
+  }
+}
