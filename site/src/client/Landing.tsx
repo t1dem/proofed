@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { AsciiVideo } from "./AsciiVideo";
+import { CliInstall } from "./CliInstall";
 import { Replay } from "./Replay";
 import {
   ALL_DONE_AT,
@@ -73,6 +74,7 @@ function Hero() {
           >
             Install on GitHub
           </a>
+          <CliInstall />
         </div>
       </div>
       {/* The picture sits low on the right and dissolves into the paper at its edges (see .hero-art). */}
@@ -122,12 +124,15 @@ function Setup() {
       <div className="mx-auto max-w-6xl px-4 sm:px-8">
         <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <h2 className="max-w-2xl font-serif text-4xl leading-tight sm:text-6xl">Set it up in your repo.</h2>
-          <a
-            href="/install"
-            className="inline-flex min-h-12 shrink-0 items-center self-start rounded-full bg-ink px-6 font-medium text-paper transition hover:bg-ink/85 md:self-auto"
-          >
-            Install on GitHub
-          </a>
+          <div className="flex shrink-0 flex-wrap gap-3">
+            <a
+              href="/install"
+              className="inline-flex min-h-12 items-center rounded-full bg-ink px-6 font-medium text-paper transition hover:bg-ink/85"
+            >
+              Install on GitHub
+            </a>
+            <CliInstall />
+          </div>
         </div>
       </div>
       <div className="mx-auto max-w-7xl px-4 sm:px-8">
@@ -177,6 +182,7 @@ const FOOTER_LINKS = [
     title: "Source",
     links: [
       ["Proofed on GitHub", REPO],
+      ["proofed-cli on npm", "https://www.npmjs.com/package/proofed-cli"],
       ["The demo store's PR #2", DEMO_PR],
       ["Kane CLI", "https://github.com/LambdaTest/kane-cli"],
     ],

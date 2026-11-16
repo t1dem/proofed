@@ -194,6 +194,14 @@ html[data-app][data-theme="light"] {
   }
 }
 
+/* The package manager menu under the CLI command opens from its first word. */
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
 /* The unticked "Fix with Claude" box in the replay asks to be ticked: a soft ring breathes around it. */
 .tick-hint {
   animation: tick-hint 1.8s ease-in-out infinite;
