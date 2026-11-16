@@ -36,12 +36,10 @@ When a flow breaks, Claude Code fixes it. The fix is pushed only after Kane has 
 
 ## For judges
 
-| | |
-|---|---|
-| **Try it, no account** | Open [/try](https://proofed.neptunescodm.workers.dev/try) and pick one of four prepared pull requests. Proofed opens it on [t1dem/proofed-demo-store](https://github.com/t1dem/proofed-demo-store), a real repository, and the page follows the run: Kane in Chrome, the report, Claude's fix, Kane's re-check. A run takes 8 to 14 minutes. One goes at a time, 15 a day, 3 per visitor, because each one spends Kane credits and Claude's time. |
-| **Read instead of waiting** | All four changes have already run on the demo store, see the table below. |
-| **The dashboard without signing in** | [/app?demo](https://proofed.neptunescodm.workers.dev/app?demo). The pull requests of `t1dem/proofed` and `t1dem/proofed-demo-store` in it are copied from GitHub. The `sample-coffee-store` repository is made up, to show every state at once, and is labelled "Sample data". |
-| **Proofed checks itself** | Every pull request to this repository runs five dashboard scenarios through Kane, for example [#25](https://github.com/t1dem/proofed/pull/25#issuecomment-6897255024). |
+- **Try it, no account.** Open [/try](https://proofed.neptunescodm.workers.dev/try) and pick one of four prepared pull requests. Proofed opens it on [t1dem/proofed-demo-store](https://github.com/t1dem/proofed-demo-store), a real repository, and the page follows the run: Kane in Chrome, the report, Claude's fix, Kane's re-check. A run takes 8 to 14 minutes. One goes at a time, 15 a day, 3 per visitor, because each one spends Kane credits and Claude's time.
+- **Read instead of waiting.** All four changes have already run on the demo store, see the table below.
+- **The dashboard without signing in.** [/app?demo](https://proofed.neptunescodm.workers.dev/app?demo). The pull requests of `t1dem/proofed` and `t1dem/proofed-demo-store` in it are copied from GitHub. The `sample-coffee-store` repository is made up, to show every state at once, and is labelled "Sample data".
+- **Proofed checks itself.** Every pull request to this repository runs five dashboard scenarios through Kane, for example [#25](https://github.com/t1dem/proofed/pull/25#issuecomment-6897255024).
 
 <img src="docs/try-run.jpg" alt="A finished run on /try: Kane caught a break, Claude fixed it, Kane confirmed. The fix and a before and after comparison of the page.">
 
@@ -58,15 +56,12 @@ When a flow breaks, Claude Code fixes it. The fix is pushed only after Kane has 
 
 ```mermaid
 flowchart LR
-  A[PR opened<br>or pushed] --> B[Pick the scenarios<br>the diff touches]
-  B --> C[Open each start page<br>once in Chrome]
-  C -->|page crashes| R
-  C --> D[Kane runs each scenario<br>in Chrome, recorded]
-  D --> R[Report on the PR:<br>clips, verdicts, steps]
-  R -->|Fix with Claude| F[Claude Code<br>edits the code]
-  F --> G[Rebuild, Kane re-runs<br>what broke]
-  G -->|fails, up to 3 attempts| F
-  G -->|passes| P[Push the fix,<br>post before and after]
+  A[Pull request] --> B[Kane runs the flows<br>the diff touches]
+  B --> C[Report with clips<br>on the PR]
+  C -->|Fix with Claude| D[Claude Code<br>edits the code]
+  D --> E[Kane re-runs<br>what broke]
+  E -->|still broken,<br>up to 3 tries| D
+  E -->|passes| F[Fix pushed,<br>before and after]
 ```
 
 1. **Pick.** Proofed diffs the PR against the base branch and picks the scenarios whose `paths` the diff touches.
