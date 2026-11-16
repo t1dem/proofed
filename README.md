@@ -15,7 +15,7 @@ When a flow breaks, Claude Code fixes it, and the fix is pushed only after Kane 
 
 <br>
 
-<img src="docs/devices.png" width="880" alt="The Proofed dashboard on a laptop and on a phone: pull requests grouped into Needs you, Kane is checking, Claude is fixing and Passed">
+<img src="docs/devices.png" width="880" alt="The Proofed dashboard in a browser and on a phone: pull requests grouped into Needs you, Kane is checking, Claude is fixing and Passed">
 
 </div>
 
