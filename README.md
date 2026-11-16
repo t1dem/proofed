@@ -106,9 +106,9 @@ It needs Node 24 or later, Chrome, [Kane CLI](https://www.npmjs.com/package/@tes
 curl -fsSL https://raw.githubusercontent.com/t1dem/proofed/main/install.sh | sh
 ```
 
-That puts a checkout in `~/.proofed` and links `proofed` into `~/.local/bin`; it takes a few seconds and needs only git and Node. Run it again to update. To uninstall, add `-s -- --uninstall` after `sh`. Then `proofed doctor` says what else is missing.
+That puts a checkout in `~/.proofed` and links `proofed` into `~/.local/bin`; it takes a few seconds and needs only git and Node. Run it again to update. To uninstall, add `-s -- --uninstall` after `sh`. Then `proofed doctor` says what else is missing. Node older than 24 gets an error that says so.
 
-With npm instead: `npm install -g --allow-scripts=github:t1dem/proofed github:t1dem/proofed` (the flag lets npm build the JavaScript it installs; uninstall with `npm uninstall -g proofed`). Node older than 24 gets an error that says so, either way.
+From a clone, `npm link` does the same. `npm install -g github:t1dem/proofed` doesn't work: Node won't run TypeScript from `node_modules`.
 
 In the app's repo:
 
@@ -243,7 +243,7 @@ Each fix is a few lines, found by a run that went wrong.
 
 ## Code
 
-TypeScript that Node 24 runs directly from the checkout and in Actions. `install.sh` makes such a checkout; an npm install runs a `prepare` build for JavaScript in `dist/` instead. `bin/proofed.cjs` checks Node, then loads whichever is there. `pnpm test` runs the tests.
+TypeScript that Node 24 runs directly, no build step. `install.sh` makes a checkout for the CLI; `bin/proofed.cjs` checks Node before it loads the TypeScript. `pnpm test` runs the tests.
 
 | File | What it does |
 |---|---|

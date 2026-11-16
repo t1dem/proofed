@@ -11,16 +11,11 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test src/*.test.ts",
-    "prepare": "node scripts/prepare.cjs"
+    "test": "node --test src/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2"
   },
-  "packageManager": "pnpm@10.20.0",
-  "files": [
-    "bin/",
-    "dist/"
-  ]
+  "packageManager": "pnpm@10.20.0"
 }

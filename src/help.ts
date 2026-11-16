@@ -13,7 +13,6 @@ Usage
 Install and update (Node 24 or newer, macOS and Linux)
   curl -fsSL https://raw.githubusercontent.com/t1dem/proofed/main/install.sh | sh
   Update: run it again. Uninstall: the same with "sh -s -- --uninstall".
-  With npm: npm install -g --allow-scripts=github:t1dem/proofed github:t1dem/proofed
 
 Usual runs, in the app's repo
   proofed check                  url and serve come from the Proofed workflow, if the repo has one

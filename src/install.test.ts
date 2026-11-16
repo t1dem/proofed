@@ -13,8 +13,8 @@ test("the checkout launcher runs the CLI version and help", () => {
   assert.ok(help.stdout.includes("curl -fsSL https://raw.githubusercontent.com/t1dem/proofed/main/install.sh | sh"));
 });
 
-test("old Node is rejected before the launcher or prepare loads TypeScript", () => {
-  for (const path of [launcher, new URL("../scripts/prepare.cjs", import.meta.url).pathname]) {
+test("old Node is rejected before the launcher loads TypeScript", () => {
+  for (const path of [launcher]) {
     const ran = spawnSync(process.execPath, ["-e", `Object.defineProperty(process.versions, "node", { value: "22.0.0" }); require(process.argv[1]);`, path], { encoding: "utf8" });
     assert.equal(ran.status, 3);
     assert.match(ran.stderr, /Node 24 or newer is required \(found 22\.0\.0\)/);
