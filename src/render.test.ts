@@ -169,3 +169,10 @@ test("zero reported credits does not claim an unfinished run was free", () => {
   assert.match(text, /balance may drop slightly more/);
   assert.doesNotMatch(text, /0 credits/);
 });
+
+test("a run of cached passes alone cost nothing, and says so", () => {
+  const cached = buildDoc({ items: [{ scenario: ran("x", "passed").scenario, cached: { key: "k", passedAt: "2026-11-16T10:00:00.000Z" } }], skipped: [], base: null, changedFiles: null, url: null, seconds: 0, out: "/out", rerun: { flags: [] }, estimatedCredits: 0 });
+  const text = ending(cached, palette(false)).join("\n");
+  assert.match(text, /✓ 1 passed · 0 credits · 0s/);
+  assert.doesNotMatch(text, /reported|balance/);
+});

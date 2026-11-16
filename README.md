@@ -102,13 +102,16 @@ The repo's model is set in the [dashboard](https://proofed.neptunescodm.workers.
 
 It needs Node 24 or later, Chrome, [Kane CLI](https://www.npmjs.com/package/@testmuai/kane-cli) signed in (`kane-cli login`) and ffmpeg for the clips.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/t1dem/proofed/main/install.sh | sh
-```
+Install the registry package with one manager:
 
-That puts a checkout in `~/.proofed` and links `proofed` into `~/.local/bin`; it takes a few seconds and needs only git and Node. Run it again to update. To uninstall, add `-s -- --uninstall` after `sh`. Then `proofed doctor` says what else is missing. Node older than 24 gets an error that says so.
+| | npm | pnpm | bun |
+|---|---|---|---|
+| Install | `npm install -g proofed-cli` | `pnpm add -g proofed-cli` | `bun add -g proofed-cli` |
+| Run without installing | `npx proofed-cli` | `pnpm dlx proofed-cli` | `bunx proofed-cli` |
+| Update | `npm install -g proofed-cli@latest` | `pnpm add -g proofed-cli@latest` | `bun add -g proofed-cli@latest` |
+| Uninstall | `npm uninstall -g proofed-cli` | `pnpm remove -g proofed-cli` | `bun remove -g proofed-cli` |
 
-From a clone, `npm link` does the same. `npm install -g github:t1dem/proofed` doesn't work: Node won't run TypeScript from `node_modules`.
+The command is `proofed`; `proofed doctor` says what else is missing. It runs on Node 24 or later with any of the three, bun included, and an older Node gets an error that says so. The package is built JavaScript with no dependencies and no install scripts. From a clone, `npm link` runs the TypeScript source instead.
 
 In the app's repo:
 
@@ -243,7 +246,27 @@ Each fix is a few lines, found by a run that went wrong.
 
 ## Code
 
-TypeScript that Node 24 runs directly, no build step. `install.sh` makes a checkout for the CLI; `bin/proofed.cjs` checks Node before it loads the TypeScript. `pnpm test` runs the tests.
+Node 24+ runs the checkout's TypeScript directly. The GitHub Action needs no build or package install.
+`pnpm build` emits the CLI and its imports to `dist/` for npm. `npm pack` builds it automatically.
+`pnpm typecheck` and `pnpm test` check the source. `pnpm check:package` builds a tarball, checks its
+contents, installs it into a temporary prefix and runs its version and help. It removes its temp files.
+
+To release, first choose a license and add its file and package metadata. Confirm the version in
+`package.json` (currently `0.1.0`); published versions cannot be reused. From a clean checkout with Node 24+:
+
+```sh
+pnpm install --frozen-lockfile
+npm login --registry=https://registry.npmjs.org/
+npm whoami --registry=https://registry.npmjs.org/
+npm publish --access public --registry=https://registry.npmjs.org/
+npm view proofed-cli@0.1.0 version bin engines dist.tarball --registry=https://registry.npmjs.org/
+npx --yes proofed-cli@0.1.0 --version
+npx --yes proofed-cli@0.1.0 --help
+```
+
+Use the chosen version in the last three commands. `npm publish` runs typecheck, tests and the package
+check before packing a fresh build. Complete npm's sign-in and two-factor prompts when asked.
+Publishing is manual; no release workflow runs on pushes or pull requests.
 
 | File | What it does |
 |---|---|

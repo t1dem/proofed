@@ -10,9 +10,12 @@ Usage
   proofed <command> --help       The flags of one command
   proofed --version
 
-Install and update (Node 24 or newer, macOS and Linux)
-  curl -fsSL https://raw.githubusercontent.com/t1dem/proofed/main/install.sh | sh
-  Update: run it again. Uninstall: the same with "sh -s -- --uninstall".
+Install (macOS and Linux; Node 24+ is required, including with bun)
+  npm install -g proofed-cli    pnpm add -g proofed-cli    bun add -g proofed-cli
+  Run without installing: npx proofed-cli | pnpm dlx proofed-cli | bunx proofed-cli
+  Update: npm install -g proofed-cli@latest | pnpm add -g proofed-cli@latest | bun add -g proofed-cli@latest
+  Uninstall: npm uninstall -g proofed-cli | pnpm remove -g proofed-cli | bun remove -g proofed-cli
+  Pick one manager. The command runs on Node, with bun too.
 
 Usual runs, in the app's repo
   proofed check                  url and serve come from the Proofed workflow, if the repo has one

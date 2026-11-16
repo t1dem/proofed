@@ -3,6 +3,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Flags } from "./args.ts";
+import { DEFAULT_CREDITS } from "./cache.ts";
 import { scenariosDirOf, type Io } from "./check.ts";
 import { findBase } from "./changes.ts";
 import { findChrome } from "./chrome.ts";
@@ -34,7 +35,7 @@ export async function doctorChecks(flags: Flags, io: Io): Promise<DoctorCheck[]>
   const add = (name: string, status: Status, detail: string, fix?: string) => checks.push({ name, status, detail, ...(fix && { fix }) });
 
   const major = Number(process.versions.node.split(".")[0]);
-  add("Node", major >= 24 ? "ok" : "fail", `v${process.versions.node}`, major >= 24 ? undefined : "Install Node 24 or newer (it runs Proofed's TypeScript directly).");
+  add("Node", major >= 24 ? "ok" : "fail", `v${process.versions.node}`, major >= 24 ? undefined : "Install Node 24 or newer from https://nodejs.org/.");
 
   try {
     const base = findBase(io.cwd, flags.base);
@@ -68,7 +69,7 @@ export async function doctorChecks(flags: Flags, io: Io): Promise<DoctorCheck[]>
     const left = /credits:\s*([\d.,]+)/i.exec(balance.text)?.[1];
     if (balance.ok && left) {
       const n = Number(left.replace(/,/g, ""));
-      add("Credits", n >= 30 ? "ok" : "warn", `${Math.floor(n)} available; a scenario takes 20 to 30`, n >= 30 ? undefined : "Top up your TestMu account before running scenarios.");
+      add("Credits", n >= DEFAULT_CREDITS ? "ok" : "warn", `${Math.floor(n)} available; a first run is estimated at ${DEFAULT_CREDITS} credits`, n >= DEFAULT_CREDITS ? undefined : "Top up your TestMu account before running scenarios.");
     } else {
       add("Credits", "warn", "couldn't read the balance", "kane-cli balance");
     }

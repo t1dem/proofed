@@ -116,8 +116,10 @@ export function ending(doc: Doc, c: Palette) {
   ].filter((p): p is string => !!p);
   const glyph = doc.exitCode === 1 ? c.red("✗") : doc.exitCode === 2 ? c.yellow("?") : c.green("✓");
   const tally = parts.length ? parts.join(", ") : doc.summary;
-  lines.push("", `${glyph} ${c.bold(tally)}${c.dim(` · ${credits(doc.credits)} · ${duration(doc.seconds)}`)}`);
-  lines.push("Credits are Kane's report; balance may drop slightly more.");
+  // Cached passes ran nothing: zero is the whole cost, not a number Kane left out.
+  const ranNow = doc.scenarios.some((d) => !d.cached);
+  lines.push("", `${glyph} ${c.bold(tally)}${c.dim(` · ${ranNow ? credits(doc.credits) : "0 credits"} · ${duration(doc.seconds)}`)}`);
+  if (ranNow) lines.push("Credits are Kane's report; balance may drop slightly more.");
   if (parts.length && doc.exitCode !== 0) lines.push(doc.summary);
   if (doc.rerun) lines.push(`Re-run what broke: ${c.bold(doc.rerun)}`);
   return lines;
