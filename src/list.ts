@@ -3,13 +3,13 @@
 import { join } from "node:path";
 import type { Flags } from "./args.ts";
 import { CACHE_FILE, cacheKey, readCache } from "./cache.ts";
-import { findBase, localChanges } from "./changes.ts";
-import { outDirOf, scenariosDirOf, type Io } from "./check.ts";
+import { findBase, localChanges, mergeBaseOf } from "./changes.ts";
+import { outDirOf, scenariosDirOf, scenariosMissing, type Io } from "./check.ts";
 import { colorOn, palette, since, textWidth, truncate } from "./render.ts";
 import { errorDoc } from "./result.ts";
 import { affectedBy, readScenarios } from "./scenarios.ts";
 import { SetupError } from "./setuperror.ts";
-import { resolveTarget } from "./target.ts";
+import { isHttpUrl, resolveTarget } from "./target.ts";
 
 export function list(flags: Flags, io: Io): number {
   const c = palette(colorOn(io.env, !!io.stdout.isTTY));
@@ -25,14 +25,15 @@ export function list(flags: Flags, io: Io): number {
   function show() {
     const dir = scenariosDirOf(flags, io);
     const loaded = readScenarios(dir);
-    if (loaded.missing) throw new SetupError("scenarios_missing", `${dir} doesn't exist here (${io.cwd}).`, "Run proofed in the app's repo, or pass --scenarios <dir>.");
+    if (loaded.missing) throw scenariosMissing(dir, flags, io, "list");
     const base = findBase(io.cwd, flags.base);
     const changed = base.rev ? localChanges(io.cwd, base.rev) : undefined;
+    const baseId = base.rev ? mergeBaseOf(io.cwd, base.rev) : "";
     const url = resolveTarget({ flags: { url: flags.url }, env: io.env, cwd: io.cwd }).url?.value;
     const cache = readCache(join(outDirOf(flags, io), CACHE_FILE));
     const scenarios = loaded.scenarios.map((s) => {
       const hit = cache.passes[s.id];
-      const cached = !!(hit && url && URL.canParse(url) && changed && hit.key === cacheKey(s, new URL(s.url, url).href, changed));
+      const cached = !!(hit && url && isHttpUrl(url) && changed && hit.key === cacheKey(s, new URL(s.url, url).href, changed, undefined, baseId));
       return {
         id: s.id,
         name: s.name,

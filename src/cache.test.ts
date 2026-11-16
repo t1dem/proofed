@@ -51,3 +51,11 @@ test("the cache file round-trips, and the estimate falls back to 25 credits", ()
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a pass doesn't survive a new base commit: a pull or a rebase changes code that isn't in the local change", () => {
+  const s = scenario(["src/**"]);
+  const read = (f: string) => ({ [s.file]: "scenario", "src/a.ts": "1" })[f];
+  const key = cacheKey(s, "http://x/", ["src/a.ts"], read, "base-1");
+  assert.equal(cacheKey(s, "http://x/", ["src/a.ts"], read, "base-1"), key);
+  assert.notEqual(cacheKey(s, "http://x/", ["src/a.ts"], read, "base-2"), key);
+});

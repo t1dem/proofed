@@ -13,7 +13,8 @@ export const outcomeOf = (r: ScenarioResult): Outcome => (r.outcome === "unsure"
 
 // A scenario of this check: run now, a pass kept from before, or (--dry-run) one that would run.
 export type Item =
-  | { scenario: Scenario; result: ScenarioResult }
+  // `extraCredits`: what the attempts before an automatic retry took; the result holds only the last.
+  | { scenario: Scenario; result: ScenarioResult; extraCredits?: number }
   | { scenario: Scenario; cached: CachedPass }
   | { scenario: Scenario; estimate: number };
 
@@ -54,6 +55,8 @@ export type Doc = {
   base: string | null;
   changedFiles: number | null;
   url: string | null;
+  // Whether Proofed started the app for this check or tested one that was already running.
+  app: "started" | "reused" | null;
   credits: number;
   estimatedCredits: number;
   seconds: number;
@@ -76,7 +79,13 @@ export type ErrorDoc = {
 // Shell-safe as typed.
 export const quote = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
 
-export type RerunContext = { text?: string; flags: string[] };
+// `selection`: "--only a,b" or "--all", when the check was asked for one; `flags`: where the app
+// and the scenarios are, so a printed command runs the same way.
+export type RerunContext = { text?: string; flags: string[]; selection?: string };
+
+// The same check again, as it was asked for.
+export const sameCommand = (ctx: RerunContext, selection = ctx.selection) =>
+  ["proofed check", ...(ctx.text !== undefined ? [quote(ctx.text)] : selection ? [selection] : []), ...ctx.flags].join(" ");
 
 export function rerunCommand(ids: string[], ctx: RerunContext) {
   const what = ctx.text !== undefined ? quote(ctx.text) : `--only ${ids.join(",")}`;
@@ -129,7 +138,7 @@ export function scenarioDoc(item: Item, ctx: RerunContext): ScenarioDoc {
       .map((step) => ({ remark: step.remark.slice(0, 200), ...(step.status === "failed" && { failed: true as const }) })),
     ...(r.pageError && { pageError: r.pageError }),
     ...(r.clip && { clip: { ...(r.clip.mp4 && { mp4: resolve(r.clip.mp4) }), jpg: resolve(r.clip.jpg) } }),
-    credits: round(r.end?.credits_consumed ?? 0),
+    credits: round((r.end?.credits_consumed ?? 0) + (item.extraCredits ?? 0)),
     ...(r.seconds !== undefined && { seconds: r.seconds }),
     rerun,
   };
@@ -143,6 +152,7 @@ type DocInput = {
   base: string | null;
   changedFiles: number | null;
   url: string | null;
+  app?: "started" | "reused";
   seconds: number;
   out: string;
   rerun: RerunContext;
@@ -175,7 +185,7 @@ export function buildDoc(input: DocInput): Doc {
   } else if (input.dryRun) {
     const would = of("would_run").length;
     summary = `Would run ${would} scenario(s) for about ${estimatedCredits} credits${cached ? `; ${cached} cached pass(es) cost nothing` : ""}`;
-    next = would ? `Run it for real: proofed check${input.rerun.text !== undefined ? ` ${quote(input.rerun.text)}` : ""}${input.rerun.flags.length ? ` ${input.rerun.flags.join(" ")}` : ""}` : "Nothing would run.";
+    next = would ? `Run it for real: ${sameCommand(input.rerun)}` : "Nothing would run.";
   } else if (counts.failed > 0) {
     summary = `${counts.failed} of ${scenarios.length} broke: ${names(of("failed"))}`;
     next = `Fix the failed scenarios, then run: ${rerun}`;
@@ -198,6 +208,7 @@ export function buildDoc(input: DocInput): Doc {
     base: input.base,
     changedFiles: input.changedFiles,
     url: input.url,
+    app: input.app ?? null,
     credits: round(scenarios.reduce((sum, d) => sum + d.credits, 0)),
     estimatedCredits,
     seconds: input.seconds,

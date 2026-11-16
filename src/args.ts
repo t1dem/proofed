@@ -26,6 +26,7 @@ export const FLAGS = {
     "dry-run": { type: "boolean" },
     "no-cache": { type: "boolean" },
     headed: { type: "boolean" },
+    reuse: { type: "boolean" },
     concurrency: { type: "string" },
     "serve-timeout": { type: "string" },
     verbose: { type: "boolean" },
@@ -52,6 +53,7 @@ export type Flags = {
   dryRun: boolean;
   noCache: boolean;
   headed: boolean;
+  reuse: boolean;
   verbose: boolean;
   concurrency?: number;
   serveTimeout?: number;
@@ -156,6 +158,7 @@ function parseFlags(command: Command, args: string[]) {
     dryRun: on("dry-run"),
     noCache: on("no-cache"),
     headed: on("headed"),
+    reuse: on("reuse"),
     verbose: on("verbose"),
     concurrency: count("concurrency"),
     serveTimeout: count("serve-timeout"),

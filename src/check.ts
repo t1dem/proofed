@@ -2,23 +2,23 @@
 // the change touches, skips the passes it already paid for, makes sure the app answers, runs the
 // rest with Kane in Chrome and says what broke: drawn live in a terminal, as plain lines in a pipe,
 // as one JSON document with --json.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Flags } from "./args.ts";
 import { CACHE_FILE, cacheKey, estimate, readCache, writeCache, type CachedPass } from "./cache.ts";
-import { findBase, localChanges } from "./changes.ts";
+import { findBase, localChanges, mergeBaseOf, repoRoot } from "./changes.ts";
 import { killChildren, stopChildren } from "./children.ts";
 import { findChrome } from "./chrome.ts";
 import { setLog } from "./log.ts";
 import { runAll } from "./pipeline.ts";
 import { colorOn, LiveView, PlainView, type Plan, type Stream, type View } from "./render.ts";
 import { askedScenario } from "./requests.ts";
-import { buildDoc, errorDoc, quote, scenarioDoc, type Doc, type ErrorDoc, type Item, type RerunContext, type Skipped } from "./result.ts";
+import { buildDoc, errorDoc, quote, sameCommand, scenarioDoc, type Doc, type ErrorDoc, type Item, type RerunContext, type Skipped } from "./result.ts";
 import type { RunEvent, ScenarioResult } from "./run.ts";
 import { affectedBy, readScenarios, type Scenario } from "./scenarios.ts";
 import { answers, startApp, type RunningApp } from "./serve.ts";
 import { SetupError } from "./setuperror.ts";
-import { resolveTarget, type Setting } from "./target.ts";
+import { isHttpUrl, resolveTarget, type Setting } from "./target.ts";
 import { findKane } from "./which.ts";
 
 export type Io = {
@@ -35,13 +35,24 @@ export const scenariosDirOf = (flags: Pick<Flags, "scenarios">, io: Pick<Io, "en
 
 // Clips must never end up committed in the app's repo.
 export function ensureOut(out: string) {
-  if (existsSync(out)) return;
   mkdirSync(out, { recursive: true });
-  writeFileSync(join(out, ".gitignore"), "*\n");
+  const ignore = join(out, ".gitignore");
+  if (!existsSync(ignore)) writeFileSync(ignore, "*\n");
+}
+
+// Run from a folder inside the repo, the default scenarios folder isn't there; say where it is.
+export function scenariosMissing(dir: string, flags: Pick<Flags, "scenarios">, io: Pick<Io, "cwd">, command: string) {
+  const root = flags.scenarios ? undefined : repoRoot(io.cwd);
+  if (root && root !== realpathSync(io.cwd) && existsSync(join(root, dir))) {
+    return new SetupError("wrong_directory", `${dir} is at the repository root, not in ${io.cwd}.`, `Run it from the root: cd ${quote(root)} && proofed ${command}`);
+  }
+  return new SetupError("scenarios_missing", `No scenarios: ${dir} doesn't exist here (${io.cwd}).`, `Run proofed in the app's repo, pass --scenarios <dir>, or check one thing: proofed check "the cart total updates"`);
 }
 
 export function makeView(flags: Flags, io: Io): View {
-  if (flags.json) return new PlainView(io.stderr, { color: colorOn(io.env, false) });
+  // An agent's shell shows stderr next to stdout: with --json, only progress goes there, since
+  // the details and the summary are in the document.
+  if (flags.json) return new PlainView(io.stderr, { color: colorOn(io.env, false), brief: true });
   if (io.stdout.isTTY && io.env.TERM !== "dumb") {
     const view = new LiveView(io.stdout, { color: colorOn(io.env, true), err: io.stderr });
     io.stdout.on?.("resize", () => view.draw());
@@ -52,23 +63,28 @@ export function makeView(flags: Flags, io: Io): View {
 
 const fromNote = (s: Setting) => (s.from.startsWith("--") ? "" : ` (url from ${s.from})`);
 
-// Flags that say where the app and the scenarios are, so a re-run command runs the same way.
+// Flags that say where the app and the scenarios are and how to run, so a printed command runs
+// the same way. Not --no-cache or --dry-run: those were about this run.
 function rerunFlags(flags: Flags) {
   const pass: [string, string | undefined][] = [
     ["--url", flags.url],
     ["--serve", flags.serve],
     ["--build", flags.build],
+    ["--serve-timeout", flags.serveTimeout?.toString()],
+    ["--base", flags.base],
     ["--scenarios", flags.scenarios],
     ["--out", flags.out],
+    ["--concurrency", flags.concurrency?.toString()],
   ];
-  return [...pass.flatMap(([name, v]) => (v ? [`${name} ${quote(v)}`] : [])), ...(flags.json ? ["--json"] : [])];
+  const on = [flags.reuse && "--reuse", flags.headed && "--headed", flags.json && "--json"].filter((f): f is string => !!f);
+  return [...pass.flatMap(([name, v]) => (v ? [`${name} ${quote(v)}`] : [])), ...on];
 }
 
 export async function check(flags: Flags, text: string | undefined, io: Io, view = makeView(flags, io)): Promise<number> {
   const started = Date.now();
   const out = outDirOf(flags, io);
   const dir = scenariosDirOf(flags, io);
-  const rerun: RerunContext = { text, flags: rerunFlags(flags) };
+  const rerun: RerunContext = { text, flags: rerunFlags(flags), selection: flags.only ? `--only ${flags.only.join(",")}` : flags.all ? "--all" : undefined };
   const finished = new Map<string, ScenarioResult>();
   let app: RunningApp | undefined;
 
@@ -99,14 +115,18 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       return 130;
     })();
   };
-  process.on("SIGINT", interrupt);
-  process.on("SIGTERM", interrupt);
+  // SIGHUP: a closed terminal tab or a dropped SSH session. Unhandled, it ends Node without
+  // stopping Kane, which runs on in its own process group and keeps spending credits.
+  const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+  for (const signal of SIGNALS) process.on(signal, interrupt);
 
   try {
     const doc = await run();
     if (interrupted) return await interrupted;
     write(doc);
-    if (doc.dryRun) {
+    if (doc.dryRun && flags.json) {
+      view.close();
+    } else if (doc.dryRun) {
       for (const d of doc.scenarios) view.info(`${d.cached ? "cached:   " : "would run:"} ${d.id} (${d.name})${d.cached ? "" : `, about ${d.estimatedCredits} credits`}`);
       view.info(`${doc.summary}. Dry run: nothing ran, no credits spent.`);
       view.info(doc.next);
@@ -120,22 +140,24 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     return doc.exitCode;
   } catch (e) {
     if (interrupted) return await interrupted;
-    if (!(e instanceof SetupError)) throw e;
-    const doc = errorDoc(e);
+    // Anything unexpected is exit 3 with a document too: exit 1 means "a scenario failed", and an
+    // old result.json left in place would say the previous run's verdict.
+    const known = e instanceof SetupError;
+    if (!known && flags.verbose && e instanceof Error) io.stderr.write(`${e.stack}\n`);
+    const doc = errorDoc(
+      known ? e : new SetupError("internal", `Proofed hit an unexpected error: ${e instanceof Error ? e.message : String(e)}`, "Run it again with --verbose for the stack; nothing was checked."),
+    );
     write(doc);
     view.fail(doc);
     return 3;
   } finally {
     await app?.stop();
-    process.off("SIGINT", interrupt);
-    process.off("SIGTERM", interrupt);
+    for (const signal of SIGNALS) process.off(signal, interrupt);
   }
 
   async function run(): Promise<Doc> {
     const loaded = readScenarios(dir);
-    if (!text && loaded.missing) {
-      throw new SetupError("scenarios_missing", `No scenarios: ${dir} doesn't exist here (${io.cwd}).`, `Run proofed in the app's repo, pass --scenarios <dir>, or check one thing: proofed check "the cart total updates"`);
-    }
+    if (!text && loaded.missing) throw scenariosMissing(dir, flags, io, "check");
     if (!text && loaded.errors.length) {
       const [first] = loaded.errors;
       throw new SetupError("scenario_invalid", loaded.errors.map((e) => `${e.file}: ${e.message}`).join("\n"), `Fix the frontmatter of ${first!.file} (see proofed list).`);
@@ -174,7 +196,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     } else if (changed.length === 0) {
       const summary = `Nothing changed against ${base!.rev}.`;
       view.info(`${summary} Use --all to run every scenario.`);
-      return buildDoc({ ...common, items: [], skipped: all.map((s) => ({ id: s.id, name: s.name, why: "nothing changed" })), url: null, idle: { summary, next: "Nothing to check. To run every scenario anyway: proofed check --all" } });
+      return buildDoc({ ...common, items: [], skipped: all.map((s) => ({ id: s.id, name: s.name, why: "nothing changed" })), url: null, idle: { summary, next: `Nothing to check. To run every scenario anyway: ${sameCommand(rerun, "--all")}` } });
     } else {
       selected = affectedBy(all, changed);
       skipped = all.filter((s) => !selected.includes(s)).map((s) => ({ id: s.id, name: s.name, why: "the change does not touch its paths" }));
@@ -182,15 +204,19 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       if (selected.length === 0) {
         const summary = `No scenario covers the ${changed.length} changed file${changed.length === 1 ? "" : "s"}.`;
         view.info(`${summary} Use --all to run every scenario.`);
-        return buildDoc({ ...common, items: [], skipped, url: null, idle: { summary, next: "Nothing to check. To run every scenario anyway: proofed check --all" } });
+        return buildDoc({ ...common, items: [], skipped, url: null, idle: { summary, next: `Nothing to check. To run every scenario anyway: ${sameCommand(rerun, "--all")}` } });
       }
     }
 
     const target = resolveTarget({ flags: { url: flags.url, serve: flags.serve, build: flags.build }, env: io.env, cwd: io.cwd });
     const url = target.url?.value;
-    if (url !== undefined && !URL.canParse(url)) {
-      throw new SetupError("url_invalid", `"${url}" (${target.url!.from}) is not a URL.`, "Pass a full URL, e.g. --url http://localhost:5173");
+    if (url !== undefined && !isHttpUrl(url)) {
+      throw new SetupError("url_invalid", `"${url}" (${target.url!.from}) is not an http(s) URL.`, "Pass a full URL, e.g. --url http://localhost:5173");
     }
+    const baseId = base?.rev ? mergeBaseOf(io.cwd, base.rev) : "";
+    let appState: "started" | "reused" | undefined;
+    // What the attempts before an automatic retry took, per scenario.
+    const retried = new Map<string, number>();
 
     const cacheFile = join(out, CACHE_FILE);
     const cache = readCache(cacheFile);
@@ -198,7 +224,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     const items = new Map<string, Item>();
     for (const s of selected) {
       if (s.file && url && changed && !flags.noCache) {
-        const key = cacheKey(s, new URL(s.url, url).href, changed);
+        const key = cacheKey(s, new URL(s.url, url).href, changed, undefined, baseId);
         keys.set(s.id, key);
         const hit = cache.passes[s.id];
         if (hit?.key === key) items.set(s.id, { scenario: s, cached: hit });
@@ -226,7 +252,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       if (target.url && !target.url.from.startsWith("--")) view.info(`url ${target.url.value} from ${target.url.from}`);
     };
     const docOf = (list: Item[], extra: Partial<Parameters<typeof buildDoc>[0]> = {}) =>
-      buildDoc({ ...common, items: list, skipped, url: url ?? null, estimatedCredits, seconds: Math.round((Date.now() - started) / 1000), ...extra });
+      buildDoc({ ...common, items: list, skipped, url: url ?? null, app: appState, estimatedCredits, seconds: Math.round((Date.now() - started) / 1000), ...extra });
 
     if (flags.dryRun) {
       showPlan();
@@ -257,7 +283,17 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
 
     showPlan();
     if (await answers(url)) {
-      view.info(`The app answers at ${url}; using it as it is.`);
+      // With a build configured, what answers was built from some earlier code, and a pass on it
+      // would be a pass nobody saw.
+      if (target.build && !flags.reuse) {
+        throw new SetupError(
+          "app_already_running",
+          `Something already answers at ${url}, so Proofed can't build and serve the current code there (build: ${target.build.value}). It may be serving an old build.`,
+          `Stop the server on that port and run the check again, or pass --reuse to test what is running as it is.`,
+        );
+      }
+      appState = "reused";
+      view.info(`The app answers at ${url}; using it as it is${target.build ? " (--reuse: not rebuilt, passes are not cached)" : ""}.`);
     } else if (target.serve) {
       const logFile = join(out, "serve.log");
       writeFileSync(logFile, "");
@@ -271,6 +307,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
         timeoutSeconds: flags.serveTimeout ?? 60,
         onPhase: (line) => view.phase(line),
       });
+      appState = "started";
       const from = [target.build && `build from ${target.build.from}`, `serve from ${target.serve.from}`].filter(Boolean).join(", ");
       view.info(`Started the app in ${Math.round((Date.now() - t0) / 1000)} s (${from}); its output is in ${logFile}`);
     } else {
@@ -278,15 +315,17 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     }
 
     view.start();
+    const cacheable = !(appState === "reused" && target.build);
     const onEvent = (e: RunEvent) => {
       view.event(e);
+      if (e.type === "retry" && e.credits) retried.set(e.id, (retried.get(e.id) ?? 0) + e.credits);
       if (e.type !== "finished") return;
       finished.set(e.id, e.result);
       const key = keys.get(e.id);
       if (!key) return;
       const credits = e.result.end?.credits_consumed;
-      if (credits !== undefined) cache.last[e.id] = { credits };
-      if (e.result.outcome === "passed") {
+      if (credits !== undefined) cache.last[e.id] = { credits: credits + (retried.get(e.id) ?? 0) };
+      if (e.result.outcome === "passed" && cacheable) {
         const clip = e.result.clip && { ...(e.result.clip.mp4 && { mp4: resolve(e.result.clip.mp4) }), jpg: resolve(e.result.clip.jpg) };
         cache.passes[e.id] = { key, passedAt: new Date().toISOString(), seconds: e.result.seconds, ...(clip && { clip }) } satisfies CachedPass;
       } else {
@@ -298,7 +337,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     const byId = new Map(results.map((r) => [r.scenario.id, r]));
     return docOf(selected.map((s) => {
       const r = byId.get(s.id);
-      return r ? { scenario: s, result: r } : items.get(s.id)!;
+      return r ? { scenario: s, result: r, extraCredits: retried.get(s.id) } : items.get(s.id)!;
     }));
   }
 }

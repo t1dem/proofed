@@ -1,7 +1,7 @@
 // `proofed` end to end, with the fake Kane (src/testing/fake-kane.ts) in place of kane-cli, a tiny
 // app served by node:http, and a temp git repo for the app's code. Real Chrome, no credits.
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
@@ -183,6 +183,12 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.equal(json<ErrorDoc>(down).error.code, "app_not_reachable");
       assert.match(json<ErrorDoc>(down).error.fix, /--serve/);
 
+      // A build is configured and something already answers: it may be an old build, so nothing runs.
+      const stale = await cli(r, ["check", "--json", "--url", url, "--build", "true", "--serve", "true"]);
+      assert.equal(stale.code, 3);
+      assert.equal(json<ErrorDoc>(stale).error.code, "app_already_running");
+      assert.match(json<ErrorDoc>(stale).error.fix, /--reuse/);
+
       const noKane = await cli(r, ["check", "--json", "--url", url], { KANE_CLI: join(r.dir, "missing-kane") });
       assert.equal(noKane.code, 3);
       assert.equal(json<ErrorDoc>(noKane).error.code, "kane_missing");
@@ -229,6 +235,23 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.equal(doc.dryRun, true);
       assert.deepEqual(doc.scenarios.map((s) => [s.id, s.outcome, s.estimatedCredits]), [["pass", "would_run", 25]]);
       assert.deepEqual(doc.skipped, [{ id: "other", name: "Scenario other", why: "the change does not touch its paths" }]);
+      // With --json, stderr carries no second copy of what the document says.
+      assert.doesNotMatch(dry.stderr, /would run:/);
+
+      // The command to run it for real checks the same scenarios the estimate was for.
+      const only = json(await cli(r, ["check", "--json", "--dry-run", "--only", "other", "--base", "main", "--url", "http://127.0.0.1:9"]));
+      assert.match(only.next, /^Run it for real: proofed check --only other --url http:\/\/127\.0\.0\.1:9 --base main --out /);
+
+      // "localhost:5173" parses as a URL with the scheme "localhost:"; it's a setup error, not a crash.
+      const typo = await cli(r, ["check", "--json", "--dry-run", "--url", "localhost:5173"]);
+      assert.equal(typo.code, 3);
+      assert.equal(json<ErrorDoc>(typo).error.code, "url_invalid");
+      assert.equal((JSON.parse(readFileSync(join(r.out, "result.json"), "utf8")) as ErrorDoc).error.code, "url_invalid");
+
+      // An --out folder that already exists gets its .gitignore too.
+      mkdirSync(join(r.dir, "reports"));
+      spawnSync(process.execPath, [CLI, "check", "--dry-run", "--url", "http://127.0.0.1:9", "--out", "reports"], { cwd: r.dir, env: env(r) });
+      assert.equal(readFileSync(join(r.dir, "reports/.gitignore"), "utf8"), "*\n");
 
       r.git("commit", "-qam", "the change");
       const none = await cli(r, ["check", "--url", "http://127.0.0.1:9"]);
@@ -240,7 +263,8 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     }
   });
 
-  test("Ctrl-C stops Kane and its children, every Chrome and the app, and exits 130", async () => {
+  // SIGHUP is a closed terminal tab or a dropped SSH session.
+  for (const signal of ["SIGINT", "SIGHUP"] as const) test(`${signal} stops Kane and its children, every Chrome and the app, and exits 130`, async () => {
     const r = repo({ stuck: { mode: "hang" } });
     const port = await freePort();
     try {
@@ -254,7 +278,7 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.ok(chromes().length > 0, "Chrome is running before the interrupt");
       assert.ok(!(await portFree(port)), "the app is up before the interrupt");
 
-      process.kill(cli_pid, "SIGINT");
+      process.kill(cli_pid, signal);
       const ran = await done;
       assert.equal(ran.code, 130);
       assert.equal(json<ErrorDoc>(ran).error.code, "interrupted");

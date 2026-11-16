@@ -120,3 +120,29 @@ test("a narrow terminal still gets lines that fit", () => {
   view.close();
   for (const line of out.text.replace(/\x1b\[\d+F\x1b\[J|\x1b\[\?25[lh]/g, "\n").split("\n")) assert.ok(textWidth(line) < 24, JSON.stringify(line));
 });
+
+test("with --json the progress view leaves the details, the summary and errors to the document", () => {
+  const out = sink(200);
+  const view = new PlainView(out, { color: false, now: () => 0, brief: true });
+  view.plan(plan);
+  view.start();
+  view.event({ type: "started", id: "free-shipping" });
+  view.event({ type: "finished", id: "free-shipping", result: failed.result });
+  view.done(doc);
+  view.fail({ ok: false, exitCode: 3, error: { code: "x", message: "broken", fix: "fix it" } });
+  assert.match(out.text, /failed free-shipping/);
+  assert.doesNotMatch(out.text, /Kane saw|Re-run what broke|broken/);
+});
+
+test("a build that fails leaves no scenario rows, and nothing is drawn after the view closed", () => {
+  const out = sink(80);
+  const view = new LiveView(out, { color: false, now: () => 0 });
+  view.plan(plan);
+  view.phase("Building the app: pnpm build");
+  view.fail({ ok: false, exitCode: 3, error: { code: "build_failed", message: "The build failed.", fix: "Fix the build." } });
+  assert.doesNotMatch(stripAnsi(out.text), /waiting/);
+  const closed = out.text;
+  // A resize after the end must not erase the error above the prompt.
+  view.draw();
+  assert.equal(out.text, closed);
+});

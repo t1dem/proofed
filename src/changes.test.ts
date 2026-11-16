@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { findBase, localChanges } from "./changes.ts";
+import { findBase, localChanges, mergeBaseOf } from "./changes.ts";
 import { SetupError } from "./setuperror.ts";
 
 test("the local change: committed, staged, unstaged and new files, not ignored ones", () => {
@@ -43,6 +43,28 @@ test("outside a git repository there is no base, and the check says why", () => 
   const cwd = mkdtempSync(join(tmpdir(), "proofed-nogit-"));
   try {
     assert.deepEqual(findBase(cwd), { why: "not a git repository" });
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("a changed file with a non-ASCII name or a space is reported by its real name", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "proofed-changes-"));
+  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd, stdio: "ignore" });
+  try {
+    git("init", "-q", "-b", "main");
+    mkdirSync(join(cwd, "src"));
+    writeFileSync(join(cwd, "src/café.ts"), "1");
+    git("add", "-A");
+    git("commit", "-qm", "base");
+    writeFileSync(join(cwd, "src/café.ts"), "2");
+    writeFileSync(join(cwd, "src/new page.ts"), "new");
+    assert.deepEqual(localChanges(cwd, "main"), ["src/café.ts", "src/new page.ts"]);
+    // The commit the change is measured from moves with the base, not with local commits.
+    const before = mergeBaseOf(cwd, "main");
+    git("checkout", "-qb", "feature");
+    git("commit", "-qam", "local");
+    assert.equal(mergeBaseOf(cwd, "main"), before);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

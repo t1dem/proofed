@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, matchesGlob } from "node:path";
 
 export type Scenario = {
@@ -60,7 +60,7 @@ export function loadScenarios(dir: string) {
 export function readScenarios(dir: string) {
   const scenarios: Scenario[] = [];
   const errors: { file: string; message: string }[] = [];
-  if (!existsSync(dir)) return { missing: true, scenarios, errors };
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) return { missing: true, scenarios, errors };
   for (const f of readdirSync(dir).filter((f) => f.endsWith(".md")).sort()) {
     const file = join(dir, f);
     try {

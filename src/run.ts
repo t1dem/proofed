@@ -87,7 +87,7 @@ export type RunEvent =
   | { type: "waiting"; id: string }
   | { type: "started"; id: string }
   | { type: "step"; id: string; step: Step }
-  | { type: "retry"; id: string; error: string }
+  | { type: "retry"; id: string; error: string; credits?: number }
   | { type: "finished"; id: string; result: ScenarioResult };
 
 type RunOptions = {
@@ -104,7 +104,7 @@ export async function runScenario(scenario: Scenario, o: RunOptions): Promise<Sc
   let result = await runOnce(scenario, o);
   for (let i = 2; i <= (o.attempts ?? 2) && result.outcome === "error" && !stopping(); i++) {
     logLine(`[${scenario.id}] ${result.error ?? "infra error"}; retrying`);
-    o.onEvent?.({ type: "retry", id: scenario.id, error: result.error ?? "infra error" });
+    o.onEvent?.({ type: "retry", id: scenario.id, error: result.error ?? "infra error", credits: result.end?.credits_consumed });
     result = await runOnce(scenario, o);
   }
   return result;

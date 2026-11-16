@@ -15,6 +15,15 @@ const KEYS: Key[] = ["url", "serve", "build"];
 
 export const CONFIG_FILE = ".proofed/config.json";
 
+// "localhost:5173" parses as a URL with the scheme "localhost:", so parsing alone isn't the test.
+export function isHttpUrl(value: string) {
+  try {
+    return /^https?:$/.test(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+}
+
 export function readConfig(cwd: string): Partial<Record<Key, string>> {
   const file = join(cwd, CONFIG_FILE);
   if (!existsSync(file)) return {};

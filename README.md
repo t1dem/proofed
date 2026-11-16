@@ -114,16 +114,18 @@ In the app's repo:
 | `proofed list` | Every scenario, whether the change touches it and whether its pass is cached |
 | `proofed check` | Runs the scenarios the change touches; `proofed check "the cart total updates"` checks just that |
 
-The change is everything since the merge base with the default branch (`origin/HEAD`, else `origin/main`, or `--base`), uncommitted and untracked files included. The URL and the commands that build and serve the app come from `--url`, `--build` and `--serve`, then `PROOFED_URL`, `PROOFED_BUILD` and `PROOFED_SERVE`, then `.proofed/config.json`, then the Proofed step of the repo's workflow. In a repo that already runs Proofed on its PRs, `proofed check` needs no flags. If the app isn't running, Proofed starts it and stops it at the end.
+The change is everything since the merge base with the default branch (`origin/HEAD`, else `origin/main`, or `--base`), uncommitted and untracked files included. The URL and the commands that build and serve the app come from `--url`, `--build` and `--serve`, then `PROOFED_URL`, `PROOFED_BUILD` and `PROOFED_SERVE`, then `.proofed/config.json`, then the Proofed step of the repo's workflow. In a repo that already runs Proofed on its PRs, `proofed check` needs no flags. If the app isn't running, Proofed builds and starts it, and stops it at the end. If something already answers at the URL and a build is configured, the check stops rather than test what may be an old build; `--reuse` tests it anyway.
 
-A passed scenario isn't run again until its file, the URL or a changed file in its `paths` changes. `--dry-run` shows what would run and the credit estimate, for free. In a terminal the scenarios update in place; in a pipe each event is one line, with a "still running" line at least every 30 seconds. From a run on the demo store with a stand-in for Kane, so the times are short:
+A passed scenario isn't run again until its file, the URL, the base commit or a changed file in its `paths` changes. `--dry-run` shows what would run and the credit estimate, for free. In a terminal the scenarios update in place; in a pipe each event is one line, with a "still running" line at least every 30 seconds. From a run on the demo store with a stand-in for Kane, so the times are short:
 
 ```
 Proofed: checking 3 of 3 scenario(s), --all, at http://localhost:4173.
 Estimate: about 75 Kane credits.
 Time: about 1 to 4 minutes per scenario, 3 at a time, so 1 to 4 minutes in all. Do not interrupt: let it finish.
 url http://localhost:4173 from .github/workflows/proofed.yml
-The app answers at http://localhost:4173; using it as it is.
+Building the app: pnpm build
+Starting the app: pnpm preview --port 4173
+Started the app in 1 s (build from .github/workflows/proofed.yml, serve from .github/workflows/proofed.yml); its output is in /home/me/store/.proofed-out/serve.log
 [0:01] started checkout: Place an order
 [0:01] started free-shipping: Free shipping from €50
 [0:01] started promo-code: Promo code total
@@ -144,7 +146,7 @@ The app answers at http://localhost:4173; using it as it is.
 Re-run what broke: proofed check --only free-shipping
 ```
 
-`--json` prints one JSON document on stdout and the progress on stderr. Every run also writes it to `.proofed-out/result.json`, next to the clips; the folder has its own `.gitignore`. The exit code is 0 when everything checked passed, 1 when a scenario failed, 2 when nothing failed but something wasn't checked, 3 when the check couldn't start (the message says why and how to fix it) and 130 on Ctrl-C, which stops Kane, Chrome and the app first.
+`--json` prints one JSON document on stdout and the progress on stderr. Every run also writes it to `.proofed-out/result.json`, next to the clips; the folder has its own `.gitignore`. The exit code is 0 when everything checked passed, 1 when a scenario failed, 2 when nothing failed but something wasn't checked, 3 when the check couldn't start (the message says why and how to fix it) and 130 on Ctrl-C or a closed terminal, which stops Kane, Chrome and the app first.
 
 For an agent, add this to the app's `AGENTS.md` or `CLAUDE.md`:
 

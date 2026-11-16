@@ -218,12 +218,16 @@ export class PlainView implements View {
   lastLine = 0;
   timer: NodeJS.Timeout | undefined;
 
-  constructor(out: Stream, o: ViewOptions & { heartbeat?: number }) {
+  // Progress only: the details, the summary and an error are left to the JSON document.
+  brief: boolean;
+
+  constructor(out: Stream, o: ViewOptions & { heartbeat?: number; brief?: boolean }) {
     this.out = out;
     this.err = o.err ?? out;
     this.c = palette(o.color);
     this.now = o.now ?? Date.now;
     this.heartbeat = o.heartbeat ?? 25_000;
+    this.brief = o.brief ?? false;
   }
   line(s: string) {
     this.out.write(`${s}\n`);
@@ -268,11 +272,11 @@ export class PlainView implements View {
   }
   done(doc: Doc) {
     this.close();
-    for (const l of ending(doc, this.c)) this.line(l);
+    if (!this.brief) for (const l of ending(doc, this.c)) this.line(l);
   }
   fail(doc: ErrorDoc) {
     this.close();
-    for (const l of errorLines(doc, this.c)) this.err.write(`${l}\n`);
+    if (!this.brief) for (const l of errorLines(doc, this.c)) this.err.write(`${l}\n`);
   }
   log(s: string) {
     this.err.write(`${s}\n`);
@@ -300,6 +304,10 @@ export class LiveView implements View {
   timer: NodeJS.Timeout | undefined;
   hidden = false;
   settled = false;
+  // The scenario rows show from start() on: a build that fails before it has no rows to leave behind.
+  started = false;
+  // After stop() nothing is drawn again: a late resize would otherwise erase the closing lines.
+  closed = false;
 
   constructor(out: Stream, o: ViewOptions) {
     this.out = out;
@@ -334,6 +342,7 @@ export class LiveView implements View {
   }
   start() {
     this.phaseText = undefined;
+    this.started = true;
     this.animate();
   }
   event(e: RunEvent) {
@@ -380,6 +389,8 @@ export class LiveView implements View {
     this.timer = undefined;
     if (this.hidden) this.out.write(SHOW);
     this.hidden = false;
+    this.closed = true;
+    this.drawn = [];
   }
   // Back to the top of the block and clear to the end of the screen. A line drawn wider than the
   // terminal is now (it shrank) has wrapped, so it takes more than one row.
@@ -390,6 +401,7 @@ export class LiveView implements View {
     this.drawn = [];
   }
   draw() {
+    if (this.closed) return;
     const lines = this.lines();
     this.erase();
     if (!lines.length) return;
@@ -404,7 +416,7 @@ export class LiveView implements View {
       const t = clock(Math.round((this.now() - this.phaseAt) / 1000));
       return [`${c.cyan(spin)} ${truncate(this.phaseText, w - t.length - 4)}  ${c.dim(t)}`];
     }
-    if (!this.board || (this.timer === undefined && !this.settled)) return [];
+    if (!this.board || (!this.started && !this.settled)) return [];
     let rows = this.board.rows;
     // Taller than the terminal: redrawing would scroll. The running ones stay, the rest are counted.
     const room = Math.max(3, (this.out.rows || 24) - 2);

@@ -6,8 +6,9 @@ import { realpathSync } from "node:fs";
 import { join, relative } from "node:path";
 import { SetupError } from "./setuperror.ts";
 
+// A repo with an unignored node_modules lists megabytes of untracked names; the default is 1 MB.
 const git = (cwd: string, ...args: string[]) =>
-  execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 256 * 1024 * 1024 });
 
 const tries = (fn: () => string) => {
   try {
@@ -41,16 +42,26 @@ function defaultBase(cwd: string) {
   return BASES.slice(1).find((rev) => tries(() => git(cwd, "rev-parse", "--verify", "--quiet", `${rev}^{commit}`)));
 }
 
+// Real paths: git reports /private/var/… for a temp folder the shell calls /var/….
+export function repoRoot(cwd: string) {
+  const root = tries(() => git(cwd, "rev-parse", "--show-toplevel"));
+  return root ? realpathSync(root) : undefined;
+}
+
+// The commit the local change is measured from. A cached pass is keyed on it too: after a pull or
+// a rebase the code under a scenario's `paths` can differ without being part of the local change.
+export const mergeBaseOf = (cwd: string, base: string) =>
+  tries(() => git(cwd, "merge-base", base, "HEAD")) ?? tries(() => git(cwd, "rev-parse", "--verify", "--quiet", `${base}^{commit}`)) ?? base;
+
 // Paths relative to `cwd`, like the scenarios' `paths` and file names.
 export function localChanges(cwd: string, base: string) {
-  // Real paths on both sides: git reports /private/var/… for a temp folder the shell calls /var/….
   const root = realpathSync(git(cwd, "rev-parse", "--show-toplevel").trim());
   const here = realpathSync(cwd);
-  const mergeBase = tries(() => git(cwd, "merge-base", base, "HEAD")) ?? base;
-  const lines = (s: string) => s.split("\n").filter(Boolean);
+  // -z: without it git quotes and escapes a name such as café.ts, and it matches no path.
+  const names = (s: string) => s.split("\0").filter(Boolean);
   const files = new Set([
-    ...lines(git(root, "diff", "--name-only", "--no-renames", mergeBase)),
-    ...lines(git(root, "ls-files", "--others", "--exclude-standard", "--full-name")),
+    ...names(git(root, "diff", "--name-only", "--no-renames", "-z", mergeBaseOf(cwd, base))),
+    ...names(git(root, "ls-files", "--others", "--exclude-standard", "--full-name", "-z")),
   ]);
   return [...files].map((f) => relative(here, join(root, f))).sort();
 }

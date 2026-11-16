@@ -26,7 +26,8 @@ Outcomes
   passed        Kane checked what the scenario says, and it held
   failed        Kane saw the app do something else: a bug to fix
   not_checked   Kane asserted nothing, or thinks the scenario text is wrong. Not a pass.
-  error         Kane couldn't finish (browser or service trouble). Says nothing about the app.
+  error         Kane couldn't finish, even on one automatic retry (browser or service trouble).
+                Says nothing about the app.
 
 Exit codes
   0    everything that ran passed, or nothing needed to run
@@ -60,6 +61,8 @@ Where the app is (flag, then env, then .proofed/config.json, then the Proofed wo
   --url <url>           Where it runs (env PROOFED_URL), e.g. http://localhost:5173
   --serve <cmd>         Starts it when the URL doesn't answer; stopped at the end (env PROOFED_SERVE)
   --build <cmd>         Runs before --serve (env PROOFED_BUILD)
+  --reuse               With a build set, a URL that already answers stops the check (exit 3): it
+                        may be an old build. --reuse tests what is running; its passes aren't cached
   --serve-timeout <s>   How long the URL gets to answer after --serve (default 60)
 
 Running
@@ -73,11 +76,13 @@ Running
 
 JSON (also written to <out>/result.json)
   ok, exitCode, summary, counts {passed, failed, not_checked, error, skipped}, base, url,
-  credits, estimatedCredits, seconds, next, rerun (re-runs everything that didn't pass),
+  app ("started" | "reused"), credits, estimatedCredits, seconds, next, rerun (re-runs
+  everything that didn't pass),
   skipped [{id, name, why}], scenarios [{id, name, file, outcome, cached, cachedAt, objective,
   reason, notChecked ("nothing_asserted" | "scenario_doubted"), diagnosis, suggestion,
   failedStep, steps [{remark, failed}], pageError, clip {mp4, jpg}, credits, seconds, rerun}]
   Proofed couldn't run: {ok: false, exitCode: 3, error: {code, message, fix}}
+  Interrupted: the same shape with exitCode 130 and scenarios [...] for what had finished
 
 Exit codes: 0 passed, 1 failed, 2 not_checked or error, 3 couldn't run, 130 interrupted.`;
 

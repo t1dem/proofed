@@ -1,7 +1,8 @@
 // Passes Proofed doesn't pay for twice. A coding agent runs the check again after each fix, and a
 // scenario it didn't touch would cost another 20 to 30 credits to come out the same. A pass stays
-// good while its scenario file, its start URL and the changed files in its `paths` (every changed
-// file, when it has none) stay as they were. Only passes are kept; everything else runs again.
+// good while its scenario file, its start URL, the commit the change is measured from and the
+// changed files in its `paths` (every changed file, when it has none) stay as they were. Only
+// passes are kept; everything else runs again.
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { matchesGlob } from "node:path";
@@ -47,12 +48,14 @@ const readOrUndefined = (file: string) => {
   }
 };
 
-export function cacheKey(s: Scenario, startUrl: string, changed: string[], read: (file: string) => Uint8Array | string | undefined = readOrUndefined) {
+// `base`: the commit the change is measured from (mergeBaseOf).
+export function cacheKey(s: Scenario, startUrl: string, changed: string[], read: (file: string) => Uint8Array | string | undefined = readOrUndefined, base = "") {
   const hash = createHash("sha256");
   // Length-prefixed, so no two different lists of parts hash the same.
   const add = (part: Uint8Array | string) => hash.update(`${typeof part === "string" ? Buffer.byteLength(part) : part.length}:`).update(part);
   add(read(s.file) ?? s.objective);
   add(startUrl);
+  add(base);
   for (const file of relevantChanges(s, changed).toSorted()) {
     add(file);
     add(read(file) ?? "\0deleted");

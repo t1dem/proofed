@@ -50,7 +50,17 @@ async function main(): Promise<number> {
   return doctor(flags, io);
 }
 
-const code = await main();
+// Exit 1 is "a scenario failed", so a crash must not end that way: 3, with the error where the
+// caller reads it.
+const code = await main().catch((e: unknown) => {
+  const message = `Proofed hit an unexpected error: ${e instanceof Error ? e.message : String(e)}`;
+  if (argv.includes("--json")) {
+    io.stdout.write(`${JSON.stringify({ ok: false, exitCode: 3, error: { code: "internal", message, fix: "Run it again with --verbose; nothing was checked." } }, null, 2)}\n`);
+  } else {
+    io.stderr.write(`proofed: ${message}\n`);
+  }
+  return 3;
+});
 // A closed Chrome may still be shutting down; its profile folder is removed once it has exited.
 await stopChildren();
 // Exit once stdout has drained: a pipe may still hold the end of the JSON.

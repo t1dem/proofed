@@ -10,7 +10,7 @@ import { colorOn, palette, stripAnsi } from "./render.ts";
 import { readScenarios } from "./scenarios.ts";
 import { answers } from "./serve.ts";
 import { SetupError } from "./setuperror.ts";
-import { resolveTarget } from "./target.ts";
+import { isHttpUrl, resolveTarget } from "./target.ts";
 import { findKane, findOnPath } from "./which.ts";
 
 export type Status = "ok" | "warn" | "fail";
@@ -85,13 +85,15 @@ export async function doctorChecks(flags: Flags, io: Io): Promise<DoctorCheck[]>
     const url = target.url;
     if (!url) {
       add("App", "fail", "no URL", 'Pass --url http://localhost:5173 to proofed check, set PROOFED_URL, or write .proofed/config.json: { "url": "http://localhost:5173", "serve": "npm run dev" }');
-    } else if (!URL.canParse(url.value)) {
-      add("App", "fail", `"${url.value}" from ${url.from} is not a URL`, "Use a full URL, e.g. http://localhost:5173");
+    } else if (!isHttpUrl(url.value)) {
+      add("App", "fail", `"${url.value}" from ${url.from} is not an http(s) URL`, "Use a full URL, e.g. http://localhost:5173");
     } else {
       add("App URL", "ok", `${url.value} (from ${url.from})`);
       if (target.build) add("Build", "ok", `${target.build.value} (from ${target.build.from})`);
       if (target.serve) add("Serve", "ok", `${target.serve.value} (from ${target.serve.from}${target.dir !== io.cwd ? `, in ${target.dir}` : ""})`);
-      if (await answers(url.value)) add("App", "ok", `${url.value} answers now`);
+      const up = await answers(url.value);
+      if (up && target.build) add("App", "warn", `${url.value} answers now, maybe from an old build: proofed check stops rather than test it`, "Stop that server so Proofed builds and serves the current code, or pass --reuse to proofed check.");
+      else if (up) add("App", "ok", `${url.value} answers now`);
       else if (target.serve) add("App", "warn", `${url.value} doesn't answer now; proofed check starts it with the serve command`);
       else add("App", "fail", `${url.value} doesn't answer and there is no serve command`, 'Start the app, or tell Proofed how: --serve "npm run dev", PROOFED_SERVE, or "serve" in .proofed/config.json');
     }
