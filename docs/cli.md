@@ -194,7 +194,7 @@ No target supports direct Safari automation. Tauri and WKWebView are unsupported
 Electron coverage excludes native desktop menus, OS file dialogs and tray UI.
 Kane may upload app artifacts to the TestMu account even for a local run. Mobile
 cost remains unknown until the first run reports `credits_consumed`; JSON uses `null`
-for targets without history. History is separate by app digest, device, OS and Kane version.
+for mobile and desktop targets without history. Web scenarios fall back to 30 credits. History is separate by app digest, device, OS and Kane version.
 Doubted failures use the same retry rules as web checks; `--no-retry` permits one attempt.
 
 In `action.yml`, pass the same target fields, omit `url` for native/desktop, and set

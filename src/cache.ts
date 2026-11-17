@@ -34,7 +34,9 @@ export function readCache(file: string): Cache {
 
 export const writeCache = (file: string, cache: Cache) => writeFileSync(file, `${JSON.stringify(cache, null, 2)}\n`);
 
-export const estimate = (cache: Cache, id: string) => cache.last[id]?.credits ?? null;
+// Web runs have a known typical cost; native and desktop targets have none until their first run.
+export const estimate = (cache: Cache, s: Scenario, kaneVersion: string) =>
+  cache.last[historyKey(s, kaneVersion)]?.credits ?? ((s.resolvedTarget?.kind ?? "web") === "web" ? DEFAULT_CREDITS : null);
 
 // The changed files a scenario depends on.
 export const relevantChanges = (s: Scenario, changed: string[]) =>

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { cacheKey, estimate, readCache, writeCache } from "./cache.ts";
+import { cacheKey, estimate, historyKey, readCache, writeCache } from "./cache.ts";
 import type { Scenario } from "./scenarios.ts";
 
 const scenario = (paths: string[]): Scenario => ({ id: "promo", file: ".proofed/scenarios/promo.md", name: "Promo", paths, url: "/", objective: "Apply welcome10." });
@@ -36,17 +36,20 @@ test("a scenario without paths depends on every changed file", () => {
   assert.notEqual(cacheKey(s, "http://x/", ["README.md"], (f) => files[f]), key);
 });
 
-test("the cache file round-trips, and the estimate is unknown without history", () => {
+test("the cache file round-trips; without history a web run is estimated at 30 credits and a desktop one is unknown", () => {
   const dir = mkdtempSync(join(tmpdir(), "proofed-cache-"));
   try {
     const file = join(dir, "cache.json");
     const empty = readCache(file);
     assert.deepEqual(empty, { version: 1, passes: {}, last: {} });
-    assert.equal(estimate(empty, "promo"), null);
-    writeCache(file, { version: 1, passes: { promo: { key: "k", passedAt: "2026-11-16T10:00:00.000Z" } }, last: { promo: { credits: 27 } } });
+    const web = scenario([]);
+    const desktop = { ...web, resolvedTarget: { kind: "desktop", execution: "local", launch: "app", cdp_endpoint: "http://127.0.0.1:9223", reuse: false, sources: {}, dir: "." } } as unknown as Scenario;
+    assert.equal(estimate(empty, web, "0.10.4"), 30);
+    assert.equal(estimate(empty, desktop, "0.10.4"), null);
+    writeCache(file, { version: 1, passes: { promo: { key: "k", passedAt: "2026-11-16T10:00:00.000Z" } }, last: { [historyKey(web, "0.10.4")]: { credits: 27 } } });
     const back = readCache(file);
     assert.equal(back.passes.promo?.key, "k");
-    assert.equal(estimate(back, "promo"), 27);
+    assert.equal(estimate(back, web, "0.10.4"), 27);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -256,7 +256,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
         const hit = cache.passes[s.id];
         if (hit?.key === key) items.set(s.id, { scenario: s, cached: hit });
       }
-      if (!items.has(s.id)) items.set(s.id, { scenario: s, estimate: cache.last[historyKey(s, kaneVersion)]?.credits ?? null });
+      if (!items.has(s.id)) items.set(s.id, { scenario: s, estimate: estimate(cache, s, kaneVersion) });
     }
     const toRun = selected.filter((s) => "estimate" in items.get(s.id)!);
     const cachedPasses = selected.flatMap((s) => {

@@ -219,6 +219,7 @@ A scenario can set `target: ios`, `android` or `desktop`; scenarios without it s
 
 - **iOS and Android** need a built app, Kane's managed simulator or emulator dependencies and one device you booted yourself, picked by `device` and `os_version`. `proofed doctor --target ios` (or `android`) lists what is missing and installs nothing. The clip keeps portrait orientation. The credit estimate is unknown until the first run.
 - **Desktop** is experimental and covers one Electron Chromium window: give `launch` and `cdp_endpoint`. Native menus, OS file dialogs, Safari, Tauri and WKWebView are not supported.
+- **Tested so far:** desktop with VS Code on macOS. iOS and Android are covered only by tests with fake devices and have not run on a real simulator or emulator yet.
 - Cloud mobile runs give Kane's screenshots, not a Proofed MP4. In the action, set `fix: false` for these targets: the fixer only restarts an HTTP server.
 
 Requirements and commands: [docs/cli.md](docs/cli.md#mobile-and-electron-targets).

@@ -383,7 +383,7 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.equal(dry.code, 0);
       const doc = json(dry);
       assert.equal(doc.dryRun, true);
-      assert.deepEqual(doc.scenarios.map((s) => [s.id, s.outcome, s.estimatedCredits]), [["pass", "would_run", null]]);
+      assert.deepEqual(doc.scenarios.map((s) => [s.id, s.outcome, s.estimatedCredits]), [["pass", "would_run", 30]]);
       assert.deepEqual(doc.skipped, [{ id: "other", name: "Scenario other", why: "the change does not touch its paths" }]);
       // With --json, stderr carries no second copy of what the document says.
       assert.doesNotMatch(dry.stderr, /would run:/);
@@ -492,13 +492,13 @@ describe("proofed list and doctor", () => {
     try {
       type ListDoc = { estimatedCredits: number; scenarios: { id: string; selected: boolean; estimatedCredits: number; touched: boolean | null }[] };
       const doc = json<ListDoc>(await cli(r, ["list", "--json"]));
-      assert.equal(doc.estimatedCredits, null);
-      assert.deepEqual(doc.scenarios.map((s) => [s.id, s.selected, s.estimatedCredits]), [["docs", false, 0], ["global", true, null], ["pricing", true, null]]);
+      assert.equal(doc.estimatedCredits, 60);
+      assert.deepEqual(doc.scenarios.map((s) => [s.id, s.selected, s.estimatedCredits]), [["docs", false, 0], ["global", true, 30], ["pricing", true, 30]]);
       writeFileSync(join(r.dir, "src/app.js"), "export const price = 1;\n");
       assert.equal(json<ListDoc>(await cli(r, ["list", "--json"])).estimatedCredits, 0);
       rmSync(join(r.dir, ".git"), { recursive: true });
       const all = json<ListDoc>(await cli(r, ["list", "--json"]));
-      assert.equal(all.estimatedCredits, null);
+      assert.equal(all.estimatedCredits, 90);
       assert.ok(all.scenarios.every((s) => s.selected && s.touched === null));
       assert.ok(calls(r).every((c) => c.args?.[0] === "--version"));
     } finally {

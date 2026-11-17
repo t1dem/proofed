@@ -431,8 +431,7 @@ runs:
         name: proofed-${{ github.run_attempt }}
         path: |
           ${{ runner.temp }}/proofed/**/clip.mp4
-          ${{ runner.temp }}/proofed/**/*.jpg
-          ${{ runner.temp }}/proofed/**/*.gif
+          ${{ runner.temp }}/proofed/**/crash-*.jpg
           ${{ runner.temp }}/proofed/**/*.ndjson*
           ${{ runner.temp }}/proofed/**/metadata.json
           ${{ runner.temp }}/proofed/*.json

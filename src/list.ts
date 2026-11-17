@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 // cached. Reads files and git only; spends nothing.
 import { join } from "node:path";
 import type { Flags } from "./args.ts";
-import { CACHE_FILE, cacheKey, historyKey, estimate, readCache } from "./cache.ts";
+import { CACHE_FILE, cacheKey, estimate, readCache } from "./cache.ts";
 import { findBase, localChanges, mergeBaseOf } from "./changes.ts";
 import { outDirOf, scenariosDirOf, scenariosMissing, type Io } from "./check.ts";
 import { colorOn, palette, since, textWidth, truncate } from "./render.ts";
@@ -50,7 +50,7 @@ export function list(flags: Flags, io: Io): number {
         paths: s.paths,
         touched,
         selected,
-        estimatedCredits: selected && !cached ? (cache.last[historyKey(s, version)]?.credits ?? null) : 0,
+        estimatedCredits: selected && !cached ? estimate(cache, s, version) : 0,
         cached,
         ...(cached && { cachedAt: hit!.passedAt }),
       };
