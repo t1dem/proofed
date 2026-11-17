@@ -190,9 +190,12 @@ export async function startRecorder(endpoint: string, outDir: string, targetId?:
 
   const recorder = {
     async visibleText(): Promise<string | undefined> {
+      // The page is known from its first screencast frame, which can come after Kane's first step.
+      for (let i = 0; !lastSession && i < 20; i++) await new Promise((r) => setTimeout(r, 100));
       if (!lastSession) return;
       try {
-        const { result } = await cdp.send<{ result: { value?: unknown } }>("Runtime.evaluate", { expression: VISIBLE_TEXT, returnByValue: true }, lastSession);
+        const busy = new Promise<never>((_, reject) => setTimeout(reject, 5000).unref());
+        const { result } = await Promise.race([cdp.send<{ result: { value?: unknown } }>("Runtime.evaluate", { expression: VISIBLE_TEXT, returnByValue: true }, lastSession), busy]);
         return typeof result.value === "string" ? result.value : undefined;
       } catch { return undefined; }
     },

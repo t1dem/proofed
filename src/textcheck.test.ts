@@ -135,3 +135,9 @@ test("page text reads controls, labels, generated content and SVG; unreadable co
     await chrome.close();
   }
 });
+
+test("one capitalised word and the noun \"list\" are not taken as on-screen text", () => {
+  assert.deepEqual(expectedText("Check that Cart contains Ethiopia Guji.").literals, ["Ethiopia Guji"]);
+  assert.deepEqual(expectedText("Check that Inbox shows 3 unread.").literals, []);
+  assert.deepEqual(expectedText("Check that Todo list contains Buy milk.").literals, ["Buy milk"]);
+});

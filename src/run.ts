@@ -237,9 +237,11 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     const focusRect = await focus;
     // Drop the blank about:blank frames from before Kane's first navigation.
     const start = Date.parse(kane.steps[0]?.ts ?? "") / 1000 || 0;
+    // The page reads use the connection that stop() closes.
+    const assertedText = await asserted.text();
     const recorded = recorder.stop();
     const frames = target.kind === "web" ? recorded.frames.filter((f) => f.time >= start) : recorded.frames;
-    const contradiction = kane.end?.status === "passed" ? textContradiction(expected, await asserted.text()) : undefined;
+    const contradiction = kane.end?.status === "passed" ? textContradiction(expected, assertedText) : undefined;
     const outcome = recorder.unexpectedPage ? "error" : contradiction ? "unsure" : outcomeOf(kane.end, kane.steps);
     // Kane left without a verdict: all it said goes to the log, where the cause can be read later.
     if (!kane.end) log(`Kane exited with code ${kane.exitCode} and no verdict${kane.timedOut ? " (cut off by Proofed's time limit)" : ""}. Its stderr:\n${kane.stderr.trim() || "(empty)"}`);

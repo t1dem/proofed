@@ -233,7 +233,7 @@ A scenario can set `target: ios`, `android` or `desktop`; scenarios without it s
 
 - **iOS and Android** need a built app, Kane's managed simulator or emulator dependencies and one device you booted yourself, picked by `device` and `os_version`. `proofed doctor --target ios` (or `android`) lists what is missing and installs nothing. The clip keeps portrait orientation. The credit estimate is unknown until the first run.
 - **Desktop** is experimental and covers one Electron Chromium window: give `launch` and `cdp_endpoint`. Native menus, OS file dialogs, Safari, Tauri and WKWebView are not supported.
-- **Tested so far:** Android on a real Pixel 8 (Android 14) and iOS on a real iPhone 16 (iOS 18) in the TestMu cloud, with `execution: cloud`, and desktop with VS Code on macOS. A local simulator or emulator has not run yet.
+- **Tested so far:** Android on a real Pixel 8 (Android 14) and iOS on a real iPhone 16 (iOS 18) in the TestMu cloud, with `execution: cloud`, and desktop with VS Code on macOS.
 - Cloud mobile runs give Kane's screenshots, not a Proofed MP4. In the action, set `fix: false` for these targets: the fixer only restarts an HTTP server.
 
 Requirements and commands: [docs/cli.md](docs/cli.md#mobile-and-electron-targets).
@@ -262,7 +262,7 @@ What went wrong in real runs, and what Proofed does about it.
 
 For web runs, Proofed compares Kane's pass on the scenario's last check with the page text. It costs no Kane credits.
 
-- **What is compared.** Text in quotes anywhere in the last check, such as `Check that the total is "€81.90".` Without quotes, only the shape `Check that A contains B.` (or `shows`, `lists`, `includes`), and only for a side that reads like on-screen text: `Check that Vos outils favoris contains Générateur de token.` compares both names, `Check that the favorites section contains Token generator.` compares only `Token generator`.
+- **What is compared.** Text in quotes anywhere in the last check, such as `Check that the total is "€81.90".` Without quotes, only the shape `Check that A contains B.` (or `shows`, `lists`, `includes`), and only for a side of two or more words that reads like on-screen text: `Check that Vos outils favoris contains Générateur de token.` compares both names, `Check that the favorites section contains Token generator.` compares only `Token generator`.
 - **When.** Proofed reads the page as Kane starts the assert for that check and again as it finishes it. A text counts as missing only when both reads lack it.
 - **What is read.** All visible text in the document, not just the part in view: open shadow roots, same-origin frames, input values and placeholders, the chosen option of a select, image `alt`, `aria-label` and `title`, SVG text and CSS `content`. Case, spaces and quote or dash styles don't matter.
 - **What a contradiction does.** A missing text turns Kane's pass into "not checked", and the reason names the text. Nothing is ever turned into a failure.

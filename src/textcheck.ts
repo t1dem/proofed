@@ -7,7 +7,8 @@ export type Expected = { check: string; literals: string[]; quoted: boolean };
 
 const NEGATION = /\b(?:not|no|never|none|nothing|without|longer|cannot|neither|nor|hidden|gone|absent|missing|empty|removed|disappears?|disappeared)\b|n['’]t\b/i;
 const QUOTED = /"([^"]+)"|“([^”]+)”|(?<![\p{L}\p{N}])'([^']+)'(?![\p{L}\p{N}])|‘([^’]+)’(?![\p{L}\p{N}])/gu;
-const VERB = /\s(?:contains?|shows?|lists?|includes?)\s/gi;
+// "list" alone is left out: in "Todo list contains Buy milk" it is a noun.
+const VERB = /(?<=\s)(?:contains?|shows?|lists|includes?)(?=\s)/gi;
 // Words of a description rather than of a label: "the cart", "Buy milk in the list", "now Free".
 const DESCRIPTIVE = new Set(("the a an this that these those no one two three four five six seven eight nine ten each every all some any both several many its their his her it they them there " +
   "is are was were be been has have had and or but in on under beside next below above with without at after before again now still only then also which who when where while should must can will would visible displayed shown listed").split(" "));
@@ -16,7 +17,8 @@ const UI_NOUN = /^(?:section|list|page|panel|menu|heading|title|table|card|dialo
 
 function onScreen(phrase: string) {
   const words = phrase.split(/\s+/);
-  return /^\p{Lu}/u.test(phrase) && words.length <= 6 && !/[,;:()[\]{}]/.test(phrase) &&
+  // One capitalised word after "Check that" is as often a description ("Cart", "Sidebar") as a label.
+  return /^\p{Lu}/u.test(phrase) && words.length >= 2 && words.length <= 6 && !/[,;:()[\]{}]/.test(phrase) &&
     !words.some((w) => DESCRIPTIVE.has(w.toLowerCase())) && !UI_NOUN.test(words.at(-1)!);
 }
 
@@ -71,7 +73,8 @@ export function assertSnapshots(expected: Expected, read: () => Promise<string |
 
 // Executed in the owned page. Text the DOM can't show (a canvas, a video, a plugin, a cross-origin
 // frame, a closed shadow root) may hold the claimed words, so a page with any of them can't
-// contradict. Images and icons can: their alt and labels are read, the pixels are not.
+// contradict. Images and icons can: their alt and labels are read, the pixels are not. A frame
+// that is still loading shows the empty about:blank it started with, so it counts as unreadable.
 export const VISIBLE_TEXT = `(() => {
   let complete = true;
   const parts = [document.title];
@@ -100,7 +103,11 @@ export const VISIBLE_TEXT = `(() => {
       if (el.shadowRoot) read(el.shadowRoot);
       else if (view.customElements.get(tag)) complete = false;
       if (tag === 'iframe') {
-        try { if (el.contentDocument?.documentElement) read(el.contentDocument.documentElement); else complete = false; }
+        try {
+          const doc = el.contentDocument, src = el.getAttribute('src');
+          const loading = !doc || doc.readyState !== 'complete' || (src && !/^about:/i.test(src) && doc.URL === 'about:blank');
+          if (!loading && doc.documentElement) read(doc.documentElement); else complete = false;
+        }
         catch { complete = false; }
       }
     }
