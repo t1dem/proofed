@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { connectCdp } from "./cdp.ts";
 import type { Action, Frame, Rect } from "./recorder.ts";
@@ -268,6 +268,8 @@ export async function makeClip({ frames, actions, focus, endpoint, marks = [] }:
     await page("Page.setDocumentContent", { frameId: frameTree.frame.id, html: STAGE(size) });
 
     let shown: string | undefined;
+    let drawing: string | undefined;
+    let rendered: string | undefined;
     for (let n = 0; n < count; n++) {
       const t = n / FPS;
       const cam = shots[n]!;
@@ -275,20 +277,28 @@ export async function makeClip({ frames, actions, focus, endpoint, marks = [] }:
       const source = time.frameAt(t).file;
       const c = pointer(t);
       const k = ui * Math.sqrt(cam.z);
+      const overlay = {
+        tx: size.width / 2 - cam.x * cam.z,
+        ty: size.height / 2 - cam.y * cam.z,
+        z: cam.z,
+        cursor: c && { ...toScreen(c), opacity: c.opacity, k: k * c.press },
+        ripple: c?.ripple && { ...toScreen(c.ripple), p: c.ripple.p, k },
+      };
+      const next = JSON.stringify(overlay);
+      const file = join(dir, `${String(n).padStart(5, "0")}.jpg`);
+      if (rendered && shown === source && drawing === next) {
+        copyFileSync(rendered, file);
+        continue;
+      }
       await page("Runtime.evaluate", {
         awaitPromise: true,
-        expression: `paint(${JSON.stringify({
-          src: source === shown ? undefined : `data:image/jpeg;base64,${readFileSync(source).toString("base64")}`,
-          tx: size.width / 2 - cam.x * cam.z,
-          ty: size.height / 2 - cam.y * cam.z,
-          z: cam.z,
-          cursor: c && { ...toScreen(c), opacity: c.opacity, k: k * c.press },
-          ripple: c?.ripple && { ...toScreen(c.ripple), p: c.ripple.p, k },
-        })})`,
+        expression: `paint(${shown === source ? next : JSON.stringify({ ...overlay, src: `data:image/jpeg;base64,${readFileSync(source).toString("base64")}` })})`,
       });
-      shown = source;
       const { data } = await page<{ data: string }>("Page.captureScreenshot", { format: "jpeg", quality: 90 });
-      writeFileSync(join(dir, `${String(n).padStart(5, "0")}.jpg`), Buffer.from(data, "base64"));
+      writeFileSync(file, Buffer.from(data, "base64"));
+      shown = source;
+      drawing = next;
+      rendered = file;
     }
     await cdp.send("Target.closeTarget", { targetId });
   } finally {

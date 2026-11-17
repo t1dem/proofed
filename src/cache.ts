@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, lstatSync, readlinkSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Scenario } from "./scenarios.ts";
+import type { WebService } from "./target.ts";
 
 export type CachedPass = {
   key: string;
@@ -52,7 +53,7 @@ const readOrUndefined = (file: string) => {
 };
 
 // `base`: the commit the change is measured from (mergeBaseOf).
-export function cacheKey(s: Scenario, startUrl: string, changed: string[], read: (file: string) => Uint8Array | string | undefined = readOrUndefined, base = "", kaneVersion = "") {
+export function cacheKey(s: Scenario, startUrl: string, changed: string[], read: (file: string) => Uint8Array | string | undefined = readOrUndefined, base = "", kaneVersion = "", service?: WebService) {
   const hash = createHash("sha256");
   // Length-prefixed, so no two different lists of parts hash the same.
   const add = (part: Uint8Array | string) => hash.update(`${typeof part === "string" ? Buffer.byteLength(part) : part.length}:`).update(part);
@@ -72,6 +73,9 @@ export function cacheKey(s: Scenario, startUrl: string, changed: string[], read:
       };
       digest(target.app);
     }
+  }
+  if (service && (s.resolvedTarget?.kind ?? s.target ?? "web") === "web" && (service.build || service.install)) {
+    add(JSON.stringify([service.build?.value, service.install?.value]));
   }
   add(base);
   for (const file of relevantChanges(s, changed).toSorted()) {

@@ -385,6 +385,28 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     }
   });
 
+  test("changing the web build or explicitly reusing it bypasses a prior pass", async () => {
+    const r = repo({ pass: { mode: "pass" } });
+    const port = await freePort();
+    const args = ["--json", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`];
+    try {
+      writeFileSync(join(r.dir, "build.cjs"), "");
+      const first = json(await cli(r, ["check", ...args], { PROOFED_BUILD: "node build.cjs" }));
+      assert.equal(first.scenarios[0]?.outcome, "passed");
+      const plan = (build: string, flags: string[] = []) => cli(r, ["check", ...args, "--dry-run", ...flags], { PROOFED_BUILD: build }).then((r) => json(r));
+      assert.equal((await plan("node build.cjs")).scenarios[0]?.cached, true);
+      assert.equal((await plan("node build.cjs alternate")).scenarios[0]?.cached, false);
+      assert.equal((await plan("node build.cjs", ["--reuse"])).scenarios[0]?.cached, false);
+      const listed = json<{ scenarios: { cached: boolean }[] }>(
+        await cli(r, ["list", "--json", "--url", `http://127.0.0.1:${port}`], { PROOFED_SERVE: `node server.cjs ${port}`, PROOFED_BUILD: "node build.cjs alternate" }),
+      );
+      assert.equal(listed.scenarios[0]?.cached, false);
+      assert.equal(runs(r).length, 1);
+    } finally {
+      r.cleanup();
+    }
+  });
+
   test("invalid concurrency in the environment fails before Kane is called", async () => {
     const r = repo({ pass: { mode: "pass" } });
     try {

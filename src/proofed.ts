@@ -3,11 +3,8 @@
 // or a coding agent that wants to see a UI change work before calling it done.
 import { readFileSync } from "node:fs";
 import { parse, UsageError } from "./args.ts";
-import { check } from "./check.ts";
 import { killChildren, stopChildren } from "./children.ts";
-import { doctor } from "./doctor.ts";
 import { helpText } from "./help.ts";
-import { list } from "./list.ts";
 
 const argv = process.argv.slice(2);
 const io = { stdout: process.stdout, stderr: process.stderr, env: process.env, cwd: process.cwd() };
@@ -45,9 +42,9 @@ async function main(): Promise<number> {
     io.stdout.write(`${helpText(command)}\n`);
     return 0;
   }
-  if (command === "check") return check(flags, text, io);
-  if (command === "list") return list(flags, io);
-  return doctor(flags, io);
+  if (command === "check") return (await import("./check.ts")).check(flags, text, io);
+  if (command === "list") return (await import("./list.ts")).list(flags, io);
+  return (await import("./doctor.ts")).doctor(flags, io);
 }
 
 // Exit 1 is "a scenario failed", so a crash must not end that way: 3, with the error where the

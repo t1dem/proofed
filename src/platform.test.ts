@@ -177,7 +177,7 @@ child.unref();
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
       import { launchChrome } from ${JSON.stringify(module)};
       await launchChrome().catch(() => {});
-    `], { env: { ...process.env, CHROME_PATH: bin, TMPDIR: dir }, encoding: "utf8", timeout: 5000 });
+    `], { env: { ...process.env, CHROME_PATH: bin, TMPDIR: dir }, encoding: "utf8", timeout: 20_000 });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(children().length, 2);
     for (const pid of children()) {

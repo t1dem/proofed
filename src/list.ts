@@ -39,7 +39,7 @@ export function list(flags: Flags, io: Io): number {
     const scenarios = loaded.scenarios.filter((s) => !filter || (s.target ?? "web") === filter).map((s) => {
       s = { ...s, resolvedTarget: resolveScenarioTarget(s, flags, io.env, io.cwd) };
       const hit = cache.passes[s.id];
-      const cached = !!(hit && canReusePass(s, target.build?.value) && (s.resolvedTarget!.kind !== "web" || (url && isHttpUrl(url))) && changed && version !== "unknown" && hit.key === cacheKey(s, s.resolvedTarget!.kind === "web" ? new URL(s.url, url!).href : "", changed, undefined, baseId, version));
+      const cached = !!(hit && canReusePass(s, target.build?.value) && (s.resolvedTarget!.kind !== "web" || (url && isHttpUrl(url))) && changed && version !== "unknown" && hit.key === cacheKey(s, s.resolvedTarget!.kind === "web" ? new URL(s.url, url!).href : "", changed, undefined, baseId, version, target));
       const touched = changed ? affectedBy([s], changed).length > 0 : null;
       const selected = touched !== false && changed?.length !== 0;
       return {

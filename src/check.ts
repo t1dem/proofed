@@ -248,18 +248,18 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     let appState: "started" | "reused" | undefined;
 
     const concurrency = runConcurrency(io.env, flags.concurrency);
-    const kaneBin = findKane(io.env).path;
-    const kaneVersion = kaneBin ? readKaneVersion(kaneBin, io.env) : "unknown";
+    const kane = findKane(io.env);
+    const kaneVersion = kane.path ? readKaneVersion(kane.path, io.env) : "unknown";
     const cacheFile = join(out, CACHE_FILE);
     const cache = readCache(cacheFile);
     const keys = new Map<string, string>();
     const items = new Map<string, Item>();
     for (const s of selected) {
       if (s.file && (s.resolvedTarget!.kind !== "web" || url) && changed && !flags.noCache && kaneVersion !== "unknown") {
-        const key = cacheKey(s, s.resolvedTarget!.kind === "web" ? new URL(s.url, url!).href : "", changed, undefined, baseId, kaneVersion);
+        const key = cacheKey(s, s.resolvedTarget!.kind === "web" ? new URL(s.url, url!).href : "", changed, undefined, baseId, kaneVersion, target);
         keys.set(s.id, key);
         const hit = cache.passes[s.id];
-        if (canReusePass(s, target.build?.value) && hit?.key === key) items.set(s.id, { scenario: s, cached: hit });
+        if ((!flags.reuse || !target.build) && canReusePass(s, target.build?.value) && hit?.key === key) items.set(s.id, { scenario: s, cached: hit });
       }
       if (!items.has(s.id)) items.set(s.id, { scenario: s, estimate: estimate(cache, s, kaneVersion) });
     }
@@ -297,7 +297,6 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     }
 
     // The cheap checks first: nothing starts unless Kane and Chrome are both there.
-    const kane = findKane(io.env);
     if (!kane.path) {
       throw new SetupError("kane_missing", `Kane CLI not found (${kane.from}).`, io.env.KANE_CLI ? "Point KANE_CLI at the kane-cli binary, or unset it." : "npm install -g @testmuai/kane-cli, then kane-cli login");
     }
