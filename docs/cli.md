@@ -96,3 +96,111 @@ A first run is estimated at 30 Kane credits per scenario. Later estimates use th
 | 130 | Ctrl-C or a closed terminal. Kane, Chrome and the app are stopped first |
 
 `failedCheck: "scenario_doubted"` means a scenario's check failed, but Kane believes the scenario is out of date. `diagnosis` is Kane's opinion; `suggestion` and `next` say to update the scenario if the app change was intended, otherwise fix the app. Such a failure is run a second time, at the scenario's cost again, and the second run is the result: Kane gives the same verdict when it misreads a page that is fine, and a misreading rarely repeats. A check that fails both times is a failure (exit 1). `notChecked: "scenario_doubted"` means Kane doubted the scenario without a failed check (exit 2).
+
+## Mobile and Electron targets
+
+A scenario can select `target: web|ios|android|desktop` and `execution: local|cloud`.
+Existing scenarios default to local web checks. Each selected scenario reports its resolved
+`target` and field sources in JSON. `list` also prints the target in its table.
+
+```markdown
+---
+name: Counter increments
+target: ios
+execution: local
+app: build/Counter.app
+device: iPhone 17
+os_version: '26.4'
+---
+Tap Add once. Assert that the counter reads 1.
+```
+
+Use `--target`, `--execution`, `--app`, `--device`, `--os-version`, `--launch`,
+and `--cdp-endpoint` with `check`, `doctor`, or `list`. Their environment equivalents
+are `PROOFED_TARGET`, `PROOFED_EXECUTION`, `PROOFED_APP`, `PROOFED_DEVICE`,
+`PROOFED_OS_VERSION`, `PROOFED_LAUNCH`, and `PROOFED_CDP_ENDPOINT`.
+Config and frontmatter use underscores (`os_version`, `cdp_endpoint`); action inputs
+use hyphens. Each field resolves in this order: flag, environment, scenario,
+`.proofed/config.json`, action inputs read from the workflow, default.
+Relative app paths resolve from the app working directory.
+`--target` filters scenario files; it sets the target for an ad hoc objective.
+`--only` with ids from another target is an error.
+
+- Local iOS needs full Xcode, an installed simulator runtime, Kane's managed simulator
+  dependencies, and exactly one matching booted device. Supply a simulator `.app` or
+  `.zip`, or a Kane `APP…` ID. Proofed temporarily zips `.app` bundles for Kane.
+  A device `.ipa` cannot run in Simulator.
+- Local Android needs Kane's managed emulator dependencies, `adb` on PATH, and exactly
+  one matching online emulator. Supply an `.apk` or `APP…` ID. A local `.aab` is rejected.
+  Device names and OS versions must identify the same device in Kane and adb.
+- Cloud iOS uses `.ipa` or `APP…`; cloud Android uses `.apk`, `.aab`, or `APP…`.
+  Kane provisions real devices. Evidence is screenshot-only in Kane's session directory;
+  Proofed reports a recording note and does not promise a cloud MP4.
+- Desktop is experimental and limited to a single Electron Chromium page renderer.
+  Set `launch` to the executable and its remote debugging arguments, and set
+  `cdp_endpoint` to its browser CDP endpoint. Proofed waits for `/json/version` and
+  rejects multiple page renderers. An already running app requires `--reuse` with no
+  `launch`; Proofed never terminates that app. Owned launch processes run in their own
+  process group. Clip rendering uses a separate Proofed Chrome.
+
+```markdown
+---
+name: Desktop counter
+target: desktop
+launch: ./dist/Counter --remote-debugging-port=9223
+cdp_endpoint: http://127.0.0.1:9223
+---
+Click Add once. Assert that the counter reads 1.
+```
+
+`doctor` discovers tools and devices without installing, downloading, launching, or
+booting anything. Every target check includes a fix line in JSON. Missing build output
+is reported as `artifact_pending_build` when a build command is configured. `check`
+builds before validating the artifact. `--dry-run` resolves scenarios and reads cache
+metadata; it never starts a device or Kane scenario. Both commands can call Kane's
+free `--version` command. Local mobile checks refuse to run with missing managed deps,
+since Kane can otherwise download them automatically.
+
+After installing the SDK and managed dependencies explicitly, choose a device from the
+local inventory, boot it yourself, and run:
+
+```sh
+kane-cli doctor --target simulator --install
+xcrun simctl list devices available
+xcrun simctl boot '<simulator-udid>'
+xcrun simctl bootstatus '<simulator-udid>' -b
+proofed doctor --target ios --app build/Counter.app --device 'iPhone 17' --os-version 26.4
+proofed check --target ios --all --app build/Counter.app --device 'iPhone 17' --os-version 26.4
+
+kane-cli doctor --target emulator --install
+emulator -list-avds
+emulator -avd '<avd-name>'
+adb devices
+proofed doctor --target android --app app/build/outputs/apk/debug/app-debug.apk --device '<device-name>' --os-version '<version>'
+proofed check --target android --all --app app/build/outputs/apk/debug/app-debug.apk --device '<device-name>' --os-version '<version>'
+```
+
+Run the emulator command in a separate terminal. Supply names and versions from your
+actual inventory; the examples do not install a runtime or choose a device for you.
+
+Native recording uses `simctl recordVideo` or `adb shell screenrecord`. Android segments
+are limited to 175 seconds and concatenated after pulling them. ffmpeg produces MP4,
+final JPG and GIF without changing portrait orientation or adding a cursor or zoom.
+Segment boundaries may have a gap. A recording failure is reported separately and
+preserves Kane's verdict. Cloud recordings are not available through this adapter.
+Only Proofed's remote recording files are removed, after a successful pull.
+
+No target supports direct Safari automation. Tauri and WKWebView are unsupported.
+Electron coverage excludes native desktop menus, OS file dialogs and tray UI.
+Kane may upload app artifacts to the TestMu account even for a local run. Mobile
+cost remains unknown until the first run reports `credits_consumed`; JSON uses `null`
+for targets without history. History is separate by app digest, device, OS and Kane version.
+Doubted failures use the same retry rules as web checks; `--no-retry` permits one attempt.
+
+In `action.yml`, pass the same target fields, omit `url` for native/desktop, and set
+`fix: false`. The fixer only rebuilds and restarts an HTTP server. Prepare SDKs,
+runtimes and Kane managed dependencies in explicit steps before the action. iOS
+requires a macOS runner with full Xcode. Android requires an online emulator; Electron
+on Linux needs a display such as Xvfb for the entire check. The action's existing web
+workflow remains supported. Native action jobs have only fake local coverage here;
+SDK runner jobs still need a real CI smoke test.

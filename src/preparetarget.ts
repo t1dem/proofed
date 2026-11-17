@@ -9,8 +9,8 @@ import { startRecorder } from "./recorder.ts";
 import type { Clip } from "./run.ts";
 import type { Target } from "./target.ts";
 
-function owned(bin: string, args: string[], cwd?: string) {
-  const proc = spawn(bin, args, { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+function owned(bin: string, args: string[], cwd?: string, env = process.env) {
+  const proc = spawn(bin, args, { cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   let error = "";
   proc.stdout.on("data", (data) => { output += data; });
@@ -124,8 +124,15 @@ export async function prepareTarget(target: Target, options: { dir: string; url?
         // Refuse to launch over an endpoint belonging to another process.
         const occupied = await fetch(new URL("/json/version", target.cdp_endpoint), { signal: AbortSignal.timeout(1000) }).then(() => true, () => false);
         if (occupied) throw new Error("CDP endpoint already answers; omit launch and pass --reuse");
-        const app = owned("/bin/sh", ["-c", target.launch], target.dir);
-        cleanups.push(() => app.stop());
+        const env = { ...process.env };
+        // Electron inherits this from some Node hosts and exits as a Node CLI instead of an app.
+        delete env.ELECTRON_RUN_AS_NODE;
+        const app = owned("/bin/sh", ["-c", target.launch], target.dir, env);
+        cleanups.push(async () => {
+          await app.stop();
+          writeFileSync(join(options.dir, "launch.stdout.log"), app.output());
+          writeFileSync(join(options.dir, "launch.stderr.log"), app.error());
+        });
       }
       let page: Awaited<ReturnType<typeof renderer>> | undefined;
       for (let i = 0; i < 100; i++) {

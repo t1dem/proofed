@@ -11,7 +11,28 @@ branding:
 inputs:
   url:
     description: Where the app under test runs, e.g. http://localhost:4173
-    required: true
+    required: false
+  target:
+    description: web, ios, android or experimental desktop
+    default: ""
+  execution:
+    description: local or cloud
+    default: ""
+  app:
+    description: App artifact path or Kane APP ID
+    default: ""
+  device:
+    description: Exact device name
+    default: ""
+  os-version:
+    description: Device OS version
+    default: ""
+  launch:
+    description: Owned desktop launch command with remote debugging
+    default: ""
+  cdp-endpoint:
+    description: Desktop browser CDP endpoint
+    default: ""
   install:
     description: Command that installs dependencies
     default: ""
@@ -73,9 +94,25 @@ runs:
       with:
         node-version: 24
 
+    - name: Validate target inputs
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        FIX: ${{ inputs.fix }}
+        URL: ${{ inputs.url }}
+      run: |
+        if [ -n "$TARGET" ] && [ "$TARGET" != web ] && [ "$FIX" = true ]; then
+          echo 'fix is only supported for web: the fixer restarts an HTTP server. Set fix: false.' >&2
+          exit 1
+        fi
+        if { [ -z "$TARGET" ] || [ "$TARGET" = web ]; } && [ -z "$URL" ]; then
+          echo 'url is required for web checks.' >&2
+          exit 1
+        fi
+
     - name: Decide what to run
       id: mode
-      if: inputs.serve != ''
+      if: inputs.serve != '' || inputs.target != ''
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
@@ -152,7 +189,9 @@ runs:
           echo "$FFMPEG_DIR" >> "$GITHUB_PATH"
           "$FFMPEG_DIR/ffmpeg" -version | sed -n 1p
         else
-          command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null)
+          if ! command -v ffmpeg >/dev/null; then
+            if [ "$RUNNER_OS" = macOS ]; then brew install ffmpeg; else sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null; fi
+          fi
         fi
         kane-cli --version
 
@@ -184,12 +223,21 @@ runs:
         PROOFED_BUILD: ${{ inputs.build }}
         PROOFED_SERVE: ${{ inputs.serve }}
         PROOFED_URL: ${{ inputs.url }}
+        PROOFED_TARGET: ${{ inputs.target }}
+        PROOFED_EXECUTION: ${{ inputs.execution }}
+        PROOFED_APP: ${{ inputs.app }}
+        PROOFED_DEVICE: ${{ inputs.device }}
+        PROOFED_OS_VERSION: ${{ inputs.os-version }}
+        PROOFED_LAUNCH: ${{ inputs.launch }}
+        PROOFED_CDP_ENDPOINT: ${{ inputs.cdp-endpoint }}
       run: |
         echo build > "$RUNNER_TEMP/proofed-stage"
         bash -e -o pipefail -c "$PROOFED_BUILD" 2>&1 | tee "$RUNNER_TEMP/proofed-app.log"
         echo serve > "$RUNNER_TEMP/proofed-stage"
-        (bash -c "$PROOFED_SERVE" > "$RUNNER_TEMP/proofed-app.log" 2>&1 &)
-        npx --yes wait-on@8 -t 60000 "$PROOFED_URL"
+        if [ -n "$PROOFED_SERVE" ]; then
+          (bash -c "$PROOFED_SERVE" > "$RUNNER_TEMP/proofed-app.log" 2>&1 &)
+          npx --yes wait-on@8 -t 60000 "$PROOFED_URL"
+        fi
 
     # Without this the PR gets a red cross and no word on why: Kane never ran, so no report was written.
     - name: Say on the PR that the app didn't start
@@ -200,6 +248,13 @@ runs:
         PROOFED_BUILD: ${{ inputs.build }}
         PROOFED_SERVE: ${{ inputs.serve }}
         PROOFED_URL: ${{ inputs.url }}
+        PROOFED_TARGET: ${{ inputs.target }}
+        PROOFED_EXECUTION: ${{ inputs.execution }}
+        PROOFED_APP: ${{ inputs.app }}
+        PROOFED_DEVICE: ${{ inputs.device }}
+        PROOFED_OS_VERSION: ${{ inputs.os-version }}
+        PROOFED_LAUNCH: ${{ inputs.launch }}
+        PROOFED_CDP_ENDPOINT: ${{ inputs.cdp-endpoint }}
         PROOFED_DIR: ${{ inputs.working-directory }}
         PROOFED_NUMBER: ${{ steps.mode.outputs.number }}
         PROOFED_SHA: ${{ steps.mode.outputs.head_sha }}
@@ -225,6 +280,13 @@ runs:
       shell: bash
       env:
         PROOFED_URL: ${{ inputs.url }}
+        PROOFED_TARGET: ${{ inputs.target }}
+        PROOFED_EXECUTION: ${{ inputs.execution }}
+        PROOFED_APP: ${{ inputs.app }}
+        PROOFED_DEVICE: ${{ inputs.device }}
+        PROOFED_OS_VERSION: ${{ inputs.os-version }}
+        PROOFED_LAUNCH: ${{ inputs.launch }}
+        PROOFED_CDP_ENDPOINT: ${{ inputs.cdp-endpoint }}
         PROOFED_SCENARIOS: ${{ inputs.scenarios }}
         PROOFED_ONLY: ${{ inputs.only }}
         PROOFED_FIX: ${{ inputs.fix }}
@@ -254,6 +316,13 @@ runs:
         PROOFED_AUTO: "true"
         PROOFED_NUMBER: ${{ steps.mode.outputs.number }}
         PROOFED_URL: ${{ inputs.url }}
+        PROOFED_TARGET: ${{ inputs.target }}
+        PROOFED_EXECUTION: ${{ inputs.execution }}
+        PROOFED_APP: ${{ inputs.app }}
+        PROOFED_DEVICE: ${{ inputs.device }}
+        PROOFED_OS_VERSION: ${{ inputs.os-version }}
+        PROOFED_LAUNCH: ${{ inputs.launch }}
+        PROOFED_CDP_ENDPOINT: ${{ inputs.cdp-endpoint }}
         PROOFED_BUILD: ${{ inputs.build }}
         PROOFED_SERVE: ${{ inputs.serve }}
         PROOFED_DIR: ${{ inputs.working-directory }}
@@ -289,6 +358,13 @@ runs:
       shell: bash
       env:
         PROOFED_URL: ${{ inputs.url }}
+        PROOFED_TARGET: ${{ inputs.target }}
+        PROOFED_EXECUTION: ${{ inputs.execution }}
+        PROOFED_APP: ${{ inputs.app }}
+        PROOFED_DEVICE: ${{ inputs.device }}
+        PROOFED_OS_VERSION: ${{ inputs.os-version }}
+        PROOFED_LAUNCH: ${{ inputs.launch }}
+        PROOFED_CDP_ENDPOINT: ${{ inputs.cdp-endpoint }}
         PROOFED_BUILD: ${{ inputs.build }}
         PROOFED_SERVE: ${{ inputs.serve }}
         PROOFED_DIR: ${{ inputs.working-directory }}
@@ -317,6 +393,13 @@ runs:
       shell: bash
       env:
         PROOFED_URL: ${{ inputs.url }}
+        PROOFED_TARGET: ${{ inputs.target }}
+        PROOFED_EXECUTION: ${{ inputs.execution }}
+        PROOFED_APP: ${{ inputs.app }}
+        PROOFED_DEVICE: ${{ inputs.device }}
+        PROOFED_OS_VERSION: ${{ inputs.os-version }}
+        PROOFED_LAUNCH: ${{ inputs.launch }}
+        PROOFED_CDP_ENDPOINT: ${{ inputs.cdp-endpoint }}
         PROOFED_BUILD: ${{ inputs.build }}
         PROOFED_SERVE: ${{ inputs.serve }}
         PROOFED_DIR: ${{ inputs.working-directory }}
@@ -346,7 +429,10 @@ runs:
         name: proofed-${{ github.run_attempt }}
         path: |
           ${{ runner.temp }}/proofed/**/clip.mp4
-          ${{ runner.temp }}/proofed/**/crash-*.jpg
+          ${{ runner.temp }}/proofed/**/*.jpg
+          ${{ runner.temp }}/proofed/**/*.gif
+          ${{ runner.temp }}/proofed/**/*.ndjson*
+          ${{ runner.temp }}/proofed/**/metadata.json
           ${{ runner.temp }}/proofed/*.json
           ${{ runner.temp }}/proofed/*.md
         if-no-files-found: ignore
