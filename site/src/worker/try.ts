@@ -5,6 +5,7 @@
 // - one run at a time, a few per visitor and per day: each costs Kane credits and Claude's time;
 // - reading is limited to the demo store, which is a public repository anyway.
 import { CLIP_PATH, repoFixer, serveClip } from "./api";
+import { readJsonObject } from "./body";
 import { appRequest, gh, GitHubError, installationToken } from "./github";
 import type { Env } from "./index";
 import { getLive, liveFrame } from "./live";
@@ -129,7 +130,7 @@ async function start(request: Request, env: Env) {
   // A form on another site can't post JSON here without the browser saying where it came from.
   const origin = request.headers.get("origin");
   if (origin && origin !== new URL(request.url).origin) return json({ error: "Start it from the Proofed site." }, 403);
-  const { bug: id } = (await request.json().catch(() => ({}))) as { bug?: unknown };
+  const id = (await readJsonObject(request))?.bug;
   const bug = BUGS.find((b) => b.id === id);
   if (!bug) return json({ error: "Pick one of the listed pull requests." }, 400);
 

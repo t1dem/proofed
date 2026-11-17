@@ -23,3 +23,15 @@ export async function readUpTo(request: Request, max: number): Promise<Uint8Arra
   }
   return out;
 }
+
+// Small form bodies are objects. Reject malformed or oversized input before it reaches a handler.
+export async function readJsonObject(request: Request): Promise<Record<string, unknown> | undefined> {
+  const bytes = await readUpTo(request, 16_384);
+  if (!bytes) return undefined;
+  try {
+    const body: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    if (body && typeof body === "object" && !Array.isArray(body)) return body as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}

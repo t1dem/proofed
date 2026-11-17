@@ -1,4 +1,5 @@
 import { currentUser, userToken, type UserRow } from "./auth";
+import { readJsonObject } from "./body";
 import { decrypt, encrypt, sealForGitHub } from "./crypto";
 import { gh, GitHubError, installationToken } from "./github";
 import type { Env } from "./index";
@@ -244,26 +245,31 @@ export async function handleApi(request: Request, env: Env, path: string) {
   }
 
   if (path === "/api/keys" && request.method === "POST") {
-    const body = (await request.json()) as { ltUsername?: string; ltAccessKey?: string; claudeToken?: string; codexKey?: string };
+    const body = await readJsonObject(request);
+    if (!body) return json({ error: "Send the keys as a JSON object." }, 400);
+    const { ltUsername, ltAccessKey, claudeToken, codexKey } = body;
+    if ([ltUsername, ltAccessKey, claudeToken, codexKey].some((v) => v !== undefined && typeof v !== "string")) {
+      return json({ error: "Keys and usernames must be text." }, 400);
+    }
     const updates: string[] = [];
     const binds: unknown[] = [];
 
-    if (body.ltUsername !== undefined || body.ltAccessKey !== undefined) {
-      const username = body.ltUsername?.trim() ?? "";
-      const key = body.ltAccessKey?.trim() ?? "";
+    if (ltUsername !== undefined || ltAccessKey !== undefined) {
+      const username = typeof ltUsername === "string" ? ltUsername.trim() : "";
+      const key = typeof ltAccessKey === "string" ? ltAccessKey.trim() : "";
       if (!username || !key) return json({ error: "TestMu needs both a username and an access key." }, 400);
       if (!(await testmuKeyWorks(username, key))) return json({ error: "TestMu didn't accept that username and access key." }, 400);
       updates.push("lt_username = ?", "lt_key = ?");
       binds.push(username, await encrypt(env.SECRETS_KEY, key));
     }
-    if (body.claudeToken !== undefined) {
-      const claude = body.claudeToken.trim();
+    if (typeof claudeToken === "string") {
+      const claude = claudeToken.trim();
       if (!claude.startsWith("sk-ant-")) return json({ error: "That doesn't look like a token from `claude setup-token`." }, 400);
       updates.push("claude_token = ?");
       binds.push(await encrypt(env.SECRETS_KEY, claude));
     }
-    if (body.codexKey !== undefined) {
-      const key = body.codexKey.trim();
+    if (typeof codexKey === "string") {
+      const key = codexKey.trim();
       if (!key.startsWith("sk-") || key.length < 20) return json({ error: "That doesn't look like an OpenAI API key." }, 400);
       updates.push("codex_key = ?");
       binds.push(await encrypt(env.SECRETS_KEY, key));
@@ -325,7 +331,7 @@ export async function handleApi(request: Request, env: Env, path: string) {
       let command = action === "fix" ? "/proofed fix" : "/proofed";
       if (action === "check") {
         // "/proofed <what to check>": one line, as the workflow reads it. "fix …" would start a fix instead.
-        const { what } = (await request.json().catch(() => ({}))) as { what?: unknown };
+        const what = (await readJsonObject(request))?.what;
         const text = typeof what === "string" ? what.replace(/\s+/g, " ").trim().slice(0, 300) : "";
         if (!text) return json({ error: "Say what Kane should check." }, 400);
         if (/^fix\b/i.test(text)) return json({ error: "That would start a fix. Use the Fix button for that." }, 400);
@@ -356,13 +362,17 @@ export async function handleApi(request: Request, env: Env, path: string) {
     if (action === "secrets" && access !== "admin") return json({ error: "Adding keys needs admin access to this repository." }, 403);
     if (access === "read") return json({ error: "You need write access to this repository." }, 403);
     if (action === "fixer") {
-      const body = (await request.json()) as Partial<FixerView>;
-      const model = body.model?.trim().toLowerCase() ?? "";
-      const effort = body.effort ?? "";
-      if (body.provider !== undefined && !isProvider(body.provider)) return json({ error: "Pick Claude or Codex." }, 400);
-      const choice = resolveFixer({ model, effort, provider: body.provider });
+      const body = await readJsonObject(request);
+      if (!body) return json({ error: "Send the fixer settings as a JSON object." }, 400);
+      const { model, effort, provider, auto } = body;
+      if ((model !== undefined && typeof model !== "string") || (effort !== undefined && typeof effort !== "string")) {
+        return json({ error: "The model and effort must be text." }, 400);
+      }
+      if (provider !== undefined && (typeof provider !== "string" || !isProvider(provider))) return json({ error: "Pick Claude or Codex." }, 400);
+      if (auto !== undefined && typeof auto !== "boolean") return json({ error: "Automatic fixes must be either on or off." }, 400);
+      const choice = resolveFixer({ model: model?.trim().toLowerCase(), effort, provider });
       if ("error" in choice) return json({ error: choice.error }, 400);
-      const fixer = { ...choice, auto: body.auto === true };
+      const fixer = { ...choice, auto: auto === true };
       try {
         await setFixer(await installationToken(env, repo.installationId), repo.full_name, fixer);
       } catch (e) {
