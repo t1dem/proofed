@@ -1,7 +1,7 @@
 // When Proofed is installed on a repo, open a pull request that wires it up: the one workflow that
 // checks and fixes, and a first scenario. Build commands are guessed from package.json, and the PR
 // says what was guessed so a human can correct it before merging. The PR's own check then has
-// Claude write scenarios for the app's main flows and adds the ones Kane saw pass (src/generate.ts).
+// the selected agent write scenarios for the app's main flows and adds the ones Kane saw pass (src/generate.ts).
 import { FIRST_SCENARIO, SETUP_BRANCH } from "../../../src/setup";
 import { gh, GitHubError } from "./github";
 
@@ -116,7 +116,7 @@ export const workflow = (c: Commands, bot: string) => `name: Proofed
 # One workflow for everything Proofed does on a PR:
 # - every push to a PR: Kane checks the affected scenarios in Chrome;
 # - "/proofed" in a comment: check again; "/proofed <what to check>": check just that;
-# - "/proofed fix [model] [effort]", or ticking "Fix with Claude" in the report: Claude fixes it.
+# - "/proofed fix [model] [effort]", or ticking the fix checkbox in the report: the selected provider fixes it.
 on:
   pull_request:
   issue_comment:
@@ -127,7 +127,7 @@ permissions:
   pull-requests: write
   issues: write
   statuses: write
-  # Traded for a push token of the Proofed app, so the workflows on Claude's fix commit run without an approval.
+  # Traded for a push token of the Proofed app, so the workflows on the fix commit run without an approval.
   id-token: write
 
 jobs:
@@ -145,7 +145,7 @@ jobs:
           github.event.action == 'edited' &&
           github.event.comment.user.type == 'Bot' &&
           contains(github.event.comment.body, '<!-- proofed -->') &&
-          contains(github.event.comment.body, '- [x] **Fix with Claude**')
+          (contains(github.event.comment.body, '- [x] **Fix with Claude**') || contains(github.event.comment.body, '- [x] **Fix with Codex**'))
         ))
       )
     runs-on: ubuntu-latest
@@ -153,7 +153,7 @@ jobs:
     concurrency:
       group: proofed-\${{ github.event.pull_request.number || github.event.issue.number }}
       # A new push makes the running check stale; a comment waits for the run in progress. So does the run
-      # on Claude's fix, pushed by the Proofed app: the fix run is still reporting on that commit.
+      # on the fix, pushed by the Proofed app: the fix run is still reporting on that commit.
       cancel-in-progress: \${{ github.event_name == 'pull_request' && github.actor != '${bot}' }}
     steps:
 ${c.setup}      - uses: t1dem/proofed@main
@@ -165,19 +165,20 @@ ${c.dir === "." ? "" : `          working-directory: ${c.dir}\n`}          insta
 ${c.cache ? `          cache: ${c.cache}\n` : ""}          lt-username: \${{ secrets.LT_USERNAME }}
           lt-access-key: \${{ secrets.LT_ACCESS_KEY }}
           claude-code-oauth-token: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Settings from the Proofed dashboard, such as the model Claude fixes with.
+          codex-api-key: \${{ secrets.CODEX_API_KEY }}
+          # Settings from the Proofed dashboard, such as the fixer provider and model.
           vars: \${{ toJSON(vars) }}
 `;
-const prBody = (repo: string, c: Commands) => `Proofed runs the user flows a pull request touches in real Chrome with Kane CLI, records each run, and posts it on the PR. When a flow breaks, ticking **Fix with Claude** in that comment lets Claude Code fix it; the fix is pushed only after Kane has watched it pass.
+const prBody = (repo: string, c: Commands) => `Proofed runs the user flows a pull request touches in real Chrome with Kane CLI, records each run, and posts it on the PR. When a flow breaks, ticking **Fix with Claude** or **Fix with Codex** in that comment lets the selected provider fix it; the fix is pushed only after Kane has watched it pass.
 
 This PR adds:
 
-- \`.github/workflows/proofed.yml\`: one workflow. It checks every pull request in Chrome, checks again on a \`/proofed\` comment, and has Claude fix a failure when you tick **Fix with Claude** or comment \`/proofed fix\`. \`/proofed fix opus high\` picks another model for that one fix; the repo's model is set in the dashboard.
+- \`.github/workflows/proofed.yml\`: one workflow. It checks every pull request in Chrome, checks again on a \`/proofed\` comment, and has the selected provider fix a failure when you tick the fix checkbox or comment \`/proofed fix\`. \`/proofed fix opus high\` picks another model for that one fix; the repo's model is set in the dashboard.
 - \`.proofed/scenarios/home.md\`: a first scenario. Add one Markdown file per flow; \`paths\` limits a scenario to PRs that touch those files.
 
-**Proofed will add scenarios to this PR itself.** On this PR's check, Claude reads the app and writes a few for its main flows, Kane runs each one in Chrome, and only the ones Kane saw pass are committed here; the comment below lists them. It needs \`CLAUDE_CODE_OAUTH_TOKEN\`, and happens only while \`home.md\` is the only scenario. They are plain Markdown: edit or delete them before you merge, like any other file.
+**Proofed will add scenarios to this PR itself.** On this PR's check, the selected provider reads the app and writes a few for its main flows, Kane runs each one in Chrome, and only the ones Kane saw pass are committed here; the comment below lists them. It needs \`CLAUDE_CODE_OAUTH_TOKEN\` or \`CODEX_API_KEY\`, and happens only while \`home.md\` is the only scenario. They are plain Markdown: edit or delete them before you merge, like any other file.
 
-**Keys.** The checks need three repository secrets: \`LT_USERNAME\`, \`LT_ACCESS_KEY\` (TestMu) and \`CLAUDE_CODE_OAUTH_TOKEN\` (from \`claude setup-token\`). If you saved them at https://proofed.neptunescodm.workers.dev/app, Proofed has already added them; otherwise add them under [Settings → Secrets → Actions](https://github.com/${repo}/settings/secrets/actions).
+**Keys.** The checks need repository secrets: \`LT_USERNAME\`, \`LT_ACCESS_KEY\` (TestMu) and either \`CLAUDE_CODE_OAUTH_TOKEN\` (from \`claude setup-token\`) or \`CODEX_API_KEY\` (an OpenAI API key). If you saved them at https://proofed.neptunescodm.workers.dev/app, Proofed has already added them; otherwise add them under [Settings → Secrets → Actions](https://github.com/${repo}/settings/secrets/actions).
 
 **Check what was guessed about your build:**
 

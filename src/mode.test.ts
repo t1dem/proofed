@@ -15,7 +15,7 @@ const comment = (action = "created", body = "/proofed") => ({
   comment: action === "edited" ? report : { id: 13, body, user: { type: "User" }, author_association: "MEMBER" },
 });
 
-function run(event: object, permission: string | number, replyFails = false) {
+function run(event: object, permission: string | number, replyFails = false, env: Record<string, string> = {}) {
   const dir = mkdtempSync(join(tmpdir(), "proofed-mode-"));
   try {
     const path = join(dir, "event.json");
@@ -44,7 +44,7 @@ function run(event: object, permission: string | number, replyFails = false) {
       encoding: "utf8",
       env: {
         ...process.env, GITHUB_EVENT_PATH: path, GITHUB_TOKEN: "job-token", GITHUB_REPOSITORY: "owner/repo",
-        GITHUB_OUTPUT: "", PROOFED_VARS: "{}", PROOFED_FIX: "true", PROOFED_CLAUDE: "false",
+        GITHUB_OUTPUT: "", PROOFED_VARS: "{}", PROOFED_FIX: "true", PROOFED_CLAUDE: "false", PROOFED_CODEX: "false", ...env,
       },
     });
     assert.equal(result.status, 0, result.stderr);
@@ -84,4 +84,26 @@ test("pull request events and unrelated comments need no permission lookup", () 
   const unrelated = run(comment("created", "Looks good"), "write");
   assert.match(unrelated, /^mode=none$/m);
   assert.doesNotMatch(unrelated, /\/permission/);
+});
+
+
+test("mode resolves Codex aliases, provider variables and effort before installing", () => {
+  const configured = { PROOFED_VARS: JSON.stringify({PROOFED_PROVIDER:"codex",PROOFED_MODEL:"gpt-6.1-terra",PROOFED_EFFORT:"ultra",PROOFED_AUTOFIX:"true"}), PROOFED_CODEX:"true" };
+  const check = run({action:"opened",pull_request:pr,sender:{type:"User",login:"writer"}},"write",false,configured);
+  assert.match(check, /^provider=codex$/m);
+  assert.match(check, /^model=gpt-6.1-terra$/m);
+  assert.match(check, /^effort=ultra$/m);
+  assert.match(check, /^autofix=true$/m);
+  const missing = run({action:"opened",pull_request:pr},"write",false,{...configured,PROOFED_CODEX:"false",PROOFED_CLAUDE:"true"});
+  assert.match(missing, /^autofix=false$/m);
+  const command = run(comment("created","/proofed fix sol high"),"write",false,{});
+  assert.match(command, /^mode=fix$/m);
+  assert.match(command, /^provider=codex$/m);
+  assert.match(command, /^model=gpt-6.1-sol$/m);
+  assert.match(command, /^effort=high$/m);
+  const provider = run(comment("created","/proofed fix codex"),"write",false,{});
+  assert.match(provider, /^model=gpt-6.1-sol$/m);
+  const invalid = run(comment("created","/proofed fix ultra"),"write",false,{});
+  assert.match(invalid, /^mode=none$/m);
+  assert.match(invalid, /doesn't support/);
 });

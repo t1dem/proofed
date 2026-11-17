@@ -32,3 +32,11 @@ test("only a PR description gets told it may ask for nothing", () => {
   assert.match(askedScenario("description", "Will be closed").objective, /stop right away without clicking anything[^]*Never sign in/);
   assert.doesNotMatch(askedScenario("comment", "the cart total").objective, /Never sign in/);
 });
+
+test("fix accepts a Codex provider, aliases and full IDs with per-model efforts", () => {
+  assert.deepEqual(parseFix("fix sol high"), {model:"gpt-6.1-sol",effort:"high"});
+  assert.deepEqual(parseFix("fix codex"), {model:"gpt-6.1-sol",effort:undefined});
+  assert.deepEqual(parseFix("fix gpt-6-astra ultra"), {model:"gpt-6-astra",effort:"ultra"});
+  assert.ok("error" in parseFix("fix luna ultra")!);
+  assert.ok("error" in parseFix("fix opus ultra")!);
+});

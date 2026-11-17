@@ -1,5 +1,5 @@
 name: Proofed
-description: Runs the scenarios a PR touches in real Chrome with Kane CLI, records each run, reports on the PR, and has Claude fix what broke when asked.
+description: Runs the scenarios a PR touches in real Chrome with Kane CLI, records each run, reports on the PR, and has the selected agent fix what broke when asked.
 branding:
   icon: eye
   color: orange
@@ -34,7 +34,10 @@ inputs:
     description: TestMu access key (secrets.LT_ACCESS_KEY)
     required: true
   claude-code-oauth-token:
-    description: From `claude setup-token` (secrets.CLAUDE_CODE_OAUTH_TOKEN), for the fixer and for the scenarios Claude writes on the setup PR
+    description: From `claude setup-token` (secrets.CLAUDE_CODE_OAUTH_TOKEN), for the fixer and for writing scenarios on the setup PR
+    default: ""
+  codex-api-key:
+    description: OpenAI API key for Codex (secrets.CODEX_API_KEY)
     default: ""
   vars:
     description: The repo's Actions variables as JSON (pass toJSON(vars) in an expression). Carries settings from the Proofed dashboard, such as PROOFED_MODEL.
@@ -46,7 +49,7 @@ inputs:
     description: Comma-separated scenario ids to run instead of picking them from the diff
     default: ""
   fix:
-    description: Offer "Fix with Claude" on failures
+    description: Offer the selected fixer on failures
     default: "true"
   github-token:
     description: Token for the PR comment, commit status, the clips branch and the fixer's push
@@ -79,8 +82,9 @@ runs:
         PROOFED_FIX: ${{ inputs.fix }}
         PROOFED_VARS: ${{ inputs.vars }}
         PROOFED_SCENARIOS: ${{ inputs.scenarios }}
-        # Whether there is a Claude token, not the token: this step needs no more.
+        # Whether there is a provider credential, not the token: this step needs no more.
         PROOFED_CLAUDE: ${{ inputs.claude-code-oauth-token != '' }}
+        PROOFED_CODEX: ${{ inputs.codex-api-key != '' }}
       run: node "$GITHUB_ACTION_PATH/src/mode.ts"
 
     # The fixer pushes to the PR's branch, so it needs the branch; the check needs the exact commit.
@@ -126,7 +130,9 @@ runs:
         FFMPEG_DIR: ${{ steps.ffmpeg.outputs.dir }}
       run: |
         npm install -g "@testmuai/kane-cli@${{ inputs.kane-version }}" >/dev/null
-        if [ "${{ steps.mode.outputs.mode }}" = fix ] || [ "${{ steps.mode.outputs.generate }}" = true ]; then npm install -g @anthropic-ai/claude-code >/dev/null; fi
+        if [ "${{ steps.mode.outputs.mode }}" = fix ] || [ "${{ steps.mode.outputs.generate }}" = true ]; then
+          if [ "${{ steps.mode.outputs.provider }}" = codex ]; then npm install -g @openai/codex@0.169.0 >/dev/null; else npm install -g @anthropic-ai/claude-code >/dev/null; fi
+        fi
         if [ -n "$FFMPEG_ARCH" ] && [ ! -x "$FFMPEG_DIR/ffmpeg" ]; then
           case "$FFMPEG_ARCH" in
             x64) sum=bfe8a8fc511530457b528c48d77b5737527b504a3797a9bc4866aeca69c2dffa ;;
@@ -219,6 +225,9 @@ runs:
         PROOFED_SCENARIOS: ${{ inputs.scenarios }}
         PROOFED_ONLY: ${{ inputs.only }}
         PROOFED_FIX: ${{ inputs.fix }}
+        PROOFED_PROVIDER: ${{ steps.mode.outputs.provider }}
+        PROOFED_MODEL: ${{ steps.mode.outputs.model }}
+        PROOFED_EFFORT: ${{ steps.mode.outputs.effort }}
         PROOFED_OUT: ${{ runner.temp }}/proofed
         LT_USERNAME: ${{ inputs.lt-username }}
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
@@ -235,7 +244,7 @@ runs:
     # "Fix automatically" in the dashboard: a check that saw a scenario fail goes on to fix it in this job,
     # as a ticked "Fix with Claude" would (src/mode.ts decides when). The check's app server is stopped
     # first, so Kane re-checks the fixer's own build rather than the old one still on the port.
-    - name: Fix automatically with Claude
+    - name: Fix automatically
       if: ${{ !cancelled() && steps.mode.outputs.autofix == 'true' && steps.run.outputs.fixable == 'true' }}
       shell: bash
       env:
@@ -249,12 +258,14 @@ runs:
         PROOFED_BASE_SHA: ${{ steps.mode.outputs.base_sha }}
         PROOFED_HEAD_REF: ${{ steps.mode.outputs.head_ref }}
         PROOFED_BASE_REF: ${{ steps.mode.outputs.base_ref }}
-        PROOFED_CLAUDE_MODEL: ${{ steps.mode.outputs.model }}
-        PROOFED_CLAUDE_EFFORT: ${{ steps.mode.outputs.effort }}
+        PROOFED_PROVIDER: ${{ steps.mode.outputs.provider }}
+        PROOFED_MODEL: ${{ steps.mode.outputs.model }}
+        PROOFED_EFFORT: ${{ steps.mode.outputs.effort }}
         PROOFED_OUT: ${{ runner.temp }}/proofed
         LT_USERNAME: ${{ inputs.lt-username }}
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
+        CODEX_API_KEY: ${{ inputs.codex-api-key }}
         KANE_CLI_CDP_TIMEOUT_MS: "60000"
         KANE_CLI_CDP_RETRIES: "2"
         KANE_CLI_USER_AGENT: github-action
@@ -264,12 +275,12 @@ runs:
         port=$(node -e 'const u = new URL(process.argv[1]); console.log(u.port || (u.protocol === "https:" ? 443 : 80))' "$PROOFED_URL")
         (fuser -k "$port/tcp" || lsof -ti "tcp:$port" | xargs -r kill) >/dev/null 2>&1 || true
         for i in $(seq 1 20); do curl -s -o /dev/null "$PROOFED_URL" || break; sleep 0.5; done
-        npm install -g @anthropic-ai/claude-code >/dev/null
+        if [ "$PROOFED_PROVIDER" = codex ]; then npm install -g @openai/codex@0.169.0 >/dev/null; else npm install -g @anthropic-ai/claude-code >/dev/null; fi
         node "$GITHUB_ACTION_PATH/src/fix.ts"
 
-    # The setup PR's check, while it holds only the stock scenario (src/mode.ts): Claude writes the first
+    # The setup PR's check, while it holds only the stock scenario (src/mode.ts): the selected agent writes the first
     # scenarios, Kane runs them with the stock one, and the ones that pass are pushed to the setup branch.
-    - name: Write scenarios with Claude, run them with Kane
+    - name: Write scenarios, run them with Kane
       id: generate
       if: steps.mode.outputs.mode == 'check' && steps.mode.outputs.generate == 'true'
       shell: bash
@@ -280,13 +291,15 @@ runs:
         PROOFED_DIR: ${{ inputs.working-directory }}
         PROOFED_SCENARIOS: ${{ inputs.scenarios }}
         PROOFED_HEAD_REF: ${{ steps.mode.outputs.head_ref }}
-        PROOFED_CLAUDE_MODEL: ${{ steps.mode.outputs.model }}
-        PROOFED_CLAUDE_EFFORT: ${{ steps.mode.outputs.effort }}
+        PROOFED_PROVIDER: ${{ steps.mode.outputs.provider }}
+        PROOFED_MODEL: ${{ steps.mode.outputs.model }}
+        PROOFED_EFFORT: ${{ steps.mode.outputs.effort }}
         PROOFED_FIX: ${{ inputs.fix }}
         PROOFED_OUT: ${{ runner.temp }}/proofed
         LT_USERNAME: ${{ inputs.lt-username }}
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
+        CODEX_API_KEY: ${{ inputs.codex-api-key }}
         KANE_CLI_CDP_TIMEOUT_MS: "60000"
         KANE_CLI_CDP_RETRIES: "2"
         KANE_CLI_USER_AGENT: github-action
@@ -296,7 +309,7 @@ runs:
         echo "report=$PROOFED_OUT/report.md" >> "$GITHUB_OUTPUT"
         node "$GITHUB_ACTION_PATH/src/generate.ts"
 
-    - name: Fix with Claude, verify with Kane
+    - name: Fix, verify with Kane
       if: steps.mode.outputs.mode == 'fix'
       shell: bash
       env:
@@ -308,12 +321,14 @@ runs:
         PROOFED_BASE_SHA: ${{ steps.mode.outputs.base_sha }}
         PROOFED_HEAD_REF: ${{ steps.mode.outputs.head_ref }}
         PROOFED_BASE_REF: ${{ steps.mode.outputs.base_ref }}
-        PROOFED_CLAUDE_MODEL: ${{ steps.mode.outputs.model }}
-        PROOFED_CLAUDE_EFFORT: ${{ steps.mode.outputs.effort }}
+        PROOFED_PROVIDER: ${{ steps.mode.outputs.provider }}
+        PROOFED_MODEL: ${{ steps.mode.outputs.model }}
+        PROOFED_EFFORT: ${{ steps.mode.outputs.effort }}
         PROOFED_OUT: ${{ runner.temp }}/proofed
         LT_USERNAME: ${{ inputs.lt-username }}
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
+        CODEX_API_KEY: ${{ inputs.codex-api-key }}
         KANE_CLI_CDP_TIMEOUT_MS: "60000"
         KANE_CLI_CDP_RETRIES: "2"
         KANE_CLI_USER_AGENT: github-action

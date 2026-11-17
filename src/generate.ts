@@ -1,12 +1,12 @@
-// The setup PR's check, when mode.ts finds only the stock scenario there: Claude Code reads the app and
+// The setup PR's check, when mode.ts finds only the stock scenario there: The agent reads the app and
 // writes scenarios for its main flows, Kane runs each of them in Chrome next to the stock one, and the
 // ones Kane saw pass are committed to the setup branch. The rest are deleted, so the PR carries no guess.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { basename, relative, resolve } from "node:path";
-import { askClaude } from "./claude.ts";
+import { askAgent, configuredFixer } from "./agent.ts";
 import { findReport, setStatus, type PullRequest } from "./github.ts";
-import { DEFAULT_FIXER, type Fixer } from "./models.ts";
+import { providerLabel, providerOf } from "./models.ts";
 import { ctx, env, isBroken, publish, readEvent, runAll } from "./pipeline.ts";
 import { pushHead } from "./push.ts";
 import { readReportData, type Written } from "./report.ts";
@@ -14,7 +14,7 @@ import { creditsOf, unchecked, type ScenarioResult } from "./run.ts";
 import { loadScenarios, parseScenario, type Scenario } from "./scenarios.ts";
 
 const MAX_SCENARIOS = 5;
-// Reading an app and writing a few files takes Claude a few minutes; one that runs this long is stuck,
+// Reading an app and writing a few files takes the agent a few minutes; one that runs this long is stuck,
 // and the check still has Kane's runs ahead of it.
 const WRITE_TIMEOUT_MS = 10 * 60_000;
 
@@ -27,10 +27,9 @@ const lines = (text: string) => text.split("\n").filter(Boolean);
 // Claude Code's permission rules take paths relative to where it runs: the repo root.
 const dir = relative(process.cwd(), resolve(env("PROOFED_SCENARIOS", ".proofed/scenarios")));
 const appDir = env("PROOFED_DIR", ".");
-const writer: Fixer = {
-  model: env("PROOFED_CLAUDE_MODEL", DEFAULT_FIXER.model),
-  effort: env("PROOFED_CLAUDE_EFFORT", DEFAULT_FIXER.effort),
-};
+const writer = configuredFixer();
+const provider = providerLabel(providerOf(writer.model));
+const agentName = provider === "Codex" ? "Codex" : "Claude Code";
 const headSha = git("rev-parse", "HEAD");
 const stock = loadScenarios(dir);
 
@@ -74,12 +73,12 @@ ${example}
 - \`url\`: the path the scenario starts at.
 - Then 4 to 8 short lines, one action or check per line. Kane does each step once, as written.
 
-Write only new files in ${dir}/. Don't change home.md.
+Write only new files in ${dir}/. Don't change home.md. Do not run builds or other commands except reading the app code. Do not access the network or external services. Do not commit.
 
 End your answer with one line per scenario you wrote, most valuable first, in English:
 SCENARIO: <file name> - <what it checks, in one short sentence a person reads in the report>`;
 
-// Undoes whatever Claude changed besides new files in the scenarios folder: home.md, or anything else
+// Undoes whatever the fixer changed besides new files in the scenarios folder: home.md, or anything else
 // a tool let through. Files that were already changed or untracked (the build's) stay as they are.
 const changedBefore = new Set(lines(git("diff", "--name-only")));
 const untrackedBefore = new Set(lines(git("ls-files", "--others", "--exclude-standard")));
@@ -101,7 +100,7 @@ const why = (r: ScenarioResult) =>
 
 async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Written; sha: string }> {
   console.log(`Asking ${writer.model} (${writer.effort}) to write scenarios in ${dir}/`);
-  const answer = askClaude(prompt(), {
+  const answer = askAgent(prompt(), {
     ...writer,
     permissionMode: "default",
     tools: ["Read", "Glob", "Grep", "Write", "Edit"],
@@ -111,7 +110,7 @@ async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Wr
   });
   const files = keepOnlyNewScenarios();
   if (!answer.ok) {
-    console.log(`Claude Code couldn't write scenarios: ${answer.message}`);
+    console.log(`${agentName} couldn't write scenarios: ${answer.message}`);
     for (const file of files) rmSync(file, { force: true });
     return { results: await runAll(stock, outDir), written: { status: "failed" }, sha: headSha };
   }
@@ -127,12 +126,12 @@ async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Wr
     try {
       const scenario = parseScenario(file, readFileSync(file, "utf8"));
       if (candidates.length < MAX_SCENARIOS) candidates.push(scenario);
-      else dropped.push({ name: scenario.name, why: `Claude wrote more than ${MAX_SCENARIOS}; this one ranked lower.` });
+      else dropped.push({ name: scenario.name, why: `${provider} wrote more than ${MAX_SCENARIOS}; this one ranked lower.` });
     } catch (e) {
       dropped.push({ name: basename(file), why: `Not a scenario file: ${e instanceof Error ? e.message : e}` });
     }
   }
-  console.log(`Claude wrote ${files.length} file(s); running ${candidates.map((s) => s.id).join(", ") || "none of them"} with the stock scenarios.`);
+  console.log(`${provider} wrote ${files.length} file(s); running ${candidates.map((s) => s.id).join(", ") || "none of them"} with the stock scenarios.`);
 
   const results = await runAll([...stock, ...candidates], outDir);
   const fresh = results.slice(stock.length);
@@ -146,8 +145,8 @@ async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Wr
   if (kept.length === 0) return { results: stockResults, written: { status: "written", kept: [], dropped, credits: droppedCredits }, sha: headSha };
 
   git("add", "--", ...kept.map((r) => r.scenario.file));
-  git("-c", "user.name=Claude", "-c", "user.email=noreply@anthropic.com", "commit", "-m",
-    `Add scenarios: ${kept.map((r) => r.scenario.name).join(", ")}\n\nWritten by Claude Code for the Proofed setup; Kane ran each one in Chrome and saw it pass.\n\nWritten-by: ${writer.model} (${writer.effort} effort)`);
+  git("-c", `user.name=${provider}`, "-c", `user.email=${provider === "Codex" ? "codex@openai.com" : "noreply@anthropic.com"}`, "commit", "-m",
+    `Add scenarios: ${kept.map((r) => r.scenario.name).join(", ")}\n\nWritten by ${agentName} for the Proofed setup; Kane ran each one in Chrome and saw it pass.\n\nWritten-by: ${writer.model} (${writer.effort} effort)`);
   try {
     // The app's push starts a check of the new commit. It waits for this job (the workflow's
     // concurrency doesn't let that push cancel a run) and then skips Kane, since the report
@@ -167,9 +166,10 @@ async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Wr
   };
 }
 
-if (repo && pr) await setStatus(repo, headSha, "pending", "Claude is writing scenarios; Kane will run them in Chrome", runUrl);
+if (repo && pr) await setStatus(repo, headSha, "pending", `${provider} is writing scenarios; Kane will run them in Chrome`, runUrl);
 try {
   const { results, written, sha } = await writeAndProve();
+  written.provider = providerOf(writer.model);
   const previous = repo && pr ? readReportData((await findReport(repo, pr.number))?.body ?? "") : undefined;
   const broken = await publish({ repo, pr: pr?.number, sha, results, skipped: [], runUrl, outDir, previous, written });
   // The report is about the new commit; the one it was written on would otherwise stay pending.

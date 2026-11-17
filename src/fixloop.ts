@@ -1,10 +1,10 @@
-// The rounds of "Claude fixes, Kane re-checks" inside one fix (fix.ts), before anything is pushed.
+// The rounds of "the fixer fixes, Kane re-checks" inside one fix (fix.ts), before anything is pushed.
 // After each attempt Kane re-runs the scenarios being fixed and every other scenario whose paths the
 // attempt's changes touch. One of those others that fails, and wasn't already failing in the report
 // the fix started from, was broken by the fix: the attempt doesn't count, and the next one is told
 // which scenario it broke. A neighbour Kane only couldn't confirm holds nothing back.
 import { live } from "./live.ts";
-import type { Fixer } from "./models.ts";
+import { providerLabel, providerOf, type Fixer } from "./models.ts";
 import type { FailureData, FixAttempt } from "./report.ts";
 import { nothingAsked } from "./requests.ts";
 import type { ScenarioResult } from "./run.ts";
@@ -56,7 +56,7 @@ export type FixLoopEnd = {
   // The last check: `fixing` for the scenarios the report had broken, `results` for all it ran.
   fixing: ScenarioResult[];
   results: ScenarioResult[];
-  // Scenarios the last attempt broke, and the last note for Claude (or why Claude couldn't run).
+  // Scenarios the last attempt broke, and the last note for Claude (or why the fixer couldn't run).
   broke: ScenarioResult[];
   feedback: string;
 };
@@ -82,7 +82,7 @@ export async function fixLoop(o: FixLoopInput): Promise<FixLoopEnd> {
       return end("no-claude", attempt);
     }
     summary = answer.summary;
-    console.log(`Claude: ${summary}`);
+    console.log(`${providerLabel(providerOf(o.fixer.model))}: ${summary}`);
 
     // The scenarios and the workflows are not the fixer's to change (guard.ts): what it did there is undone.
     const undone = o.putBack();

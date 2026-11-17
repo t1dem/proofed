@@ -1,4 +1,4 @@
-import { isEffort, parseModel, type Effort } from "./models.ts";
+import { effortsFor, isEffort, parseModel, type Effort } from "./models.ts";
 import type { ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
 
@@ -14,7 +14,7 @@ export function parseCommand(comment: string): string | undefined {
 
 export type FixCommand = { model?: string; effort?: Effort } | { error: string };
 
-// "/proofed fix [model] [effort]" has Claude fix the broken scenarios, with that model this once.
+// "/proofed fix [model] [effort]" has the fixer fix the broken scenarios, with that model this once.
 // Only the first line counts, so a note under the command doesn't become part of the model name.
 export function parseFix(command: string): FixCommand | undefined {
   const words = (command.split("\n")[0] ?? "").trim().split(/\s+/).filter(Boolean);
@@ -25,7 +25,9 @@ export function parseFix(command: string): FixCommand | undefined {
   const modelWords = effort ? rest.slice(0, -1) : rest;
   if (modelWords.length === 0) return { effort };
   const choice = parseModel(modelWords);
-  return "error" in choice ? choice : { model: choice.model, effort };
+  if ("error" in choice) return choice;
+  if (effort && !effortsFor(choice.model).includes(effort)) return { error: `The model \`${choice.model}\` doesn't support \`${effort}\` effort.` };
+  return { model: choice.model, effort };
 }
 
 // What the PR description asks to have checked. HTML comments (PR templates) are dropped, and a

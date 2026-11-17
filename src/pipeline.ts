@@ -1,3 +1,4 @@
+import { configuredFixer } from "./agent.ts";
 // Shared by the PR check (cli.ts) and the fix loop (fix.ts).
 import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
@@ -195,7 +196,7 @@ export async function publish(input: PublishInput) {
 
   const repoUrl = repo && `https://github.com/${repo.owner}/${repo.name}`;
   const body = buildReport({
-    sha, results, skipped, clips, runUrl, fixEnabled: process.env.PROOFED_FIX !== "false", fix, asked, previous, repoUrl, runKey, written,
+    sha, results, skipped, clips, runUrl, fixEnabled: process.env.PROOFED_FIX !== "false", fixer: configuredFixer(), fix, asked, previous, repoUrl, runKey, written,
   });
   writeFileSync(join(outDir, "report.md"), body);
   writeFileSync(join(outDir, "results.json"), JSON.stringify(results, null, 2));

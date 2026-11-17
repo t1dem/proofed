@@ -307,3 +307,19 @@ test("a refuted check carries Kane's opinion and the conditional next step throu
   assert.ok(file.scenarios[0]!.reason?.includes(FAILED_CHECK_ACTION));
   assert.match(file.scenarios[0]!.diagnosis!, /^Kane's opinion:/);
 });
+
+test("Codex reports name the agent, keep old Claude reports actionable, and retire both labels", () => {
+  const fixer = {model:"gpt-6.1-sol",effort:"low"};
+  const body = buildReport({sha:"head",results:[failed],skipped:[],clips:new Map(),fixEnabled:true,fixer});
+  assert.match(body, /\*\*Fix with Codex\*\*: Codex gets/);
+  assert.doesNotMatch(body, /Claude/);
+  assert.equal(fixRequested(body.replace('- [ ]','- [x]')), true);
+  assert.equal(fixRequested('- [x] **Fix with Claude**'), true);
+  assert.doesNotMatch(outdated(body), /Fix with Codex/);
+  assert.doesNotMatch(outdated('<!-- proofed -->\n\n⏳ **Codex is working on a fix** with Codex.'), /Codex is working/);
+  const fixed = buildReport({sha:"head",results:[passed],skipped:[],clips:new Map(),fixEnabled:true,fix:{...fix,...fixer}});
+  assert.match(fixed, /by Codex GPT-6.1 Sol, low effort/);
+  const written = buildReport({sha:"head",results:[passed],skipped:[],clips:new Map(),fixEnabled:true,written:{status:"written",provider:"codex",kept:[{id:"promo",about:"The promo total."}],dropped:[]}});
+  assert.match(written, /\*\*Codex wrote a scenario/);
+  assert.doesNotMatch(written, /Claude/);
+});

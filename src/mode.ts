@@ -1,10 +1,10 @@
 // The one Proofed workflow runs on PR events and on comments; this decides what to do for this one:
-// check the PR in Chrome, or have Claude fix what the last check found. It also settles the fix model,
+// check the PR in Chrome, or have the selected agent fix what the last check found. It also settles the fix model,
 // so a "/proofed fix" that can't run gets an answer before anything is installed, and whether the
 // setup PR's check starts by writing scenarios.
 import { appendFileSync } from "node:fs";
 import { acknowledge, findReport, getPermission, getPullRequest, hasStatus, listFolder, readFile, reply, setStatus, type PullRequest } from "./github.ts";
-import { DEFAULT_FIXER } from "./models.ts";
+import { isProvider, resolveFixer } from "./models.ts";
 import { ctx, readEvent } from "./pipeline.ts";
 import { alreadyReported, fixRequested, readReportData } from "./report.ts";
 import { parseCommand, parseFix, type FixCommand } from "./requests.ts";
@@ -76,7 +76,7 @@ if (event.action === "edited" && event.comment) {
       skip(message);
     };
     if ("error" in fix) await refuse(fix.error);
-    else if (process.env.PROOFED_FIX === "false") await refuse("Fixing with Claude is turned off for this repository.");
+    else if (process.env.PROOFED_FIX === "false") await refuse("Fixing is turned off for this repository.");
     else {
       const report = await findReport(repo, number);
       const data = report?.body ? readReportData(report.body) : undefined;
@@ -88,7 +88,7 @@ if (event.action === "edited" && event.comment) {
   }
 }
 
-// The run that Claude's fix commit starts: the fix run already checked that commit and reported on it.
+// The run that the fix commit starts: the fix run already checked that commit and reported on it.
 if (mode === "check" && event.pull_request) {
   const sha = event.pull_request.head.sha;
   const report = await findReport(repo, number);
@@ -109,13 +109,26 @@ if (mode === "check" && event.pull_request) {
 
 // Settings saved from the Proofed dashboard arrive as the repo's Actions variables.
 const vars = JSON.parse(process.env.PROOFED_VARS || "{}") as Record<string, string | undefined>;
+const provider = vars.PROOFED_PROVIDER;
+const configured = resolveFixer({
+  model: vars.PROOFED_MODEL,
+  effort: vars.PROOFED_EFFORT,
+  ...(provider && isProvider(provider) ? { provider } : {}),
+});
+if ("error" in configured) skip(configured.error);
+const fixer = resolveFixer(asked, configured);
+if ("error" in fixer) {
+  if (event.comment) await reply(repo, number, fixer.error);
+  skip(fixer.error);
+}
+const credential = fixer.provider === "codex" ? process.env.PROOFED_CODEX === "true" : process.env.PROOFED_CLAUDE === "true";
 const pr = event.pull_request ?? (await getPullRequest(repo, number));
 
-// The setup PR's check has Claude write the first scenarios before Kane runs them (generate.ts):
+// The setup PR's check has the selected agent write the first scenarios before Kane runs them (generate.ts):
 // only while the branch holds just the stock scenario, so a person's scenarios are never touched,
-// and only with a Claude token. Otherwise Claude Code isn't even installed.
+// and only with a credential for the selected provider. Otherwise its CLI is not installed.
 let generate = false;
-if (mode === "check" && event.pull_request && pr.head.ref === SETUP_BRANCH && process.env.PROOFED_CLAUDE === "true") {
+if (mode === "check" && event.pull_request && pr.head.ref === SETUP_BRANCH && credential) {
   const dir = (process.env.PROOFED_SCENARIOS || ".proofed/scenarios").replace(/\/+$/, "");
   try {
     const [only, ...more] = (await listFolder(repo, dir, pr.head.sha)) ?? [];
@@ -128,14 +141,14 @@ if (mode === "check" && event.pull_request && pr.head.ref === SETUP_BRANCH && pr
 
 // "Fix automatically" in the dashboard (vars.PROOFED_AUTOFIX): a check of a person's push goes on to fix
 // what it finds broken (action.yml), as a ticked "Fix with Claude" would. Not on a draft, where someone is
-// still at work, and not on a push by a bot: Claude's own fix commit would otherwise start another fix.
+// still at work, and not on a push by a bot: the fixer's own fix commit would otherwise start another fix.
 // The one exception is a pull request Proofed's own app opens (the site's "Break it yourself"): it is
 // fixed like a person's. Renovate's and other bots' are left alone, nobody asked for a push to those.
 const opened = event.action === "opened" || event.action === "reopened";
 const byBot = event.sender?.type === "Bot" && !(opened && event.sender.login === APP_LOGIN);
 const autofix =
   mode === "check" && !generate && !!event.pull_request && vars.PROOFED_AUTOFIX === "true" && !pr.draft &&
-  !byBot && process.env.PROOFED_CLAUDE === "true" && process.env.PROOFED_FIX !== "false";
+  !byBot && credential && process.env.PROOFED_FIX !== "false";
 
 output({
   mode,
@@ -146,6 +159,7 @@ output({
   head_ref: pr.head.ref,
   base_sha: pr.base.sha,
   base_ref: pr.base.ref,
-  model: asked.model ?? (vars.PROOFED_MODEL || DEFAULT_FIXER.model),
-  effort: asked.effort ?? (vars.PROOFED_EFFORT || DEFAULT_FIXER.effort),
+  provider: fixer.provider!,
+  model: fixer.model,
+  effort: fixer.effort,
 });

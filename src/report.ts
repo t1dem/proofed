@@ -1,7 +1,7 @@
 import { MARKER, OLD_MARKER } from "./github.ts";
 import { BLANK_PAGE, FAILED_CHECK_ACTION, FAILED_CHECK_REASON, runMarker } from "./runfile.ts";
 import type { Step } from "./kane.ts";
-import { describeFixer, type Fixer } from "./models.ts";
+import { DEFAULT_FIXER, describeFixer, providerLabel, providerOf, type Fixer, type Provider } from "./models.ts";
 import { nothingAsked } from "./requests.ts";
 import { creditsOf, scenarioDoubted, unchecked, type ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
@@ -42,16 +42,17 @@ export type FixNote = Fixer & {
   changes?: FileChange[];
 };
 
-// The setup PR's first check (generate.ts): the scenarios Claude wrote that Kane saw pass and Proofed
-// committed, each with Claude's line on what it checks, and the ones it dropped. "failed": Claude
+// The setup PR's first check (generate.ts): the scenarios the selected agent wrote that Kane saw pass and Proofed
+// committed, each with the fixer's line on what it checks, and the ones it dropped. "failed": Claude
 // didn't get as far as writing any, or the push failed. `credits`: what Kane spent on the scenarios that
 // weren't kept, which the results don't carry but the run cost all the same.
 export type Written = (
   | { status: "written"; kept: { id: string; about: string }[]; dropped: { name: string; why: string }[]; commit?: string; commitUrl?: string }
   | { status: "failed" }
-) & { credits?: number };
+) & { credits?: number; provider?: Provider };
 
 const DATA_RE = /<!-- proofed:data (.*?) -->/s;
+// Claude keeps its old label: installed workflows filter edits by this exact text.
 export const FIX_BOX = "Fix with Claude";
 const COMMENT_LIMIT = 65_536;
 const HISTORY_SIZE = 8;
@@ -68,13 +69,13 @@ export function readReportData(body: string): ReportData | undefined {
   }
 }
 
-// A push of the very commit the report is about: the Proofed app pushing Claude's fix, which the fix
+// A push of the very commit the report is about: the Proofed app pushing the fixer's fix, which the fix
 // run checked and reported before it ended. Any other push brings a new commit, and a /proofed
 // comment always runs, whatever the commit.
 export const alreadyReported = (action: string | undefined, headSha: string, report: ReportData | undefined) =>
   action === "synchronize" && report?.sha === headSha;
 
-export const fixRequested = (body: string) => body.includes(`- [x] **${FIX_BOX}**`);
+export const fixRequested = (body: string) => /^- \[x\] \*\*Fix with (?:Claude|Codex)\*\*/m.test(body);
 
 export const WORKING = "⏳ **Claude is working on a fix**";
 
@@ -106,7 +107,7 @@ export function postsNew(current: string | undefined, next: string, notify: bool
   return a.state !== b.state || a.open.join("\n") !== b.open.join("\n");
 }
 
-const LIVE_LINES = new RegExp(`\\n\\n(?:- \\[[ x]\\] \\*\\*${FIX_BOX}\\*\\*|${WORKING.replaceAll("*", "\\*")})[^\\n]*`, "g");
+const LIVE_LINES = /\n\n(?:- \[[ x]\] \*\*Fix with (?:Claude|Codex)\*\*|⏳ \*\*(?:Claude|Codex) is working on a fix\*\*)[^\n]*/g;
 
 // A report a newer one replaced: without the fix box, so nobody ticks a stale one, or a "working" line
 // that would never end, and with a marker that nothing reads as the PR's report.
@@ -129,7 +130,7 @@ const quote = (text = "") =>
 
 const short = (sha: string) => sha.slice(0, 7);
 
-// Kane's and Claude's words on one line, cut to `max` characters.
+// Kane's and the fixer's words on one line, cut to `max` characters.
 const oneLine = (text = "", max = 300) => {
   const line = text.replace(/\s+/g, " ").trim();
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
@@ -201,18 +202,19 @@ function whatChanged(fix: FixNote) {
 }
 
 function writtenSection(written: Written, results: ScenarioResult[], clips: Map<string, ClipLinks>) {
+  const provider = providerLabel(written.provider ?? "claude");
   if (written.status === "failed") return "Proofed tried to add scenarios for this app's main flows, but the scenarios couldn't be written this time.";
   const kept = written.kept.flatMap(({ id, about }) => results.filter((r) => r.scenario.id === id).map((r) => ({ r, about })));
   const dropped = written.dropped.map((d) => `- **${html(d.name)}**: ${html(oneLine(d.why, 200))}`).join("\n");
   if (kept.length === 0) {
     return dropped
-      ? `Claude wrote ${written.dropped.length === 1 ? "a scenario" : `${written.dropped.length} scenarios`} for this app, but Kane didn't see ${written.dropped.length === 1 ? "it" : "any of them"} pass, so none were added:\n\n${dropped}`
-      : "Claude didn't find a flow it could write a scenario for without guessing, so none were added.";
+      ? `${provider} wrote ${written.dropped.length === 1 ? "a scenario" : `${written.dropped.length} scenarios`} for this app, but Kane didn't see ${written.dropped.length === 1 ? "it" : "any of them"} pass, so none were added:\n\n${dropped}`
+      : `${provider} didn't find a flow it could write a scenario for without guessing, so none were added.`;
   }
   const folder = kept[0]!.r.scenario.file.split("/").slice(0, -1).join("/");
   const commit = written.commit ? ` in ${commitRef(written.commit, written.commitUrl)}` : "";
   const intro =
-    `**Claude wrote ${kept.length === 1 ? "a scenario" : `${kept.length} scenarios`} for this app**, and Proofed added ${kept.length === 1 ? "it" : "them"} to this PR${commit}. ` +
+    `**${provider} wrote ${kept.length === 1 ? "a scenario" : `${kept.length} scenarios`} for this app**, and Proofed added ${kept.length === 1 ? "it" : "them"} to this PR${commit}. ` +
     `Kane ran each one in Chrome and saw it pass. They are plain Markdown in \`${folder}/\`: edit or delete them like any other file.`;
   const items = kept.map(
     ({ r, about }) => `**✓ ${r.scenario.name}** · \`${r.scenario.file.split("/").at(-1)}\`<br>${html(oneLine(about, 200))}${clip(clips.get(r.scenario.id), 560)}`,
@@ -257,6 +259,7 @@ type ReportInput = {
   clips: Map<string, ClipLinks>;
   runUrl?: string;
   fixEnabled: boolean;
+  fixer?: Fixer;
   fix?: FixNote;
   asked?: Scenario[];
   // The data of the report this one replaces: run history, and after a fix, what was broken.
@@ -287,7 +290,7 @@ export function buildReport(input: ReportInput) {
 }
 
 function compose(
-  { sha, results: all, skipped, clips, runUrl, fixEnabled, fix, asked, previous, repoUrl, runKey, written }: ReportInput,
+  { sha, results: all, skipped, clips, runUrl, fixEnabled, fixer = DEFAULT_FIXER, fix, asked, previous, repoUrl, runKey, written }: ReportInput,
   { stepList: withSteps, storedSteps }: Fit,
 ) {
   const unasked = all.filter(nothingAsked);
@@ -378,9 +381,10 @@ function compose(
     );
   }
 
+  const provider = providerLabel(providerOf(fixer.model));
   if (failed.length > 0 && fixEnabled && fix?.status !== "gave-up") {
     sections.push(
-      `- [ ] **${FIX_BOX}** — Claude Code gets the failure, the steps and the diff, pushes a fix to this branch, and Proofed checks again.`,
+      `- [ ] **Fix with ${provider}**: ${provider} gets the failure, the steps and the diff, pushes a fix to this branch, and Proofed checks again.`,
     );
   }
 
@@ -439,7 +443,7 @@ function compose(
     .join(" · ");
   const canFix = failed.length > 0 && fixEnabled;
   const hint = canFix
-    ? "Comment <code>/proofed</code> to check again or <code>/proofed fix</code> to have Claude fix it."
+    ? `Comment <code>/proofed</code> to check again or <code>/proofed fix</code> to have ${provider} fix it.`
     : "Comment <code>/proofed</code> to check again.";
   const lines = [footer, history.length > 1 && historyLine(history, repoUrl), hint].filter(Boolean).join("<br>");
   return `${sections.join("\n\n")}\n\n<sub>${lines}</sub>\n${dataComment(data)}${runKey ? `\n${runMarker(runKey)}` : ""}`;

@@ -1,20 +1,20 @@
 // "Fix with Claude": someone ticked the box in the Proofed comment, or commented "/proofed fix [model]".
-// Claude Code gets the failure, Kane's steps and the PR diff; we rebuild, re-run the broken scenarios
+// The agent gets the failure, Kane's steps and the PR diff; we rebuild, re-run the broken scenarios
 // in Chrome, and only push a fix that Kane has seen pass. Up to three attempts, each one told why the last one failed.
 import { execFileSync, execSync, spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { askClaude } from "./claude.ts";
+import { askAgent, configuredFixer } from "./agent.ts";
 import { editComment, findReport, setStatus } from "./github.ts";
 import { putBack } from "./guard.ts";
 import { describeFailure } from "./fixprompt.ts";
 import { live } from "./live.ts";
-import { DEFAULT_FIXER, describeFixer, type Fixer } from "./models.ts";
+import { describeFixer, providerLabel, providerOf } from "./models.ts";
 import { changedFiles, ctx, env, pickScenarios, publish, putReport, readEvent, runAll } from "./pipeline.ts";
 import { pushHead } from "./push.ts";
 import { fixLoop, settled } from "./fixloop.ts";
-import { fixRequested, FIX_BOX, readReportData, WORKING, type FailureData } from "./report.ts";
+import { fixRequested, readReportData, WORKING, type FailureData } from "./report.ts";
 import type { ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
 
@@ -37,7 +37,7 @@ if (!prNumber || !(auto || event.issue?.pull_request) || !data || data.failures.
   console.log("No fix requested.");
   process.exit(0);
 }
-// The app's folder when it isn't the repo root. Claude and git work from the root; build and serve run there.
+// The app's folder when it isn't the repo root. The agent and git work from the root; build and serve run there.
 const appDir = env("PROOFED_DIR", ".");
 const sh = (word: string) => (/^[\w./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`);
 // Claude Code allows a compound command only if each part of it is allowed on its own, so it refused
@@ -45,10 +45,9 @@ const sh = (word: string) => (/^[\w./-]+$/.test(word) ? word : `'${word.replaceA
 const buildScript = join(process.env.RUNNER_TEMP || tmpdir(), "proofed-build.sh");
 writeFileSync(buildScript, `set -e -o pipefail\ncd ${sh(resolve(appDir))}\n${env("PROOFED_BUILD")}\n`);
 const buildCommand = `bash ${sh(buildScript)}`;
-const fixer: Fixer = {
-  model: env("PROOFED_CLAUDE_MODEL", DEFAULT_FIXER.model),
-  effort: env("PROOFED_CLAUDE_EFFORT", DEFAULT_FIXER.effort),
-};
+const fixer = configuredFixer();
+const provider = providerLabel(providerOf(fixer.model));
+const agentName = provider === "Codex" ? "Codex" : "Claude Code";
 
 mkdirSync(outDir, { recursive: true });
 const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
@@ -62,14 +61,14 @@ const scenariosFor = (ids: string[]) => [
   ...asked.filter((s) => ids.includes(s.id)),
 ];
 
-const BOX = new RegExp(`- \\[[ x]\\] \\*\\*${FIX_BOX}\\*\\*.*`);
-// Puts a line where the checkbox is, or under the headline when there's none (Claude gave up last time).
+const BOX = /- \[[ x]\] \*\*Fix with (?:Claude|Codex)\*\*.*/;
+// Puts a line where the checkbox is, or under the headline when there's none (the fixer gave up last time).
 const withLine = (text: string, line: string) =>
   BOX.test(text) ? text.replace(BOX, line) : text.replace(/(### Proofed\n\n[^\n]*\n)/, `$1\n${line}\n`);
 
 if (repo && report) {
-  await editComment(repo, report.id, withLine(body, `${WORKING} with ${describeFixer(fixer)}. [Follow along](${runUrl})`));
-  await setStatus(repo, git("rev-parse", "HEAD"), "pending", "Claude is fixing, Kane will re-check", runUrl);
+  await editComment(repo, report.id, withLine(body, `${WORKING.replace("Claude", provider)} with ${describeFixer(fixer)}. [Follow along](${runUrl})`));
+  await setStatus(repo, git("rev-parse", "HEAD"), "pending", `${provider} is fixing, Kane will re-check`, runUrl);
 }
 // The dashboard follows along: which attempt it is, what's being done, and Kane's re-check.
 live.start({ kind: "fix", pr: prNumber, sha: git("rev-parse", "HEAD"), runUrl });
@@ -90,13 +89,15 @@ ${diff}
 ${feedback ? `\nA previous fix attempt didn't work:\n${feedback}\n` : ""}
 ${failures.some((f) => f.failedCheck) ? "Kane's opinion is not proof that the scenario is wrong. If the app change was intended, stop and explain that the scenario needs review. Otherwise fix the app. Do not make a check pass by changing its expectations." : "Find the cause in the application code and fix it with the smallest change that keeps what the PR set out to do."}
 Don't edit anything under .proofed/, don't change the scenario expectations, and don't commit.
+Do not run commands other than reading application code and the build. Do not access the network or external services.
 You may run \`${buildCommand}\` to check that your change builds (it runs \`${env("PROOFED_BUILD")}\` ${appDir === "." ? "at the repo root" : `in \`${appDir}\``}).
 End your answer with one line in English that starts with "SUMMARY:". It goes into the pull request as is, so it says only what was wrong in the code and what you changed, nothing about tools, builds, tests or permissions.`;
 }
 
 function askFixer(text: string) {
-  const answer = askClaude(text, {
+  const answer = askAgent(text, {
     ...fixer,
+    timeoutMs: 10 * 60_000,
     allowedTools: ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", `Bash(${buildCommand})`],
   });
   if (!answer.ok) return answer;
@@ -109,8 +110,8 @@ function askFixer(text: string) {
 async function restoreReport(note: string, ended = false, status = "Fix didn't run; the original failure stands") {
   await live.end();
   if (!repo || !prNumber || !report) return;
-  const box = `- [ ] **${FIX_BOX}**`;
-  const original = body.replace(`- [x] **${FIX_BOX}**`, box);
+  const box = `- [ ] **Fix with ${provider}**`;
+  const original = body.replace(/- \[x\] \*\*Fix with (?:Claude|Codex)\*\*/, box);
   const quoted = `> ${note}`;
   const restored = original.includes(box) ? original.replace(box, `${quoted}\n\n${box}`) : withLine(original, quoted);
   await (ended ? putReport(repo, prNumber, restored, true) : editComment(repo, report.id, restored));
@@ -178,9 +179,9 @@ const { attempt, summary, tries, feedback } = loop;
 const lastResults = loop.results;
 
 if (loop.status === "no-claude") {
-  console.log(`Claude Code couldn't run: ${feedback}`);
+  console.log(`${agentName} couldn't run: ${feedback}`);
   git("checkout", "--", ".");
-  await restoreReport(`Claude Code couldn't run: ${feedback}. Tick the box, or comment \`/proofed fix\` with a model, to try again.`);
+  await restoreReport(`${agentName} couldn't run: ${feedback}. Tick the box, or comment \`/proofed fix\` with a model, to try again.`);
   process.exit(1);
 }
 
@@ -188,21 +189,21 @@ if (loop.status === "gave-up") {
   git("checkout", "--", ".");
   // Kane never got to re-run anything (no change, or it didn't build): keep the original report.
   if (lastResults.length === 0) {
-    await restoreReport(`Claude tried ${attempt} times without a change that builds. Last note: ${feedback.split("\n")[0]}`, true);
+    await restoreReport(`${provider} tried ${attempt} times without a change that builds. Last note: ${feedback.split("\n")[0]}`, true);
     process.exit(1);
   }
   // What the last attempt made pass, it broke elsewhere. Nothing was pushed, so the report's failures still stand.
   if (loop.fixing.every(settled)) {
     const names = (results: ScenarioResult[]) => results.map((r) => `"${r.scenario.name}"`).join(", ");
     await restoreReport(
-      `Claude tried ${attempt} times. The last fix Kane checked made ${names(loop.fixing)} pass but broke ${names(loop.broke)}, so nothing was pushed.`,
+      `${provider} tried ${attempt} times. The last fix Kane checked made ${names(loop.fixing)} pass but broke ${names(loop.broke)}, so nothing was pushed.`,
       true,
-      "Claude's fix broke another scenario; nothing was pushed",
+      `${provider}'s fix broke another scenario; nothing was pushed`,
     );
     process.exit(1);
   }
   await live.end();
-  // Only the scenarios the report had broken: the others ran on Claude's change, which isn't on the branch.
+  // Only the scenarios the report had broken: the others ran on the fixer's change, which isn't on the branch.
   await publish({
     repo, pr: prNumber, sha: git("rev-parse", "HEAD"), results: loop.fixing, skipped: [], runUrl, outDir, asked, previous: data,
     fix: { status: "gave-up", attempts: attempt, summary, ...fixer, tries },
@@ -217,8 +218,8 @@ const changes = git("diff", "--numstat", "HEAD").split("\n").filter(Boolean).map
 });
 const names = data.failures.map((f) => f.name).join(", ");
 live.fix({ doing: "pushing", tries: [...tries] });
-git("-c", "user.name=Claude", "-c", "user.email=noreply@anthropic.com", "commit", "-am",
-  `Fix ${names}\n\n${summary}\n\nWritten by Claude Code from a Proofed report; Kane re-ran the scenario in Chrome and it passes.\n\nFixed-by: ${fixer.model} (${fixer.effort} effort)`);
+git("-c", `user.name=${provider}`, "-c", `user.email=${provider === "Codex" ? "codex@openai.com" : "noreply@anthropic.com"}`, "commit", "-am",
+  `Fix ${names}\n\n${summary}\n\nWritten by ${agentName} from a Proofed report; Kane re-ran the scenario in Chrome and it passes.\n\nFixed-by: ${fixer.model} (${fixer.effort} effort)`);
 const asApp = await pushHead(branch);
 const sha = git("rev-parse", "HEAD");
 console.log(`Pushed ${sha} to ${branch}${asApp ? " as the Proofed app" : ""}`);

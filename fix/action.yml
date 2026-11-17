@@ -1,5 +1,5 @@
 name: Proofed fix
-description: When "Fix with Claude" is ticked in the Proofed comment, Claude Code fixes the broken scenario and Kane checks the fix in Chrome before it is pushed.
+description: When the fix checkbox is ticked in the Proofed comment, the selected agent fixes the broken scenario and Kane checks the fix in Chrome before it is pushed.
 
 inputs:
   url:
@@ -20,12 +20,18 @@ inputs:
     required: true
   claude-code-oauth-token:
     description: From `claude setup-token`
-    required: true
+    default: ""
+  codex-api-key:
+    description: OpenAI API key for Codex (secrets.CODEX_API_KEY)
+    default: ""
+  provider:
+    description: Fixer provider (claude or codex); inferred from model when empty
+    default: ""
   model:
-    description: Model Claude Code fixes with
-    default: claude-haiku-5-5
+    description: Model the fixer uses
+    default: ""
   effort:
-    description: Claude Code effort level (low, medium, high, xhigh, max)
+    description: Reasoning effort supported by the selected model
     default: xhigh
   scenarios:
     default: .proofed/scenarios
@@ -56,10 +62,14 @@ runs:
       with:
         node-version: 24
 
-    - name: Install Kane CLI, Claude Code and ffmpeg
+    - name: Install Kane CLI, fixer and ffmpeg
       shell: bash
+      env:
+        PROOFED_PROVIDER: ${{ inputs.provider }}
+        PROOFED_MODEL: ${{ inputs.model }}
       run: |
-        npm install -g "@testmuai/kane-cli@${{ inputs.kane-version }}" @anthropic-ai/claude-code >/dev/null
+        npm install -g "@testmuai/kane-cli@${{ inputs.kane-version }}" >/dev/null
+        if [ "$PROOFED_PROVIDER" = codex ] || [[ "$PROOFED_MODEL" == gpt-* ]]; then npm install -g @openai/codex@0.169.0 >/dev/null; else npm install -g @anthropic-ai/claude-code >/dev/null; fi
         command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null)
         ${{ inputs.install }}
 
@@ -72,7 +82,7 @@ runs:
       # otherwise the first runs race to create them and fail.
       run: kane-cli login --username "$LT_USERNAME" --access-key "$LT_ACCESS_KEY" </dev/null
 
-    - name: Fix with Claude, verify with Kane
+    - name: Fix, verify with Kane
       shell: bash
       env:
         PROOFED_URL: ${{ inputs.url }}
@@ -86,8 +96,10 @@ runs:
         LT_USERNAME: ${{ inputs.lt-username }}
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
-        PROOFED_CLAUDE_MODEL: ${{ inputs.model }}
-        PROOFED_CLAUDE_EFFORT: ${{ inputs.effort }}
+        CODEX_API_KEY: ${{ inputs.codex-api-key }}
+        PROOFED_PROVIDER: ${{ inputs.provider }}
+        PROOFED_MODEL: ${{ inputs.model }}
+        PROOFED_EFFORT: ${{ inputs.effort }}
         KANE_CLI_CDP_TIMEOUT_MS: "60000"
         KANE_CLI_CDP_RETRIES: "2"
         KANE_CLI_USER_AGENT: github-action

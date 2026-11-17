@@ -29,7 +29,7 @@ function readReport(body: string) {
       .split("\n")
       .map((l) => l.trim())
       .find((l) => l && !l.startsWith("<!--") && !l.startsWith("#")) ?? "";
-  const state = body.includes("⏳ **Claude is working")
+  const state = /⏳ \*\*(?:Claude|Codex) is working/.test(body)
     ? "fixing"
     : /scenarios broke on this PR/.test(headline)
       ? "failing"
