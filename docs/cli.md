@@ -4,7 +4,7 @@ The reference for `proofed check`. Installing it and the three commands are in t
 
 ## What it checks
 
-The change is everything since the merge base with the default branch (`origin/HEAD`, else `origin/main`, or `--base`), uncommitted and untracked files included.
+The change is everything since the merge base with the default branch (`origin/HEAD`, else `origin/main`, `origin/master`, `main`, `master`, or `--base`), uncommitted and untracked files included.
 
 ## Where it finds the app
 
@@ -15,13 +15,16 @@ The URL and the commands that install, build and serve the app are taken from th
 3. `.proofed/config.json`
 4. the Proofed step of the repo's workflow, so a repo that already runs Proofed on its PRs needs no flags
 
+A build or install set in config or the workflow belongs to its serve command. Overriding
+`serve` also drops that layer's build/install; pass them explicitly when needed.
+
 Before anything is built, `kane-cli balance` (free) checks that TestMu accepts the login or the `LT_USERNAME` and `LT_ACCESS_KEY`. If it doesn't, the check stops with exit 3: `kane_not_signed_in` (fix: `kane-cli login`) or `kane_keys_rejected` (the keys are wrong or expired).
 
 If the app isn't running, Proofed starts it and stops it at the end. It installs the dependencies only when `node_modules` is missing or older than `package.json` or the lockfile (with the install command found as above, else the app's package manager), then builds, then serves. If something already answers at the URL and a build is configured, the check stops rather than test what may be an old build; `--reuse` tests it anyway.
 
 ## Caching and output
 
-A passed scenario isn't run again until its file, the URL, the base commit or a changed file in its `paths` changes. Native and desktop checks with a build command always rebuild and run again; an old artifact's pass cannot skip the build. `--dry-run` shows what would run and the credit estimate, for free. In a terminal the scenarios update in place; in a pipe each event is one line, with a "still running" line at least every 30 seconds.
+A passed scenario isn't run again until its file, the URL, the resolved target, Kane version, the base commit or a changed file in its `paths` changes. Native and desktop checks with a build command always rebuild and run again; an old artifact's pass cannot skip the build. `--dry-run` shows what would run and the credit estimate, for free. In a terminal the scenarios update in place; in a pipe each event is one line, with a "still running" line at least every 30 seconds.
 
 ## For an agent
 
@@ -31,7 +34,7 @@ problems and their fixes. To ask which scenarios a change touches without planni
 `proofed list --json` gives each scenario's `selected`, `cached` and `estimatedCredits`, plus the total
 `estimatedCredits`. A selected scenario is touched by the change, or all scenarios when
 there is no Git base. A clean diff selects nothing. Untouched scenarios and cached passes cost zero. Estimates use the
-last reported cost, or 30 credits for a first run. Invalid scenarios are in `errors`; fix
+last reported cost, or 30 credits for a first web run; mobile and desktop estimates are `null` without history. Invalid scenarios are in `errors`; fix
 those before checking. These commands do not spend credits.
 
 Use `proofed check --only <id> --dry-run --json` to plan one scenario, or
@@ -82,9 +85,14 @@ Re-run what broke: proofed check --only free-shipping --url http://localhost:417
 
 `--no-retry` limits each selected scenario to one Kane attempt, including infrastructure errors
 and checks Kane blames on the scenario. The first verdict is returned, with its usual exit code
-and diagnostics. Without the flag, automatic retries are unchanged.
+and diagnostics. Without the flag, infrastructure errors get one retry unless Kane rejected the login. A doubted failure gets a second run, which can also retry an infrastructure error: up to four Kane attempts in total.
 
-A first run is estimated at 30 Kane credits per scenario. Later estimates use the last reported cost. Credits are what Kane reported for the runs; the account balance can drop slightly more. An interrupted run can spend credits before Kane reports them.
+A first web run is estimated at 30 Kane credits per scenario. Mobile and desktop estimates are `null` without history. Later estimates use the last reported cost. Credits are Kane estimates for the runs, retries included (`creditsSource: "kane_estimate"`); the account balance can drop slightly more. An interrupted run can spend credits before Kane reports them.
+
+When available, scenario JSON includes `accountBalance: {before, after, debit}`. This is
+the whole account's balance change, with unknown attribution to the scenario. Proofed
+omits it when it detects overlapping Proofed runs on the same machine; it cannot
+detect other activity on the account.
 
 ## JSON and exit codes
 
@@ -92,17 +100,18 @@ A first run is estimated at 30 Kane credits per scenario. Later estimates use th
 
 | Exit | Meaning |
 |---|---|
-| 0 | Everything checked passed |
+| 0 | Everything checked passed, nothing needed to run, or a dry run succeeded |
 | 1 | A scenario failed |
-| 2 | Nothing failed, but something wasn't checked |
+| 2 | Nothing failed, but something wasn't checked or a run errored |
 | 3 | The check couldn't start. The message says why and how to fix it; running it again unchanged won't help |
 | 130 | Ctrl-C or a closed terminal. Kane, Chrome and the app are stopped first |
 
-`failedCheck: "scenario_doubted"` means a scenario's check failed, but Kane believes the scenario is out of date. `diagnosis` is Kane's opinion; `suggestion` and `next` say to update the scenario if the app change was intended, otherwise fix the app. Such a failure is run a second time, at the scenario's cost again. A check that fails both times is a failure (exit 1). A failure followed by a pass stays unconfirmed and is reported as not checked (exit 2). `notChecked: "scenario_doubted"` means Kane doubted the scenario without a failed check (exit 2).
+`failedCheck: "scenario_doubted"` means a scenario's check failed, but Kane believes the scenario is out of date. `diagnosis` is Kane's opinion; `suggestion` and `next` say to update the scenario if the app change was intended, otherwise fix the app. Unless `--no-retry` is set, such a failure is run a second time, at the scenario's cost again. A check that fails both times is a failure (exit 1). A failure followed by a pass stays unconfirmed and is reported as `notChecked: "runs_disagreed"` (exit 2). `notChecked: "scenario_doubted"` means Kane doubted the scenario without a failed check (exit 2).
 
 ## Mobile and Electron targets
 
 A scenario can select `target: web|ios|android|desktop` and `execution: local|cloud`.
+Cloud execution is only for iOS and Android.
 Existing scenarios default to local web checks. Each selected scenario reports its resolved
 `target` and field sources in JSON. `list` also prints the target in its table.
 

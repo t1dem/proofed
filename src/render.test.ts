@@ -156,7 +156,7 @@ test("both views label Kane's opinion on a refuted check and give a conditional 
     const view = new View(out, { color: false });
     view.done(disputed);
     assert.match(out.text, /✗ Free shipping from €50 failed/);
-    assert.match(out.text, /Why +The scenario's check did not hold on the page, on two runs in a row\. Kane believes the scenario is out of date\./);
+    assert.match(out.text, /Why +The scenario's check did not hold on the page\. Kane believes the scenario is out of date\./);
     assert.match(out.text, /Kane thinks +The test used the wrong/);
     assert.match(out.text, /Next +If the change in the app was intended, update the scenario; otherwise fix the app\./);
     assert.doesNotMatch(out.text, /Suggestion|Update the test expectation/);

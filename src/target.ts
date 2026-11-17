@@ -38,7 +38,7 @@ export function readConfig(cwd: string): Partial<Record<Key, string>> {
   try {
     data = JSON.parse(readFileSync(file, "utf8"));
   } catch (e) {
-    throw new SetupError("config_invalid", `${CONFIG_FILE} is not valid JSON: ${e instanceof Error ? e.message : e}`, `Correct the JSON in ${CONFIG_FILE}; it holds { "url", "serve", "build", "install" }.`);
+    throw new SetupError("config_invalid", `${CONFIG_FILE} is not valid JSON: ${e instanceof Error ? e.message : e}`, `Correct the JSON in ${CONFIG_FILE}; it accepts url, serve, build, install and target settings.`);
   }
   if (typeof data !== "object" || data === null) return {};
   const out: Partial<Record<Key, string>> = {};
@@ -167,7 +167,7 @@ export function resolveScenarioTarget(scenario: TargetFields, flags: TargetField
   const kind = values.target ?? "web";
   const execution = values.execution ?? "local";
   if (!["web", "ios", "android", "desktop"].includes(kind) || !["local", "cloud"].includes(execution))
-    throw new SetupError("target_invalid", `Invalid target/execution: ${kind}/${execution}`, "Use web, ios, android or desktop with local or cloud.");
+    throw new SetupError("target_invalid", `Invalid target/execution: ${kind}/${execution}`, "Use web, ios, android or desktop; cloud execution is only for ios and android.");
   if (execution === "cloud" && (kind === "web" || kind === "desktop"))
     throw new SetupError("target_invalid", `${kind} requires execution: local`, "Use local execution.");
   const service = resolveTarget({ flags: {}, env, cwd });

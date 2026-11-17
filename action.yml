@@ -1,13 +1,12 @@
 name: Proofed
-description: Runs the scenarios a PR touches with Kane CLI, records each run, reports on the PR, and has the selected agent fix what broke when asked.
+description: Runs the scenarios a PR touches with Kane CLI, records local runs, reports on the PR, and has the selected agent fix what broke when asked.
 branding:
   icon: eye
   color: orange
 
-# Two ways to use it. With install/build/serve (what the Proofed setup PR writes), this action is the
-# whole workflow: it checks out the PR, serves the app, and either checks it or runs the fixer,
-# depending on the event. Without them it only runs the check, against an app the workflow already
-# serves; the fixer is then t1dem/proofed/fix in a second workflow.
+# With build, serve or target, this action checks out the PR and chooses check or fix from the event.
+# It serves web apps and prepares native/desktop targets. Without those inputs it only checks
+# an app the workflow already serves; use t1dem/proofed/fix in a second workflow for fixes.
 inputs:
   url:
     description: Required for web scenarios, e.g. http://localhost:4173
@@ -16,10 +15,10 @@ inputs:
     description: web, ios, android or experimental desktop
     default: ""
   execution:
-    description: local or cloud
+    description: local, or cloud for ios/android (requires a TestMu real-device automation plan)
     default: ""
   app:
-    description: App artifact path or Kane APP ID
+    description: Mobile artifact path or Kane APP ID, or desktop executable; fixing needs a rebuildable path
     default: ""
   device:
     description: Exact device name
@@ -34,7 +33,7 @@ inputs:
     description: Desktop browser CDP endpoint
     default: ""
   install:
-    description: Command that installs dependencies
+    description: Command that installs dependencies once per check/fix job
     default: ""
   build:
     description: Command that builds the app (also after every fix attempt)

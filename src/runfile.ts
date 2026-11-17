@@ -42,5 +42,5 @@ export const runMarker = (key: string) => `<!-- proofed:run ${key} -->`;
 export const readRunKey = (body: string) => /<!-- proofed:run (pr-\d+\/[\w.-]+) -->/.exec(body)?.[1];
 
 // A refuted check stays a failure even when Kane blames the scenario. Consumers share the next step.
-export const FAILED_CHECK_REASON = "The scenario's check did not hold on the page, on two runs in a row. Kane believes the scenario is out of date.";
+export const FAILED_CHECK_REASON = "The scenario's check did not hold on the page. Kane believes the scenario is out of date.";
 export const FAILED_CHECK_ACTION = "If the change in the app was intended, update the scenario; otherwise fix the app.";

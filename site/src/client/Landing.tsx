@@ -55,10 +55,10 @@ function Hero() {
     <section className="relative overflow-hidden lg:min-h-[calc(100svh-72px)]">
       <div className="relative z-10 mx-auto max-w-6xl px-4 pt-12 sm:px-8 sm:pt-20 lg:pt-[12vh]">
         <h1 className="max-w-4xl font-serif text-[2.6rem] leading-[1.05] tracking-tight sm:text-7xl">
-          Every pull request, run in Chrome before you merge it.
+          Web pull requests, run in Chrome before you merge them.
         </h1>
         <p className="mt-6 max-w-xl text-lg leading-relaxed text-ink/85 sm:text-xl">
-          Proofed runs the user flows your diff touches in a real Chrome, posts the recording on the PR, and lets Claude or Codex fix what
+          For web apps, Proofed runs the user flows your diff touches in Chrome, posts the recording on the PR, and lets Claude or Codex fix what
           broke. A fix is pushed only after Proofed has watched it pass.
         </p>
         <div className="mt-9 flex flex-wrap gap-3">
@@ -95,8 +95,8 @@ const SETUP = [
     title: "Add three secrets",
     body: (
       <>
-        Proofed drives Chrome with Kane CLI: two keys come from TestMu, one from{" "}
-        <code className="font-mono text-[0.9em]">claude setup-token</code>. You can also save an OpenAI API key for Codex. Runs and fixes use your own accounts.
+        Proofed drives Chrome with Kane CLI: two keys come from TestMu. For fixes, use{" "}
+        <code className="font-mono text-[0.9em]">claude setup-token</code> or an OpenAI API key for Codex. Runs and fixes use your own accounts.
       </>
     ),
     scene: <GlyphScene draw={drawSecrets} loop={SECRETS_LOOP} rest={5} label="Three keys in a padlock, locked and green" />,
@@ -198,7 +198,7 @@ function Footer() {
               <a href="/" className="font-serif text-4xl">
                 Proofed
               </a>
-              <p className="mt-3 max-w-xs leading-relaxed text-ink/80">Every pull request, run in Chrome before you merge it.</p>
+              <p className="mt-3 max-w-xs leading-relaxed text-ink/80">Web pull requests, run in Chrome before you merge them.</p>
             </div>
             {FOOTER_LINKS.map((col) => (
               <nav key={col.title} aria-label={col.title}>

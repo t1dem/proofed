@@ -402,7 +402,7 @@ function FixerMenu({ repo }: { repo: RepoView }) {
               <span className="min-w-0 flex-1">
                 <span className="block text-[13px] max-md:text-[15px]">Fix automatically</span>
                 <span className="mt-0.5 block text-[12px] text-faint max-md:text-[13px]">
-                  When Kane sees a scenario fail, {providerName} starts a fix right away. Not on drafts, or when the test may be wrong.
+                  When Kane sees a scenario fail, {providerName} starts a fix right away. Not on drafts or runs marked not checked.
                 </span>
               </span>
               <span className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors ${fixer.auto ? "bg-work" : "bg-edge"}`}>

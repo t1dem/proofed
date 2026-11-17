@@ -4,9 +4,9 @@
 
 # Proofed
 
-**Every pull request, run in Chrome before you merge it.**
+**Check the user flows a pull request touches before you merge it.**
 
-Kane CLI runs the user flows a pull request touches and posts the recording on the PR.<br>
+Kane CLI runs the user flows a pull request touches. Proofed posts local recordings or cloud recording notes on the PR.<br>
 When a flow breaks, Claude Code or OpenAI Codex fixes it, and the fix is pushed only after Kane has watched it pass.
 
 [Website](https://proofed.neptunescodm.workers.dev) · [**Break it yourself**](https://proofed.neptunescodm.workers.dev/try) · [Dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo) · [Install on GitHub](https://proofed.neptunescodm.workers.dev/install) · [CLI](#locally-and-from-an-ai-agent)
@@ -81,9 +81,9 @@ Three merged pull requests from open-source projects, replayed with Proofed. Eac
 </picture>
 
 - Only the scenarios whose `paths` the diff touches run.
-- A start page that crashes on load fails at once, with the browser's error and a screenshot, at no Kane credits.
-- Kane doesn't record video, so Proofed records Chrome itself. The clip cuts the waiting, shows where Kane clicked and zooms in on what it checks.
-- When Kane blames the test rather than the code, the scenario shows as "not checked", never as a pass.
+- For web, a start page that crashes on load fails at once, with the browser's error and a screenshot, at no Kane credits.
+- For web, Kane doesn't record video, so Proofed records Chrome itself. The clip cuts the waiting, shows where Kane clicked and zooms in on what it checks.
+- When Kane blames the test without a failed assertion, the scenario shows as "not checked". A failed assertion is retried; two failures stay failed.
 - A fix starts when someone ticks **Fix with Claude** or **Fix with Codex**, or on its own with [Fix automatically](#fix-automatically) on.
 - Each attempt rebuilds and re-checks the broken flows and affected neighbors. The final check reuses the last attempt's results on the same tree and rebuilds only when scenarios still need to run, before committing and pushing.
 - The fix commit's `Fixed-by:` line names the model.
@@ -137,9 +137,9 @@ gh variable delete PROOFED_AUTOFIX --repo owner/repo            # off
 
 ## Locally and from an AI agent
 
-`proofed check` runs the same check on your machine, against the change you haven't pushed yet: the scenarios its files touch, in Chrome, with Kane CLI. A coding agent can run it before it says a UI change is done.
+`proofed check` runs the same check on your machine, against the change you haven't pushed yet: the scenarios its files touch, with Kane CLI on their configured targets. A coding agent can run it before it says a UI change is done.
 
-It needs Node 22.18 or later, Chrome, [Kane CLI](https://www.npmjs.com/package/@testmuai/kane-cli) signed in (`kane-cli login`) and ffmpeg for the clips.
+Web checks need Node 22.18 or later, Chrome, [Kane CLI](https://www.npmjs.com/package/@testmuai/kane-cli) signed in (`kane-cli login`) and ffmpeg for the clips.
 
 Install it with `npm install -g proofed-cli` (or `pnpm add -g`, `bun add -g`), or run it once with `npx proofed-cli`.
 
@@ -179,7 +179,7 @@ Checks spend Kane credits; planning does not. Use `--no-retry` when another atte
 2. Install the GitHub App on a repo. Proofed opens a PR with the workflow and puts the keys into the repo's secrets.
 3. On that PR, the selected provider writes up to five scenarios for the app's main flows. Only the ones Kane saw pass are committed.
 
-A scenario takes 1 to 4 minutes and about 30 Kane credits the first time. A fix attempt re-runs the broken scenarios and affected neighboring scenarios before pushing.
+A web scenario takes 1 to 4 minutes and is estimated at 30 Kane credits the first time. Mobile and desktop costs are unknown without history. A fix attempt re-runs the broken scenarios and affected neighboring scenarios before pushing.
 
 <details>
 <summary><b>Setting it up by hand</b></summary>
@@ -275,7 +275,7 @@ If a failed assert is retried because Kane doubts the scenario, two failures sta
 
 `credits` is Kane's own estimate, retries included, and is labelled as an estimate in the terminal, the reports and the dashboard (`creditsSource: "kane_estimate"` in JSON). An interrupted run can spend credits before Kane reports any cost.
 
-Proofed can also read the free `kane-cli balance` before and after a scenario and report the account's debit as `accountBalance`. That figure covers the whole account: another run on the same account at the same time makes it wrong, so Proofed drops it when it sees one on the same machine.
+Proofed can also read the free `kane-cli balance` before and after a scenario and report the account's debit as `accountBalance`. That figure covers the whole account: other activity on the account can contribute to it, so attribution to the scenario is unknown. Proofed drops it when it detects overlapping Proofed runs on the same machine; it cannot detect remote account activity.
 ## Code
 
 Node 22.18+ runs the checkout's TypeScript directly, so the GitHub Action needs no build or package install. `pnpm build` emits the CLI and its imports to `dist/` for npm; `npm pack` builds it automatically. `pnpm typecheck` and `pnpm test` check the source. `pnpm check:package` builds a tarball, checks its contents, installs it into a temporary prefix and runs its version and help, then removes its temp files.
@@ -286,7 +286,7 @@ Releasing to npm is manual: [docs/release.md](docs/release.md).
 |---|---|
 | `src/cli.ts` | The PR check |
 | `src/fix.ts` | The fix loop |
-| `src/run.ts` | One scenario: Chrome, recorder, Kane, clip |
+| `src/run.ts` | One scenario: target preparation, recording, Kane, clip |
 | `src/generate.ts` | The setup PR's first scenarios |
 | `src/mode.ts` | Decides what an event asks for |
 | `site/` | The dashboard, `/try` and the Cloudflare Worker behind them |

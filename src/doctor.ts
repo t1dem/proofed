@@ -1,7 +1,7 @@
 import { executableCommand } from "./process.ts";
 import { targetChecks } from "./targetchecks.ts";
 // `proofed doctor`: whether `proofed check` can run here, and the exact fix for what can't. It only
-// calls Kane's free commands (--version, balance); no run, no credits.
+// calls Kane's free commands (--version, balance, doctor); no run, no credits.
 import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
 import { promisify } from "node:util";

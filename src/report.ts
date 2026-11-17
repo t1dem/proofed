@@ -219,7 +219,7 @@ function writtenSection(written: Written, results: ScenarioResult[], clips: Map<
   const commit = written.commit ? ` in ${commitRef(written.commit, written.commitUrl)}` : "";
   const intro =
     `**${provider} wrote ${kept.length === 1 ? "a scenario" : `${kept.length} scenarios`} for this app**, and Proofed added ${kept.length === 1 ? "it" : "them"} to this PR${commit}. ` +
-    `Kane ran each one in Chrome and saw it pass. They are plain Markdown in \`${folder}/\`: edit or delete them like any other file.`;
+    `Kane ran each one and saw it pass. They are plain Markdown in \`${folder}/\`: edit or delete them like any other file.`;
   const items = kept.map(
     ({ r, about }) => `**✓ ${r.scenario.name}** · \`${gitPath(r.scenario.file).split("/").at(-1)}\`<br>${html(oneLine(about, 200))}${clip(clips.get(r.scenario.id), 560)}`,
   );
@@ -399,7 +399,7 @@ function compose(
 
   for (const r of errored) {
     sections.push(
-      `#### ⚠ ${r.scenario.name}: Kane couldn't finish, even after a retry\n\n${quote(r.error)}` +
+      `#### ⚠ ${r.scenario.name}: Kane couldn't finish\n\n${quote(r.error)}` +
         clip(clips.get(r.scenario.id), 560) +
         `\n\nThis is about the test run, not your code. Re-run the check to try again.`,
     );

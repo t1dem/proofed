@@ -1,6 +1,6 @@
 import type { Command } from "./args.ts";
 
-const MAIN = `proofed: check web app scenarios in Chrome with Kane CLI.
+const MAIN = `proofed: check web, mobile and Electron scenarios with Kane CLI.
 
 Usage
   proofed check --json               Run affected scenarios; spends Kane credits
@@ -13,7 +13,8 @@ Usage
   proofed --version
 
 Setup
-  Node 22.18+, Chrome, Kane CLI signed in; ffmpeg for clips.
+  Node 22.18+, Kane CLI signed in; Chrome for web and Electron, ffmpeg for clips.
+  Local mobile needs Apple Silicon macOS; cloud mobile needs a TestMu real-device plan.
   Install: npm install -g proofed-cli | pnpm add -g proofed-cli | bun add -g proofed-cli
   Without installing: npx proofed-cli | pnpm dlx proofed-cli | bunx proofed-cli
   Update: npm install -g proofed-cli@latest.
@@ -26,14 +27,15 @@ Results
   130: interrupted. not_checked is not a pass. Fix error.fix for exit 3.
   On failed, read reason and diagnosis, fix the cause, then run rerun.
   failedCheck: "scenario_doubted" is Kane's opinion; review the scenario before editing it.
-  A first run is estimated at 30 credits per scenario, 1 to 4 minutes, 3 at a time.
+  A first web run is estimated at 30 credits per scenario, 1 to 4 minutes.
+  Mobile/Electron cost is unknown without history. Web runs up to 3 at a time by default; other targets serially.
   Cached passes cost nothing. Use --no-cache to run them again.
   Use --no-retry when another paid attempt is forbidden.
   Give checks at least 10 minutes; don't interrupt them.`;
 
 const CHECK = `proofed check [text] [flags]
 
-Runs the scenarios the local change touches, in Chrome, with Kane, and says what broke.
+Runs the scenarios the local change touches with Kane and says what broke.
 The local change: files that differ from the merge base with --base, committed or not, plus new
 files git doesn't ignore. Nothing changed: nothing runs (exit 0). Not a git repo: every scenario runs.
 With [text], Kane checks just that, e.g. proofed check "the cart total updates when I press +".
@@ -47,7 +49,7 @@ Which scenarios
 Where the app is (flag, then env, then .proofed/config.json, then the Proofed workflow step)
   --url <url>           Where it runs (env PROOFED_URL), e.g. http://localhost:5173
   --serve <cmd>         Starts it when the URL doesn't answer; stopped at the end (env PROOFED_SERVE)
-  --build <cmd>         Runs before --serve (env PROOFED_BUILD)
+  --build <cmd>         Builds before --serve, or before mobile/Electron checks (env PROOFED_BUILD)
   --install <cmd>       Installs the app's dependencies before the build, when node_modules is
                         missing or older than package.json or the lockfile (env PROOFED_INSTALL;
                         default: the workflow's install, else the app's package manager)
@@ -55,11 +57,23 @@ Where the app is (flag, then env, then .proofed/config.json, then the Proofed wo
                         may be an old build. --reuse tests what is running; its passes aren't cached
   --serve-timeout <s>   How long the URL gets to answer after --serve (default 60)
 
+Target (flag, env, scenario, config, workflow, default)
+  --target <kind>       web (default), ios, android or experimental desktop; filters scenario files
+  --execution <kind>    local (default) or cloud (mobile only)
+  --app <path|APP…>     Mobile artifact/APP ID or desktop executable
+  --device <name>       Exact mobile device name
+  --os-version <v>      Mobile OS version
+  --launch <cmd>        Owned desktop launch command with remote debugging
+  --cdp-endpoint <url>  Desktop browser CDP endpoint; requires launch, app or --reuse
+  Local mobile: Apple Silicon macOS. Cloud mobile: TestMu real-device automation plan.
+  Target env vars: PROOFED_TARGET, PROOFED_EXECUTION, PROOFED_APP, PROOFED_DEVICE,
+  PROOFED_OS_VERSION, PROOFED_LAUNCH, PROOFED_CDP_ENDPOINT.
+
 Running
   --dry-run             Show what would run and the credit estimate; spends nothing
   --no-cache            Run scenarios whose pass is cached, too
   --no-retry            One attempt per scenario, including infrastructure errors and doubted checks
-  --concurrency <n>     Scenarios at a time (default 3)
+  --concurrency <n>     Web scenarios at a time (default 3, env PROOFED_CONCURRENCY); other targets serial
   --headed              Show Chrome
   --out <dir>           Clips, logs, cache and result.json (default .proofed-out, env PROOFED_OUT)
   --verbose             Also print Kane's steps and Chrome's log (always in <out>/run.log)
@@ -67,16 +81,20 @@ Running
 
 JSON (also written to <out>/result.json)
   ok, exitCode, summary, counts {passed, failed, not_checked, error, skipped}, base, url,
-  app ("started" | "reused"), credits, estimatedCredits, seconds, next, rerun (re-runs
+  changedFiles, out, dryRun, app ("started" | "reused" | null), credits, estimatedCredits, seconds, next, rerun (re-runs
   everything that didn't pass),
   skipped [{id, name, why}], scenarios [{id, name, file, outcome, cached, cachedAt, objective,
-  reason, notChecked ("nothing_asserted" | "scenario_doubted"), failedCheck ("scenario_doubted"),
+  target, recordingNote, reason, notChecked ("nothing_asserted" | "scenario_doubted" |
+  "runs_disagreed" | "text_contradicted"), failedCheck ("scenario_doubted"),
   diagnosis (Kane's opinion), suggestion,
-  failedStep, steps [{remark, failed}], pageError, clip {mp4, jpg}, kaneReport, credits, seconds, rerun}]
+  failedStep, steps [{remark, failed}], pageError, clip {mp4, jpg}, kaneReport, credits, creditsSource ("kane_estimate"), accountBalance {before, after, debit},
+  estimatedCredits, seconds, rerun}]
   failedCheck is only set on failed checks Kane blames on the scenario. suggestion gives the
   conditional next step: if the app change was intended, update the scenario; otherwise fix the app.
   credits is Kane’s estimate, not an attributed account debit.
-  First-run estimate: 30 credits. Reported costs are Kane estimates. Interrupted runs can spend unreported credits.
+  First web estimate: 30 credits; mobile/Electron estimatedCredits is null without history.
+  accountBalance is the whole account debit; attribution to this scenario is unknown.
+  Interrupted runs can spend unreported credits.
   Proofed couldn't run: {ok: false, exitCode: 3, error: {code, message, fix}}
   Interrupted: the same shape with exitCode 130 and scenarios [...] for what had finished
 
@@ -91,8 +109,10 @@ const LIST = `proofed list [flags]
 Every scenario with its id, name, start URL and paths, whether the local change touches it, and
 whether a pass of it is cached. A file that doesn't parse is shown with its error (exit 3).
 Spends nothing. JSON includes selected and estimatedCredits per scenario, plus the total.
-Untouched scenarios and cached passes cost zero; first runs are estimated at 30 credits.
+Untouched scenarios and cached passes cost zero; first web runs are estimated at 30 credits.
+Mobile/Electron estimatedCredits is null without history.
 
+  Target flags and their environment variables: as for proofed check.
   --base <rev>          Compare against this (default: the remote's default branch)
   --url <url>           The app's URL, for the cache (default: as proofed check finds it)
   --scenarios <dir>     Default .proofed/scenarios
@@ -101,11 +121,13 @@ Untouched scenarios and cached passes cost zero; first runs are estimated at 30 
 
 const DOCTOR = `proofed doctor [flags]
 
-Checks Node, git, the scenarios, Kane CLI (installed, signed in, credits left), Chrome, ffmpeg
-(optional: without it there are no clips, the verdicts still work) and where the app is. Every
+Checks Node, git, the scenarios, Kane CLI (installed, signed in, credits left) and target setup.
+Web checks include Chrome, optional ffmpeg and where the app is. Mobile checks inspect artifacts
+and local tools/devices; desktop checks inspect CDP. Installs and launches nothing. Every
 problem comes with the command or step that fixes it. Uses only Kane's free commands.
 Exit 0 when proofed check can run, else 3.
 
+  Target flags and their environment variables: as for proofed check.
   --url, --serve, --build, --install   As for proofed check
   --scenarios <dir>                    Default .proofed/scenarios
   --json                               {ok, exitCode, checks [{name, status: ok | warn | fail, detail, fix}]}`;

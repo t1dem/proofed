@@ -9,10 +9,10 @@ inputs:
     description: web, ios, android or experimental desktop
     default: ""
   execution:
-    description: local or cloud
+    description: local, or cloud for ios/android (requires a TestMu real-device automation plan)
     default: ""
   app:
-    description: Rebuilt app artifact path
+    description: Rebuilt mobile artifact path or desktop executable
     default: ""
   device:
     description: Exact device name
@@ -33,7 +33,7 @@ inputs:
     description: Command that installs dependencies (runs once)
     required: true
   build:
-    description: Command that builds the app (runs after every fix attempt)
+    description: Command that builds the app before verification; skipped when final results can be reused
     required: true
   serve:
     description: Command that serves the built web app on `url` (required for web scenarios)

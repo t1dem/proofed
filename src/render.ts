@@ -265,7 +265,7 @@ export class PlainView implements View {
     const running = this.board.running().map((r) => `${r.id} ${at(r)}${r.remark ? ` at "${truncate(r.remark, 80)}"` : ""}`);
     const waiting = this.board.rows.filter((r) => r.state === "waiting").map((r) => r.id);
     this.stamp(
-      `still running: ${running.join("; ") || "starting Chrome"}${waiting.length ? `. Waiting: ${waiting.join(", ")}` : ""}`,
+      `still running: ${running.join("; ") || "starting target"}${waiting.length ? `. Waiting: ${waiting.join(", ")}` : ""}`,
     );
   }
   event(e: RunEvent) {
@@ -454,7 +454,7 @@ export class LiveView implements View {
     const t = clock(Math.round((this.now() - (r.startedAt ?? this.now())) / 1000));
     const n = name(w - 4 - t.length);
     const room = w - 2 - textWidth(n) - 2 - t.length - 2;
-    const said = r.retry ? `retrying: ${r.retry}` : (r.remark ?? "starting Chrome");
+    const said = r.retry ? `retrying: ${r.retry}` : (r.remark ?? "starting target");
     const remark = room >= 6 ? `  ${(r.retry ? c.yellow : c.dim)(truncate(said, room))}` : "";
     return `${c.cyan(spin)} ${c.bold(n)}  ${t}${remark}`;
   }
