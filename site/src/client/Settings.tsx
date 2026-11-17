@@ -1,7 +1,7 @@
 import { Check, ChevronDown, LoaderCircle, LogOut, Moon, Pause, Play, Sun, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { FixerView, MeView, RepoView } from "../worker/api";
-import { defaultModel, effortsFor, modelLabel, MODELS, PROVIDERS, providerLabel, providerOf } from "../worker/models";
+import { defaultModel, effortsFor, modelLabel, MODELS, PROVIDERS, providerLabel, providerOf, type Provider } from "../worker/models";
 import type { PullDetail, PullView } from "../worker/runs";
 import type { Theme } from "./App";
 import { api, DEMO, message, mutate, useLoad } from "./lib";
@@ -23,11 +23,11 @@ const ClaudeMark = () => (
   </svg>
 );
 
+// OpenAI Blossom: official brand SVG, with the construction guides omitted.
+// https://images.ctfassets.net/kftzwdyauwt9/3hUGLn3ypllZ0oa01qOYVq/28e8188e6f11b84c3e876569d492734f/Blossom_Light.svg
 const CodexMark = () => (
-  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true">
-    {[0, 60, 120, 180, 240, 300].map((angle) => (
-      <path key={angle} transform={`rotate(${angle} 12 12)`} d="M12 3.2a4.5 4.5 0 0 1 7.3 4.6l-7.3 4.3-3.8-2.2V5.6L12 3.4v8.7" />
-    ))}
+  <svg viewBox="146.694 227.042 267.198 264.812" width="22" height="22" fill="currentColor" aria-hidden="true">
+    <path d="M249.176 323.434V298.276C249.176 296.158 249.971 294.569 251.825 293.509L302.406 264.381C309.29 260.409 317.5 258.555 325.973 258.555C357.75 258.555 377.877 283.185 377.877 309.399C377.877 311.253 377.877 313.371 377.611 315.49L325.178 284.771C322.001 282.919 318.822 282.919 315.645 284.771L249.176 323.434ZM367.283 421.415V361.301C367.283 357.592 365.694 354.945 362.516 353.092L296.048 314.43L317.763 301.982C319.617 300.925 321.206 300.925 323.058 301.982L373.639 331.112C388.205 339.586 398.003 357.592 398.003 375.069C398.003 395.195 386.087 413.733 367.283 421.412V421.415ZM233.553 368.452L211.838 355.742C209.986 354.684 209.19 353.095 209.19 350.975V292.718C209.19 264.383 230.905 242.932 260.301 242.932C271.423 242.932 281.748 246.641 290.49 253.26L238.321 283.449C235.146 285.303 233.555 287.951 233.555 291.659V368.455L233.553 368.452ZM280.292 395.462L249.176 377.985V340.913L280.292 323.436L311.407 340.913V377.985L280.292 395.462ZM300.286 475.968C289.163 475.968 278.837 472.259 270.097 465.64L322.264 435.449C325.441 433.597 327.03 430.949 327.03 427.239V350.445L349.011 363.155C350.865 364.213 351.66 365.802 351.66 367.922V426.179C351.66 454.514 329.679 475.965 300.286 475.965V475.968ZM237.525 416.915L186.944 387.785C172.378 379.31 162.582 361.305 162.582 343.827C162.582 323.436 174.763 305.164 193.563 297.485V357.861C193.563 361.571 195.154 364.217 198.33 366.071L264.535 404.467L242.82 416.915C240.967 417.972 239.377 417.972 237.525 416.915ZM234.614 460.343C204.689 460.343 182.71 437.833 182.71 410.028C182.71 407.91 182.976 405.792 183.238 403.672L235.405 433.863C238.582 435.715 241.763 435.715 244.938 433.863L311.407 395.466V420.622C311.407 422.742 310.612 424.331 308.758 425.389L258.179 454.519C251.293 458.491 243.083 460.343 234.611 460.343H234.614ZM300.286 491.854C332.329 491.854 359.073 469.082 365.167 438.892C394.825 431.211 413.892 403.406 413.892 375.073C413.892 356.535 405.948 338.529 391.648 325.552C392.972 319.991 393.766 314.43 393.766 308.87C393.766 271.003 363.048 242.666 327.562 242.666C320.413 242.666 313.528 243.723 306.644 246.109C294.725 234.457 278.307 227.042 260.301 227.042C228.258 227.042 201.513 249.815 195.42 280.004C165.761 287.685 146.694 315.49 146.694 343.824C146.694 362.362 154.638 380.368 168.938 393.344C167.613 398.906 166.819 404.467 166.819 410.027C166.819 447.894 197.538 476.231 233.024 476.231C240.172 476.231 247.058 475.173 253.943 472.788C265.859 484.441 282.278 491.854 300.286 491.854Z" />
   </svg>
 );
 
@@ -215,6 +215,10 @@ const menuRow = `flex h-8 w-full items-center gap-2 rounded-md px-2 text-left te
 // the right, the switch for fixing automatically under both.
 function FixerMenu({ repo }: { repo: RepoView }) {
   const fixer = repo.fixer;
+  const [provider, setProvider] = useState<Provider>(() => providerOf(fixer?.model ?? ""));
+  const saves = useRef(Promise.resolve());
+  const latestSave = useRef(0);
+  const confirmed = useRef(fixer);
   const [saving, setSaving] = useState<"model" | "effort" | "auto">();
   const [error, setError] = useState<string>();
   const [open, setOpen] = useState(false);
@@ -239,8 +243,7 @@ function FixerMenu({ repo }: { repo: RepoView }) {
     );
   }
 
-  const provider = providerOf(fixer.model);
-  const providerName = providerLabel(provider);
+  const providerName = providerLabel(providerOf(fixer.model));
   const custom = !MODELS.some((m) => m.id === fixer.model);
   const setFixer = (next: FixerView) => {
     mutate<RepoView[]>("/api/repos", (all) => all.map((r) => (r.name === repo.name ? { ...r, fixer: next } : r)));
@@ -250,18 +253,27 @@ function FixerMenu({ repo }: { repo: RepoView }) {
       return { ...p, fixer: next };
     }));
   };
-  const save = async (next: FixerView, what: "model" | "effort" | "auto") => {
+  const save = (next: FixerView, what: "model" | "effort" | "auto") => {
+    const id = ++latestSave.current;
     setFixer(next);
     setSaving(what);
     setError(undefined);
-    try {
-      await api(`/api/repos/${repo.name}/fixer`, { method: "POST", body: JSON.stringify(next) });
-    } catch (e) {
-      setFixer(fixer);
-      setError(message(e));
-    } finally {
-      setSaving(undefined);
-    }
+    // Keep rapid selections in order so the last visible choice is also the last saved.
+    saves.current = saves.current.then(async () => {
+      try {
+        await api(`/api/repos/${repo.name}/fixer`, { method: "POST", body: JSON.stringify(next) });
+        confirmed.current = next;
+      } catch (e) {
+        if (id === latestSave.current) {
+          const previous = confirmed.current ?? fixer;
+          setFixer(previous);
+          setError(message(e));
+        }
+      } finally {
+        if (id === latestSave.current) setSaving(undefined);
+      }
+    });
+    return saves.current;
   };
   const saveOther = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -269,9 +281,7 @@ function FixerMenu({ repo }: { repo: RepoView }) {
     setTyping(false);
     if (model && model !== fixer.model) void save({ ...fixer, provider: providerOf(model), model, effort: effortsFor(model).some((e) => e === fixer.effort) ? fixer.effort : "high" }, "model");
   };
-  // The tick on the picked row turns into a spinner while GitHub saves it.
-  const tick = (on: boolean, what: "model" | "effort") =>
-    on && (saving === what ? <LoaderCircle size={14} className="shrink-0 animate-spin text-faint" /> : <Check size={14} className="shrink-0" />);
+  const tick = (on: boolean) => on && <Check size={14} className="shrink-0" />;
 
   return (
     <div ref={box} className="relative">
@@ -279,7 +289,10 @@ function FixerMenu({ repo }: { repo: RepoView }) {
         type="button"
         aria-expanded={open}
         disabled={repo.access === "read"}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          if (!open) setProvider(providerOf(fixer.model));
+          setOpen(!open);
+        }}
         title={repo.access === "read" ? NEEDS_WRITE : "The model that fixes this repository"}
         className={`${outline} max-md:w-full`}
       >
@@ -291,8 +304,13 @@ function FixerMenu({ repo }: { repo: RepoView }) {
         <>
         <Backdrop onClose={close} />
         <div ref={sheet} className={`${popover} w-[min(460px,calc(100vw-48px))]`}>
-          <div className="grid grid-cols-[48px_minmax(0,1fr)_120px] max-md:grid-cols-[48px_minmax(0,1fr)_104px]">
-            <div role="tablist" aria-label="Provider" className="flex flex-col items-center gap-1 border-r border-edge py-2">
+          <div className="grid min-h-[232px] grid-cols-[52px_minmax(0,1fr)_120px] max-md:min-h-[304px] max-md:grid-cols-[52px_minmax(0,1fr)_104px]">
+            <div role="tablist" aria-label="Provider" className="relative flex flex-col items-center gap-1 border-r border-edge py-2">
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute right-0.5 top-[18px] z-10 h-5 w-[3px] rounded-full bg-work transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+                style={{ transform: `translateY(${PROVIDERS.indexOf(provider) * 44}px)` }}
+              />
               {PROVIDERS.map((p) => (
                 <button
                   key={p}
@@ -303,12 +321,9 @@ function FixerMenu({ repo }: { repo: RepoView }) {
                   title={providerLabel(p)}
                   onClick={() => {
                     setTyping(false);
-                    if (p !== providerOf(fixer.model)) {
-                      const model = defaultModel(p);
-                      void save({ ...fixer, provider: p, model, effort: effortsFor(model).some((e) => e === fixer.effort) ? fixer.effort : "high" }, "model");
-                    }
+                    setProvider(p);
                   }}
-                  className={`relative grid size-11 place-items-center rounded-md text-dim hover:bg-hover hover:text-fg ${focus} ${provider === p ? "text-fg before:absolute before:left-0 before:top-2 before:bottom-2 before:w-0.5 before:rounded-full before:bg-work" : ""}`}
+                  className={`relative grid size-10 place-items-center rounded-lg text-dim hover:bg-fg/[0.08] hover:text-fg ${focus} ${provider === p ? "text-fg" : ""}`}
                 >
                   {p === "claude" ? <ClaudeMark /> : <CodexMark />}
                 </button>
@@ -327,7 +342,7 @@ function FixerMenu({ repo }: { repo: RepoView }) {
                   }}
                 >
                   <span className="flex-1 truncate">{modelLabel(m.id)}</span>
-                  {tick(fixer.model === m.id, "model")}
+                  {tick(fixer.model === m.id)}
                 </button>
               ))}
               {provider === "claude" && (typing ? (
@@ -354,7 +369,7 @@ function FixerMenu({ repo }: { repo: RepoView }) {
               ) : (
                 <button type="button" className={menuRow} onClick={() => setTyping(true)} title="A full model ID">
                   <span className={`flex-1 truncate ${custom ? "font-mono text-[12px]" : "text-dim"}`}>{custom ? fixer.model : "Other model ID…"}</span>
-                  {tick(custom, "model")}
+                  {tick(custom)}
                 </button>
               ))}
             </div>
@@ -370,7 +385,7 @@ function FixerMenu({ repo }: { repo: RepoView }) {
                   onClick={() => effort !== fixer.effort && save({ ...fixer, effort }, "effort")}
                 >
                   <span className="flex-1">{effort}</span>
-                  {tick(fixer.effort === effort, "effort")}
+                  {tick(fixer.effort === effort)}
                 </button>
               ))}
             </div>
