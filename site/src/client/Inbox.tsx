@@ -91,7 +91,7 @@ function Why({ pull }: { pull: PullView }): ReactNode {
     if (unsure.every((s) => s.reason === NOTHING_CHECKED)) return <>{strong(names(unsure))}: not checked. {NOTHING_CHECKED}</>;
     return (
       <>
-        {strong(names(unsure))}: the test may be wrong, not the code. {unsure[0]?.reason}
+        {strong(names(unsure))}: not checked. {unsure[0]?.reason}
       </>
     );
   }

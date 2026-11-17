@@ -33,6 +33,7 @@ export type ScenarioResult = {
   clip: Clip | undefined;
   error?: string;
   recordingNote?: string;
+  notChecked?: "runs_disagreed" | "text_contradicted";
   // The uncaught exception that left the page blank, when Proofed failed the scenario before Kane ran (precheck.ts).
   pageError?: string;
   // Wall time of the run, retries included.
@@ -104,7 +105,7 @@ export function outcomeOf(end: RunEnd | undefined, steps: Step[]): Outcome {
 }
 
 // An unsure run where Kane said "passed": nothing was checked, as opposed to Kane doubting the test.
-export const unchecked = (r: ScenarioResult) => r.outcome === "unsure" && r.end?.status === "passed";
+export const unchecked = (r: ScenarioResult) => r.outcome === "unsure" && r.end?.status === "passed" && !r.notChecked;
 
 export const scenarioDoubted = (r: ScenarioResult) => r.outcome === "failed" && r.end?.verdict?.family === "automation_bug";
 
@@ -161,9 +162,13 @@ export async function runScenario(scenario: Scenario, o: RunOptions): Promise<Sc
   let result = await settle(await runOnce(scenario, o));
   // Kane gives the same verdict for a wrong value all over the app and for a page it misread (a
   // heading that is there, reported as not visible). A wrong value is wrong again on a second
-  // run; a misreading rarely is. So the second run decides, whatever it comes to.
+  // run; a misreading rarely is. Disagreement leaves the check unconfirmed.
   if (!o.noRetry && scenarioDoubted(result) && !stopping()) {
+    const first = result;
     result = await settle(await again(result, RECHECK));
+    if (result.outcome === "passed") {
+      result = { ...result, outcome: "unsure", notChecked: "runs_disagreed", end: { ...result.end!, reason: `The two runs disagreed. First run failed: ${first.end?.reason ?? "check failed"} Second run passed: ${result.end?.reason ?? "check passed"}` } };
+    }
   }
   return earlier ? { ...result, earlierCredits: earlier } : result;
 }

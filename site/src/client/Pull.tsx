@@ -278,7 +278,7 @@ function runLabel(run: Run) {
   if (count("failed") > 0) return `${count("failed")} of ${run.scenarios.length} broke`;
   if (count("error") > 0) return "couldn't finish";
   const unsure = run.scenarios.filter((s) => s.outcome === "unsure");
-  if (unsure.length > 0) return unsure.every((s) => s.reason === NOTHING_CHECKED) ? "not checked" : "test may be wrong";
+  if (unsure.length > 0) return "not checked";
   return run.scenarios.length === 0 ? "nothing to run" : `${run.scenarios.length} pass`;
 }
 

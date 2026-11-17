@@ -417,16 +417,18 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     }
   });
 
-  test("a failed assert Kane blames on the scenario is run again, and a pass on the second run is the result", async () => {
+  test("a failed assert followed by a passing recheck is not checked", async () => {
     const r = repo({ heading: { mode: "flaky", credits: 15 } });
     const port = await freePort();
     try {
       const ran = await cli(r, ["check", "--json", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`]);
-      assert.equal(ran.code, 0, ran.stderr);
+      assert.equal(ran.code, 2, ran.stderr);
       const doc = json(ran);
-      assert.equal(doc.scenarios[0]!.outcome, "passed");
+      assert.equal(doc.scenarios[0]!.outcome, "not_checked");
       assert.equal(doc.scenarios[0]!.failedCheck, undefined);
       assert.equal(doc.credits, 30);
+      assert.equal(doc.scenarios[0]!.notChecked, "runs_disagreed");
+      assert.match(doc.scenarios[0]!.reason!, /runs disagreed.*First.*failed.*Second.*passed/s);
       assert.match(ran.stderr, /retrying heading: the check failed, but Kane blames the scenario/);
       assert.equal(runs(r).length, 2);
     } finally {

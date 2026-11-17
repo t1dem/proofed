@@ -34,7 +34,7 @@ export type ScenarioDoc = {
   objective: string;
   reason?: string;
   // Only for not_checked: Kane asserted nothing, or Kane thinks the scenario text itself is wrong.
-  notChecked?: "nothing_asserted" | "scenario_doubted";
+  notChecked?: "nothing_asserted" | "scenario_doubted" | "runs_disagreed" | "text_contradicted";
   // A failed check that Kane blames on the scenario, rather than the app. Diagnosis is Kane's opinion.
   failedCheck?: "scenario_doubted";
   diagnosis?: string;
@@ -136,7 +136,7 @@ export function scenarioDoc(item: Item, ctx: RerunContext): ScenarioDoc {
     cached: false,
     objective: s.objective,
     ...(reason && { reason }),
-    ...(outcome === "not_checked" && { notChecked: unchecked(r) ? "nothing_asserted" : "scenario_doubted" }),
+    ...(outcome === "not_checked" && { notChecked: r.notChecked ?? (unchecked(r) ? "nothing_asserted" : "scenario_doubted") }),
     ...(outcome !== "passed" && verdict?.root_cause && { diagnosis: verdict.root_cause }),
     ...(scenarioDoubted(r) && { failedCheck: "scenario_doubted" as const }),
     ...(scenarioDoubted(r) ? { suggestion: FAILED_CHECK_ACTION } : outcome !== "passed" && verdict?.suggestion && { suggestion: verdict.suggestion }),

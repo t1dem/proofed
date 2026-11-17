@@ -73,6 +73,8 @@ export const WORD: Record<Outcome, string> = { passed: "passed", failed: "failed
 const tint = (c: Palette, o: Outcome) => ({ passed: c.green, failed: c.red, not_checked: c.yellow, error: c.magenta })[o];
 
 const NOT_CHECKED = {
+  runs_disagreed: "The two runs disagreed; the check is not confirmed.",
+  text_contradicted: "The page text contradicts Kane’s passing check.",
   nothing_asserted: 'Kane finished without asserting anything on the page. Make the scenario end in a concrete check ("Check that …").',
   scenario_doubted: "Kane thinks the scenario text is wrong, not the app. Read what it saw, then fix the scenario or the app.",
 };

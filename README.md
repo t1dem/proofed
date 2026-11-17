@@ -253,7 +253,7 @@ What went wrong in real runs, and what Proofed does about it.
 | Kane routed around a broken button and passed | Kane is told to do each step once, with no other way to the goal | `src/run.ts` |
 | A run was still going after 361 seconds | A 360-second wall-clock limit over Kane's own `--timeout 300` | `src/kane.ts` |
 | Kane's children outlived a plain kill and held the output open | Kane runs in its own process group, killed as a whole | `src/kane.ts` |
-| On a page that was fine, Kane reported a heading as not visible and blamed the scenario | A failed check Kane blames on the scenario is run a second time; the second run is the result | `src/run.ts` |
+| On a page that was fine, Kane reported a heading as not visible and blamed the scenario | A failed check Kane blames on the scenario is run a second time; two failures stay failed; a failure followed by a pass is not checked | `src/run.ts` |
 | In 13 of 36 parallel starts, a scenario exited within seconds | One `kane-cli login` before the scenarios, and one retry; the retry always reached a verdict | `action.yml`, `src/run.ts` |
 
 ## Code
