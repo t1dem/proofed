@@ -107,3 +107,15 @@ test("mode resolves Codex aliases, provider variables and effort before installi
   assert.match(invalid, /^mode=none$/m);
   assert.match(invalid, /doesn't support/);
 });
+
+test("an invalid fixer setting keeps the check and refuses only the fix", () => {
+  const bad = { PROOFED_VARS: JSON.stringify({ PROOFED_MODEL: "opus", PROOFED_AUTOFIX: "true" }), PROOFED_CLAUDE: "true" };
+  const check = run({ action: "opened", pull_request: pr, sender: { type: "User", login: "writer" } }, "write", false, bad);
+  assert.match(check, /^mode=check$/m);
+  assert.match(check, /^model=claude-haiku-5-5$/m);
+  assert.match(check, /^autofix=false$/m);
+  assert.match(check, /^::warning::.*opus/m);
+  const tick = run(comment("edited"), "write", false, bad);
+  assert.match(tick, /^mode=none$/m);
+  assert.match(tick, /"method":"POST".*opus/);
+});

@@ -4,7 +4,7 @@
 // setup PR's check starts by writing scenarios.
 import { appendFileSync } from "node:fs";
 import { acknowledge, findReport, getPermission, getPullRequest, hasStatus, listFolder, readFile, reply, setStatus, type PullRequest } from "./github.ts";
-import { isProvider, resolveFixer } from "./models.ts";
+import { DEFAULT_FIXER, isProvider, resolveFixer } from "./models.ts";
 import { ctx, readEvent } from "./pipeline.ts";
 import { alreadyReported, fixRequested, readReportData } from "./report.ts";
 import { parseCommand, parseFix, type FixCommand } from "./requests.ts";
@@ -115,8 +115,14 @@ const configured = resolveFixer({
   effort: vars.PROOFED_EFFORT,
   ...(provider && isProvider(provider) ? { provider } : {}),
 });
-if ("error" in configured) skip(configured.error);
-const fixer = resolveFixer(asked, configured);
+// A bad fixer setting must not cost the PR its check: only the fixer waits until the setting is corrected.
+const badSetting = "error" in configured ? `The fixer setting in this repository's variables is invalid: ${configured.error}` : undefined;
+if (badSetting && mode === "fix") {
+  await reply(repo, number, badSetting).catch((e: unknown) => console.log(`Couldn't reply: ${e instanceof Error ? e.message : e}`));
+  skip(badSetting);
+}
+if (badSetting) console.log(`::warning::${badSetting} The check runs; fixing and writing scenarios are off until it is corrected.`);
+const fixer = resolveFixer(asked, "error" in configured ? DEFAULT_FIXER : configured);
 if ("error" in fixer) {
   if (event.comment) await reply(repo, number, fixer.error);
   skip(fixer.error);
@@ -128,7 +134,7 @@ const pr = event.pull_request ?? (await getPullRequest(repo, number));
 // only while the branch holds just the stock scenario, so a person's scenarios are never touched,
 // and only with a credential for the selected provider. Otherwise its CLI is not installed.
 let generate = false;
-if (mode === "check" && event.pull_request && pr.head.ref === SETUP_BRANCH && credential) {
+if (mode === "check" && event.pull_request && pr.head.ref === SETUP_BRANCH && credential && !badSetting) {
   const dir = (process.env.PROOFED_SCENARIOS || ".proofed/scenarios").replace(/\/+$/, "");
   try {
     const [only, ...more] = (await listFolder(repo, dir, pr.head.sha)) ?? [];
@@ -148,7 +154,7 @@ const opened = event.action === "opened" || event.action === "reopened";
 const byBot = event.sender?.type === "Bot" && !(opened && event.sender.login === APP_LOGIN);
 const autofix =
   mode === "check" && !generate && !!event.pull_request && vars.PROOFED_AUTOFIX === "true" && !pr.draft &&
-  !byBot && credential && process.env.PROOFED_FIX !== "false";
+  !byBot && credential && !badSetting && process.env.PROOFED_FIX !== "false";
 
 output({
   mode,
