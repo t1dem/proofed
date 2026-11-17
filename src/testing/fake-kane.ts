@@ -25,7 +25,8 @@ const record = (entry: object) => process.env.FAKE_KANE_LOG && appendFileSync(pr
 record({ args });
 
 if (args[0] === "--version") {
-  console.log("0.10.4");
+  if (process.env.FAKE_KANE_VERSION_WARNING) console.error(process.env.FAKE_KANE_VERSION_WARNING);
+  console.log(process.env.FAKE_KANE_VERSION ?? "0.10.4");
   process.exit(0);
 }
 if (args[0] === "balance") {

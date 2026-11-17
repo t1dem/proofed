@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { readKaneVersion } from "./kaneversion.ts";
 // `proofed list`: every scenario, whether the local change touches it and whether a pass of it is
 // cached. Reads files and git only; spends nothing.
 import { join } from "node:path";
@@ -32,8 +32,7 @@ export function list(flags: Flags, io: Io): number {
     const changed = base.rev ? localChanges(io.cwd, base.rev) : undefined;
     const baseId = base.rev ? mergeBaseOf(io.cwd, base.rev) : "";
     const url = resolveTarget({ flags: { url: flags.url }, env: io.env, cwd: io.cwd }).url?.value;
-    let version = "unknown";
-    try { version = execFileSync(findKane(io.env).path ?? "kane-cli", ["--version"], { env: io.env, encoding: "utf8", timeout: 20_000, stdio: ["ignore", "pipe", "pipe"] }).trim(); } catch {}
+    const version = readKaneVersion(findKane(io.env).path ?? "kane-cli", io.env);
     const cache = readCache(join(outDirOf(flags, io), CACHE_FILE));
     const filter = flags.target ?? io.env.PROOFED_TARGET;
     const scenarios = loaded.scenarios.filter((s) => !filter || (s.target ?? "web") === filter).map((s) => {

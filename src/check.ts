@@ -20,7 +20,8 @@ import { affectedBy, readScenarios, type Scenario } from "./scenarios.ts";
 import { answers, buildApp, startApp, type RunningApp } from "./serve.ts";
 import { SetupError } from "./setuperror.ts";
 import { isHttpUrl, resolveTarget, resolveScenarioTarget, type Setting } from "./target.ts";
-import { targetChecks, command } from "./targetchecks.ts";
+import { readKaneVersion } from "./kaneversion.ts";
+import { targetChecks } from "./targetchecks.ts";
 import { findKane } from "./which.ts";
 
 export type Io = {
@@ -247,14 +248,13 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     let appState: "started" | "reused" | undefined;
 
     const kaneBin = findKane(io.env).path;
-    const version = kaneBin ? await command(kaneBin, ["--version"], io.env) : { ok: false, text: "" };
-    const kaneVersion = version.ok ? version.text : "unknown";
+    const kaneVersion = kaneBin ? readKaneVersion(kaneBin, io.env) : "unknown";
     const cacheFile = join(out, CACHE_FILE);
     const cache = readCache(cacheFile);
     const keys = new Map<string, string>();
     const items = new Map<string, Item>();
     for (const s of selected) {
-      if (s.file && (s.resolvedTarget!.kind !== "web" || url) && changed && !flags.noCache && version.ok) {
+      if (s.file && (s.resolvedTarget!.kind !== "web" || url) && changed && !flags.noCache && kaneVersion !== "unknown") {
         const key = cacheKey(s, s.resolvedTarget!.kind === "web" ? new URL(s.url, url!).href : "", changed, undefined, baseId, kaneVersion);
         keys.set(s.id, key);
         const hit = cache.passes[s.id];

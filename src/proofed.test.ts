@@ -348,9 +348,10 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
   test("a pass is cached until a file in its paths changes", async () => {
     const r = repo({ pricing: { mode: "pass", paths: ["src/app.js"] } });
     const port = await freePort();
-    const check = () => cli(r, ["check", "--json", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`]);
+    const check = (extra: NodeJS.ProcessEnv = {}) => cli(r, ["check", "--json", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`], extra);
     try {
-      const first = json(await check());
+      const warning = { FAKE_KANE_VERSION_WARNING: "kane-cli: bundled Node runtime not found - running on system node 24.11.1" };
+      const first = json(await check(warning));
       assert.equal(first.credits, 7);
       assert.equal(runs(r).length, 1);
 
@@ -364,6 +365,8 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       );
       assert.equal(listed.estimatedCredits, 0);
       assert.deepEqual(listed.scenarios.map((s) => [s.selected, s.cached, s.estimatedCredits]), [[true, true, 0]]);
+      const warnedList = json<{ scenarios: { cached: boolean }[] }>(await cli(r, ["list", "--json", "--url", `http://127.0.0.1:${port}`], warning));
+      assert.equal(warnedList.scenarios[0]!.cached, true);
 
       writeFileSync(join(r.dir, "src/app.js"), "export const price = 3;\n");
       const third = json(await check());
