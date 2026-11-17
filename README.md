@@ -99,25 +99,14 @@ The repo's model is set in the [dashboard](https://proofed.neptunescodm.workers.
 
 ## Fix automatically
 
-By default a fix starts only when someone asks for it: ticks **Fix with Claude** or comments `/proofed fix`. With **Fix automatically** on, Claude starts the fix as soon as Kane sees a scenario fail, in the same job as the check.
+By default a fix waits for someone to tick **Fix with Claude**. With **Fix automatically** on, it starts as soon as Kane sees a scenario fail. Either way Claude gets up to three attempts, Kane re-runs the broken scenarios after each, and nothing is pushed until one passes. It doesn't start on drafts, on pushes by bots (Claude's own fix included) or on a run Kane marked "not checked".
 
-Either way, one fix gives Claude up to three attempts. After each one Proofed rebuilds the app and Kane re-runs the scenarios that broke; a failed attempt goes back to Claude with what Kane saw, and nothing is pushed until an attempt passes. After the push, Kane runs every scenario the pull request touches on the fix commit. If the fix broke one of those, the report says so and offers **Fix with Claude** again; that second round waits for a person, so one fix never sets off another. When all three attempts fail, nothing is pushed and the report lists what each one tried.
-
-It's off by default and set per repo. Even when it's on, no fix starts:
-
-- on a draft pull request, where someone is still at work;
-- on a push by a bot, Claude's own fix commit included. Pull requests opened by Proofed's own app, as on [Break it yourself](https://proofed.neptunescodm.workers.dev/try), are the exception;
-- when no scenario failed outright: a run Kane marked "not checked" because it blames the test, or one it couldn't finish;
-- without `CLAUDE_CODE_OAUTH_TOKEN` in the repo's secrets, or with `fix: "false"` in the workflow.
-
-In the dashboard, open Settings and click the model button in the repo's row: the switch is at the bottom of its menu. It's stored as the repo's Actions variable `PROOFED_AUTOFIX`, so you can flip it without the site, from a terminal with the [GitHub CLI](https://cli.github.com):
+Switch it in the dashboard (Settings, the model button in the repo's row) or with the GitHub CLI:
 
 ```sh
 gh variable set PROOFED_AUTOFIX --body true --repo owner/repo   # on
 gh variable delete PROOFED_AUTOFIX --repo owner/repo            # off
 ```
-
-Or on GitHub: the repo's Settings → Secrets and variables → Actions → Variables. The next check picks it up, with no change to the workflow. The model and effort work the same way, as `PROOFED_MODEL` and `PROOFED_EFFORT`, for example `gh variable set PROOFED_MODEL --body claude-opus-5-5 --repo owner/repo`.
 
 ## Locally and from an AI agent
 
