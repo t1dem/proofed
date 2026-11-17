@@ -176,4 +176,3 @@ export function resolveScenarioTarget(scenario: TargetFields, flags: TargetField
   if (kind === "desktop") return { kind, execution: "local", app, launch: values.launch, cdp_endpoint: values.cdp_endpoint, reuse: flags.reuse ?? false, sources, dir: service.dir };
   return { kind: kind as "ios" | "android", execution: execution as "local" | "cloud", app, device: values.device, os_version: values.os_version, sources, dir: service.dir };
 }
-export const targetFields = (flags: { target?: string; execution?: string; app?: string; device?: string; os_version?: string; launch?: string; cdp_endpoint?: string; reuse?: boolean }) => flags;

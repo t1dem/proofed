@@ -11,6 +11,7 @@ import { errorDoc } from "./result.ts";
 import { affectedBy, readScenarios } from "./scenarios.ts";
 import { SetupError } from "./setuperror.ts";
 import { isHttpUrl, resolveTarget, resolveScenarioTarget } from "./target.ts";
+import { findKane } from "./which.ts";
 
 export function list(flags: Flags, io: Io): number {
   const c = palette(colorOn(io.env, !!io.stdout.isTTY));
@@ -32,7 +33,7 @@ export function list(flags: Flags, io: Io): number {
     const baseId = base.rev ? mergeBaseOf(io.cwd, base.rev) : "";
     const url = resolveTarget({ flags: { url: flags.url }, env: io.env, cwd: io.cwd }).url?.value;
     let version = "unknown";
-    try { version = execFileSync(io.env.KANE_CLI ?? "kane-cli", ["--version"], { env: io.env, encoding: "utf8", timeout: 20_000, stdio: ["ignore", "pipe", "pipe"] }).trim(); } catch {}
+    try { version = execFileSync(findKane(io.env).path ?? "kane-cli", ["--version"], { env: io.env, encoding: "utf8", timeout: 20_000, stdio: ["ignore", "pipe", "pipe"] }).trim(); } catch {}
     const cache = readCache(join(outDirOf(flags, io), CACHE_FILE));
     const filter = flags.target ?? io.env.PROOFED_TARGET;
     const scenarios = loaded.scenarios.filter((s) => !filter || (s.target ?? "web") === filter).map((s) => {

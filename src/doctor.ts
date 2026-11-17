@@ -78,7 +78,7 @@ export async function doctorChecks(flags: Flags, io: Io): Promise<DoctorCheck[]>
       add("Credits", "warn", "unknown until Kane accepts the login");
     } else if (left) {
       const n = Number(left.replace(/,/g, ""));
-      add("Credits", n >= DEFAULT_CREDITS ? "ok" : "warn", `${Math.floor(n)} available; cost without target history is unknown`, n >= DEFAULT_CREDITS ? undefined : "Top up your TestMu account before running scenarios.");
+      add("Credits", n >= DEFAULT_CREDITS ? "ok" : "warn", `${Math.floor(n)} available; ${needsWeb ? `a first web run is estimated at ${DEFAULT_CREDITS} credits` : "the cost of a first mobile or desktop run is unknown"}`, n >= DEFAULT_CREDITS ? undefined : "Top up your TestMu account before running scenarios.");
     } else {
       add("Credits", "warn", "couldn't read the balance", "kane-cli balance");
     }

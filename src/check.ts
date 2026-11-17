@@ -243,7 +243,8 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     const baseId = base?.rev ? mergeBaseOf(io.cwd, base.rev) : "";
     let appState: "started" | "reused" | undefined;
 
-    const version = await command(io.env.KANE_CLI ?? "kane-cli", ["--version"], io.env);
+    const kaneBin = findKane(io.env).path;
+    const version = kaneBin ? await command(kaneBin, ["--version"], io.env) : { ok: false, text: "" };
     const kaneVersion = version.ok ? version.text : "unknown";
     const cacheFile = join(out, CACHE_FILE);
     const cache = readCache(cacheFile);

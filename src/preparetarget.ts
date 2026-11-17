@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { adopt } from "./children.ts";
@@ -106,6 +106,29 @@ export type PreparedTarget = {
   metadata: { target: Target; recordingNote?: string };
 };
 
+const alive = (pid: number) => {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; }
+};
+
+// One run per local device. The lock holds the owner's pid, so a lock left by a run that was killed
+// outright (or an old directory-style lock) is taken over instead of blocking the device for good.
+export function lockDevice(id: string, dir = tmpdir()) {
+  const lock = join(dir, `proofed-device-${id.replace(/[^\w-]/g, "_")}.lock`);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      writeFileSync(lock, String(process.pid), { flag: "wx" });
+      return () => rmSync(lock, { force: true });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      let owner = 0;
+      try { owner = Number(readFileSync(lock, "utf8").trim()); } catch {}
+      if (attempt > 0 || alive(owner)) throw new Error(`Device ${id} is in use by another Proofed run${owner ? ` (pid ${owner})` : ""}. Wait for it to finish, or delete ${lock}.`);
+      rmSync(lock, { recursive: true, force: true });
+    }
+  }
+}
+
 export async function prepareTarget(target: Target, options: { dir: string; url?: string; headless?: boolean }): Promise<PreparedTarget> {
   mkdirSync(options.dir, { recursive: true });
   const cleanups: (() => Promise<unknown> | unknown)[] = [];
@@ -161,9 +184,7 @@ export async function prepareTarget(target: Target, options: { dir: string; url?
     const kaneArgs = ["--target", kaneTarget(target), "--app", app, ...(target.device ? ["--device-name", target.device] : []), ...(target.os_version ? ["--os-version", target.os_version] : [])];
     if (target.execution === "cloud") return { kaneArgs, cleanup, metadata: { target, recordingNote: "Cloud screenshot-only: Kane evidence is in session_dir; no local MP4 is available." } };
     const id = await localDevice(target);
-    const lock = join(tmpdir(), `proofed-device-${id.replace(/[^\w-]/g, "_")}.lock`);
-    mkdirSync(lock);
-    cleanups.push(() => rmSync(lock, { recursive: true }));
+    cleanups.push(lockDevice(id));
     const native = await nativeRecorder(target, options.dir, id);
     cleanups.push(() => native.stop());
     return { kaneArgs, native, cleanup, metadata: { target } };

@@ -71,8 +71,6 @@ export async function runAll(scenarios: Scenario[], outDir: string, concurrency 
   const targetFilter = process.env.PROOFED_TARGET;
   if (targetFilter) scenarios = scenarios.filter((s) => s.resolvedTarget ? s.resolvedTarget.kind === targetFilter : !s.file || (s.target ?? "web") === targetFilter);
   scenarios = scenarios.map((s) => ({ ...s, resolvedTarget: s.resolvedTarget ?? resolveScenarioTarget(s, {}, process.env, process.cwd()) }));
-  const filter = process.env.PROOFED_TARGET;
-  if (filter) scenarios = scenarios.filter((s) => s.resolvedTarget!.kind === filter);
   if (process.env.PROOFED_FIX === "true" && scenarios.some((s) => s.resolvedTarget!.kind !== "web")) throw new Error("fix is only supported for web: the fixer restarts an HTTP server. Set fix: false.");
   const baseUrl = o.baseUrl ?? process.env.PROOFED_URL ?? "";
   const web = scenarios.filter((s) => s.resolvedTarget!.kind === "web");
