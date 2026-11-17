@@ -1,3 +1,4 @@
+import { targetChecks } from "./targetchecks.ts";
 // `proofed doctor`: whether `proofed check` can run here, and the exact fix for what can't. It only
 // calls Kane's free commands (--version, balance); no run, no credits.
 import { execFile } from "node:child_process";
@@ -14,7 +15,7 @@ import { colorOn, palette, stripAnsi } from "./render.ts";
 import { readScenarios } from "./scenarios.ts";
 import { answers } from "./serve.ts";
 import { SetupError } from "./setuperror.ts";
-import { isHttpUrl, resolveTarget } from "./target.ts";
+import { isHttpUrl, resolveTarget, resolveScenarioTarget } from "./target.ts";
 import { findKane, findOnPath } from "./which.ts";
 
 export type Status = "ok" | "warn" | "fail";
@@ -58,6 +59,10 @@ export async function doctorChecks(flags: Flags, io: Io): Promise<DoctorCheck[]>
   else add("Scenarios", "ok", `${loaded.scenarios.length} in ${dir}`);
   for (const e of loaded.errors) add("Scenario", "fail", `${e.file}: ${e.message}`, `Correct the frontmatter of ${e.file}: --- name, paths, url --- then the objective.`);
 
+  const filter = flags.target ?? io.env.PROOFED_TARGET;
+  const targets = loaded.scenarios.filter((s) => !filter || (s.target ?? "web") === filter).map((s) => resolveScenarioTarget(s, flags, io.env, io.cwd));
+  if (!targets.length) targets.push(resolveScenarioTarget({}, flags, io.env, io.cwd));
+  const needsWeb = targets.some((t) => t.kind === "web");
   const found = findKane(io.env);
   if (!found.path) {
     add("Kane CLI", "fail", `not found (${found.from})`, io.env.KANE_CLI ? "Point KANE_CLI at the kane-cli binary, or unset it." : "npm install -g @testmuai/kane-cli");
@@ -73,11 +78,16 @@ export async function doctorChecks(flags: Flags, io: Io): Promise<DoctorCheck[]>
       add("Credits", "warn", "unknown until Kane accepts the login");
     } else if (left) {
       const n = Number(left.replace(/,/g, ""));
-      add("Credits", n >= DEFAULT_CREDITS ? "ok" : "warn", `${Math.floor(n)} available; a first run is estimated at ${DEFAULT_CREDITS} credits`, n >= DEFAULT_CREDITS ? undefined : "Top up your TestMu account before running scenarios.");
+      add("Credits", n >= DEFAULT_CREDITS ? "ok" : "warn", `${Math.floor(n)} available; cost without target history is unknown`, n >= DEFAULT_CREDITS ? undefined : "Top up your TestMu account before running scenarios.");
     } else {
       add("Credits", "warn", "couldn't read the balance", "kane-cli balance");
     }
   }
+
+  for (const target of targets) {
+    for (const check of await targetChecks(target, { env: io.env, pendingBuild: !!resolveTarget({ flags, env: io.env, cwd: io.cwd }).build, launchPending: true })) checks.push({ ...check, name: `${target.kind}: ${check.name}` });
+  }
+  if (!needsWeb) return checks;
 
   const chrome = findChrome();
   add("Chrome", chrome ? "ok" : "fail", chrome ?? "not found", chrome ? undefined : "Install Google Chrome, or set CHROME_PATH to its binary.");

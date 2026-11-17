@@ -246,7 +246,7 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.ok(Date.now() - started < 10_000, "it took seconds, not a build and a run");
       assert.equal(existsSync(join(r.dir, "tmp/built")), false, "nothing was built");
       assert.ok(await portFree(port), "the app was never started");
-      assert.deepEqual(calls(r).map((c) => c.args?.[0]), ["balance"]);
+      assert.deepEqual(calls(r).map((c) => c.args?.[0]), ["--version", "balance"]);
 
       const plain = await cli(r, args.filter((a) => a !== "--json"), { FAKE_KANE_SIGNED_IN: "0", LT_USERNAME: "", LT_ACCESS_KEY: "" });
       assert.equal(plain.code, 3);
@@ -376,14 +376,14 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     }
   });
 
-  test("--dry-run and a change that touches nothing never call Kane", async () => {
+  test("--dry-run and a change that touches nothing never run Kane scenarios", async () => {
     const r = repo({ pass: { mode: "pass" }, other: { mode: "pass", paths: ["lib/**"] } });
     try {
       const dry = await cli(r, ["check", "--json", "--dry-run", "--url", "http://127.0.0.1:9"]);
       assert.equal(dry.code, 0);
       const doc = json(dry);
       assert.equal(doc.dryRun, true);
-      assert.deepEqual(doc.scenarios.map((s) => [s.id, s.outcome, s.estimatedCredits]), [["pass", "would_run", 30]]);
+      assert.deepEqual(doc.scenarios.map((s) => [s.id, s.outcome, s.estimatedCredits]), [["pass", "would_run", null]]);
       assert.deepEqual(doc.skipped, [{ id: "other", name: "Scenario other", why: "the change does not touch its paths" }]);
       // With --json, stderr carries no second copy of what the document says.
       assert.doesNotMatch(dry.stderr, /would run:/);
@@ -487,20 +487,20 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
 });
 
 describe("proofed list and doctor", () => {
-  test("list estimates only selected scenarios without calling Kane", async () => {
+  test("list estimates only selected scenarios without running Kane scenarios", async () => {
     const r = repo({ pricing: { mode: "pass", paths: ["src/app.js"] }, docs: { mode: "pass", paths: ["docs/**"] }, global: { mode: "pass", paths: [] } });
     try {
       type ListDoc = { estimatedCredits: number; scenarios: { id: string; selected: boolean; estimatedCredits: number; touched: boolean | null }[] };
       const doc = json<ListDoc>(await cli(r, ["list", "--json"]));
-      assert.equal(doc.estimatedCredits, 60);
-      assert.deepEqual(doc.scenarios.map((s) => [s.id, s.selected, s.estimatedCredits]), [["docs", false, 0], ["global", true, 30], ["pricing", true, 30]]);
+      assert.equal(doc.estimatedCredits, null);
+      assert.deepEqual(doc.scenarios.map((s) => [s.id, s.selected, s.estimatedCredits]), [["docs", false, 0], ["global", true, null], ["pricing", true, null]]);
       writeFileSync(join(r.dir, "src/app.js"), "export const price = 1;\n");
       assert.equal(json<ListDoc>(await cli(r, ["list", "--json"])).estimatedCredits, 0);
       rmSync(join(r.dir, ".git"), { recursive: true });
       const all = json<ListDoc>(await cli(r, ["list", "--json"]));
-      assert.equal(all.estimatedCredits, 90);
+      assert.equal(all.estimatedCredits, null);
       assert.ok(all.scenarios.every((s) => s.selected && s.touched === null));
-      assert.deepEqual(calls(r), []);
+      assert.ok(calls(r).every((c) => c.args?.[0] === "--version"));
     } finally {
       r.cleanup();
     }

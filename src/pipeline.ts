@@ -1,3 +1,4 @@
+import { resolveScenarioTarget } from "./target.ts";
 import { configuredFixer } from "./agent.ts";
 // Shared by the PR check (cli.ts) and the fix loop (fix.ts).
 import { execFileSync } from "node:child_process";
@@ -59,25 +60,44 @@ type RunAllOptions = {
   headless?: boolean;
   noRetry?: boolean;
   onEvent?: (event: RunEvent) => void;
+  grouped?: boolean;
 };
 
 // Every scenario gets its own Chrome, so they can run side by side; Kane is mostly waiting on its backend.
 // A start page that crashes while loading fails its scenarios without Kane (see precheck.ts).
 export async function runAll(scenarios: Scenario[], outDir: string, concurrency = Number(process.env.PROOFED_CONCURRENCY) || 3, o: RunAllOptions = {}) {
-  const baseUrl = o.baseUrl ?? env("PROOFED_URL");
+  const targetFilter = process.env.PROOFED_TARGET;
+  if (targetFilter) scenarios = scenarios.filter((s) => s.resolvedTarget ? s.resolvedTarget.kind === targetFilter : !s.file || (s.target ?? "web") === targetFilter);
+  scenarios = scenarios.map((s) => ({ ...s, resolvedTarget: s.resolvedTarget ?? resolveScenarioTarget(s, {}, process.env, process.cwd()) }));
+  const filter = process.env.PROOFED_TARGET;
+  if (filter) scenarios = scenarios.filter((s) => s.resolvedTarget!.kind === filter);
+  if (process.env.PROOFED_FIX === "true" && scenarios.some((s) => s.resolvedTarget!.kind !== "web")) throw new Error("fix is only supported for web: the fixer restarts an HTTP server. Set fix: false.");
+  const baseUrl = o.baseUrl ?? process.env.PROOFED_URL ?? "";
+  const web = scenarios.filter((s) => s.resolvedTarget!.kind === "web");
+  if (web.length && !baseUrl) throw new Error("Missing PROOFED_URL for web scenarios");
+  if (!o.grouped && scenarios.some((s) => s.resolvedTarget!.kind !== "web")) {
+    const groups = new Map<string, Scenario[]>();
+    for (const s of scenarios) {
+      const key = s.resolvedTarget!.kind;
+      groups.set(key, [...(groups.get(key) ?? []), s]);
+    }
+    const results: ScenarioResult[] = [];
+    for (const [kind, group] of groups) results.push(...await runAll(group, outDir, kind === "web" ? concurrency : 1, { ...o, grouped: true }));
+    return scenarios.map((s) => results.find((r) => r.scenario.id === s.id)!);
+  }
   const emit = o.onEvent ?? (() => {});
   for (const s of scenarios) emit({ type: "waiting", id: s.id });
   const urlOf = (s: Scenario) => new URL(s.url, baseUrl).href;
   live.track(scenarios);
   const checking = Date.now();
-  const crashes = await findCrashes([...new Set(scenarios.map(urlOf))], outDir);
+  const crashes = await findCrashes([...new Set(web.map(urlOf))], outDir);
   const checkSeconds = Math.round((Date.now() - checking) / 1000);
   const results: ScenarioResult[] = new Array(scenarios.length);
   let next = 0;
   const worker = async () => {
     for (let i = next++; i < scenarios.length; i = next++) {
       const scenario = scenarios[i]!;
-      const crash = crashes.get(urlOf(scenario));
+      const crash = scenario.resolvedTarget!.kind === "web" ? crashes.get(urlOf(scenario)) : undefined;
       if (crash) {
         log(`✗ ${scenario.name}: ${urlOf(scenario)} crashed while loading (${crash.error}); Kane not run`);
         const result = { ...crashResult(scenario, crash), seconds: checkSeconds };

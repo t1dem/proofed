@@ -1,15 +1,16 @@
+import { execFileSync } from "node:child_process";
 // `proofed list`: every scenario, whether the local change touches it and whether a pass of it is
 // cached. Reads files and git only; spends nothing.
 import { join } from "node:path";
 import type { Flags } from "./args.ts";
-import { CACHE_FILE, cacheKey, estimate, readCache } from "./cache.ts";
+import { CACHE_FILE, cacheKey, historyKey, estimate, readCache } from "./cache.ts";
 import { findBase, localChanges, mergeBaseOf } from "./changes.ts";
 import { outDirOf, scenariosDirOf, scenariosMissing, type Io } from "./check.ts";
 import { colorOn, palette, since, textWidth, truncate } from "./render.ts";
 import { errorDoc } from "./result.ts";
 import { affectedBy, readScenarios } from "./scenarios.ts";
 import { SetupError } from "./setuperror.ts";
-import { isHttpUrl, resolveTarget } from "./target.ts";
+import { isHttpUrl, resolveTarget, resolveScenarioTarget } from "./target.ts";
 
 export function list(flags: Flags, io: Io): number {
   const c = palette(colorOn(io.env, !!io.stdout.isTTY));
@@ -30,13 +31,18 @@ export function list(flags: Flags, io: Io): number {
     const changed = base.rev ? localChanges(io.cwd, base.rev) : undefined;
     const baseId = base.rev ? mergeBaseOf(io.cwd, base.rev) : "";
     const url = resolveTarget({ flags: { url: flags.url }, env: io.env, cwd: io.cwd }).url?.value;
+    let version = "unknown";
+    try { version = execFileSync(io.env.KANE_CLI ?? "kane-cli", ["--version"], { env: io.env, encoding: "utf8", timeout: 20_000, stdio: ["ignore", "pipe", "pipe"] }).trim(); } catch {}
     const cache = readCache(join(outDirOf(flags, io), CACHE_FILE));
-    const scenarios = loaded.scenarios.map((s) => {
+    const filter = flags.target ?? io.env.PROOFED_TARGET;
+    const scenarios = loaded.scenarios.filter((s) => !filter || (s.target ?? "web") === filter).map((s) => {
+      s = { ...s, resolvedTarget: resolveScenarioTarget(s, flags, io.env, io.cwd) };
       const hit = cache.passes[s.id];
-      const cached = !!(hit && url && isHttpUrl(url) && changed && hit.key === cacheKey(s, new URL(s.url, url).href, changed, undefined, baseId));
+      const cached = !!(hit && (s.resolvedTarget!.kind !== "web" || (url && isHttpUrl(url))) && changed && version !== "unknown" && hit.key === cacheKey(s, s.resolvedTarget!.kind === "web" ? new URL(s.url, url!).href : "", changed, undefined, baseId, version));
       const touched = changed ? affectedBy([s], changed).length > 0 : null;
       const selected = touched !== false && changed?.length !== 0;
       return {
+        target: s.resolvedTarget,
         id: s.id,
         name: s.name,
         file: s.file,
@@ -44,14 +50,14 @@ export function list(flags: Flags, io: Io): number {
         paths: s.paths,
         touched,
         selected,
-        estimatedCredits: selected && !cached ? estimate(cache, s.id) : 0,
+        estimatedCredits: selected && !cached ? (cache.last[historyKey(s, version)]?.credits ?? null) : 0,
         cached,
         ...(cached && { cachedAt: hit!.passedAt }),
       };
     });
     const exitCode = loaded.errors.length ? 3 : 0;
     if (flags.json) {
-      const doc = { ok: exitCode === 0, exitCode, base: base.rev ?? null, changedFiles: changed?.length ?? null, url: url ?? null, scenarios, errors: loaded.errors, estimatedCredits: scenarios.reduce((sum, s) => sum + s.estimatedCredits, 0) };
+      const doc = { ok: exitCode === 0, exitCode, base: base.rev ?? null, changedFiles: changed?.length ?? null, url: url ?? null, scenarios, errors: loaded.errors, estimatedCredits: scenarios.some((s) => s.estimatedCredits === null) ? null : scenarios.reduce((sum, s) => sum + (s.estimatedCredits ?? 0), 0) };
       io.stdout.write(`${JSON.stringify(doc)}\n`);
       return exitCode;
     }
@@ -59,10 +65,11 @@ export function list(flags: Flags, io: Io): number {
     const where = base.rev ? `changes against ${base.rev}: ${changed!.length} file${changed!.length === 1 ? "" : "s"}` : `${base.why}, so every scenario runs`;
     io.stdout.write(`${scenarios.length} scenario${scenarios.length === 1 ? "" : "s"} in ${dir}; ${where}.\n\n`);
     const rows = [
-      ["ID", "NAME", "URL", "CHANGED", "CACHED", "PATHS"],
+      ["ID", "NAME", "TARGET", "URL", "CHANGED", "CACHED", "PATHS"],
       ...scenarios.map((s) => [
         s.id,
         s.name,
+        `${s.target!.kind}/${s.target!.execution}`,
         s.url,
         s.touched === null ? "?" : s.touched ? "yes" : "no",
         s.cachedAt ? `pass ${since(s.cachedAt)}` : "no",

@@ -10,9 +10,9 @@ export const TARGET_KEYS = ["target", "execution", "app", "device", "os_version"
 export type TargetKey = typeof TARGET_KEYS[number];
 export type TargetFields = Partial<Record<TargetKey, string>>;
 export type Target =
-  | { kind: "web"; execution: "local"; sources: TargetFields }
-  | { kind: "ios" | "android"; execution: "local" | "cloud"; app?: string; device?: string; os_version?: string; sources: TargetFields }
-  | { kind: "desktop"; execution: "local"; app?: string; launch?: string; cdp_endpoint?: string; reuse: boolean; sources: TargetFields };
+  | { kind: "web"; execution: "local"; sources: TargetFields; dir: string }
+  | { kind: "ios" | "android"; execution: "local" | "cloud"; app?: string; device?: string; os_version?: string; sources: TargetFields; dir: string }
+  | { kind: "desktop"; execution: "local"; app?: string; launch?: string; cdp_endpoint?: string; reuse: boolean; sources: TargetFields; dir: string };
 export type Setting = { value: string; from: string };
 export type WebService = { url?: Setting; serve?: Setting; build?: Setting; install?: Setting; dir: string };
 
@@ -162,6 +162,8 @@ export function resolveScenarioTarget(scenario: TargetFields, flags: TargetField
     const found = layers.find(([value]) => value);
     if (found) { values[key] = found[0]; sources[key] = found[1]; }
   }
+  sources.target ??= "default";
+  sources.execution ??= "default";
   const kind = values.target ?? "web";
   const execution = values.execution ?? "local";
   if (!["web", "ios", "android", "desktop"].includes(kind) || !["local", "cloud"].includes(execution))
@@ -170,8 +172,8 @@ export function resolveScenarioTarget(scenario: TargetFields, flags: TargetField
     throw new SetupError("target_invalid", `${kind} requires execution: local`, "Use local execution.");
   const service = resolveTarget({ flags: {}, env, cwd });
   const app = values.app && (/^APP[\w-]+$/.test(values.app) ? values.app : resolve(service.dir, values.app));
-  if (kind === "web") return { kind, execution: "local", sources };
-  if (kind === "desktop") return { kind, execution: "local", app, launch: values.launch, cdp_endpoint: values.cdp_endpoint, reuse: flags.reuse ?? false, sources };
-  return { kind: kind as "ios" | "android", execution: execution as "local" | "cloud", app, device: values.device, os_version: values.os_version, sources };
+  if (kind === "web") return { kind, execution: "local", sources, dir: service.dir };
+  if (kind === "desktop") return { kind, execution: "local", app, launch: values.launch, cdp_endpoint: values.cdp_endpoint, reuse: flags.reuse ?? false, sources, dir: service.dir };
+  return { kind: kind as "ios" | "android", execution: execution as "local" | "cloud", app, device: values.device, os_version: values.os_version, sources, dir: service.dir };
 }
 export const targetFields = (flags: { target?: string; execution?: string; app?: string; device?: string; os_version?: string; launch?: string; cdp_endpoint?: string; reuse?: boolean }) => flags;

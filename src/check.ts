@@ -5,7 +5,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Flags } from "./args.ts";
-import { CACHE_FILE, DEFAULT_CREDITS, cacheKey, estimate, readCache, writeCache, type CachedPass } from "./cache.ts";
+import { CACHE_FILE, DEFAULT_CREDITS, cacheKey, historyKey, estimate, readCache, writeCache, type CachedPass } from "./cache.ts";
 import { findBase, localChanges, mergeBaseOf, repoRoot } from "./changes.ts";
 import { killChildren, stopChildren } from "./children.ts";
 import { findChrome } from "./chrome.ts";
@@ -17,9 +17,10 @@ import { askedScenario } from "./requests.ts";
 import { buildDoc, errorDoc, quote, sameCommand, scenarioDoc, type Doc, type ErrorDoc, type Item, type RerunContext, type Skipped } from "./result.ts";
 import { creditsOf, type RunEvent, type ScenarioResult } from "./run.ts";
 import { affectedBy, readScenarios, type Scenario } from "./scenarios.ts";
-import { answers, startApp, type RunningApp } from "./serve.ts";
+import { answers, buildApp, startApp, type RunningApp } from "./serve.ts";
 import { SetupError } from "./setuperror.ts";
-import { isHttpUrl, resolveTarget, type Setting } from "./target.ts";
+import { isHttpUrl, resolveTarget, resolveScenarioTarget, type Setting } from "./target.ts";
+import { targetChecks, command } from "./targetchecks.ts";
 import { findKane } from "./which.ts";
 
 export type Io = {
@@ -74,6 +75,14 @@ const fromNote = (s: Setting) => (s.from.startsWith("--") ? "" : ` (url from ${s
 // the same way. Not --no-cache or --dry-run: those were about this run.
 function rerunFlags(flags: Flags) {
   const pass: [string, string | undefined][] = [
+    ["--target", flags.target],
+    ["--execution", flags.execution],
+    ["--app", flags.app],
+    ["--device", flags.device],
+    ["--os-version", flags.os_version],
+    ["--launch", flags.launch],
+    ["--cdp-endpoint", flags.cdp_endpoint],
+
     ["--url", flags.url],
     ["--serve", flags.serve],
     ["--build", flags.build],
@@ -135,7 +144,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     if (doc.dryRun && flags.json) {
       view.close();
     } else if (doc.dryRun) {
-      for (const d of doc.scenarios) view.info(`${d.cached ? "cached:   " : "would run:"} ${d.id} (${d.name})${d.cached ? "" : `, about ${Math.round((d.estimatedCredits ?? 0) * 100) / 100} credits`}`);
+      for (const d of doc.scenarios) view.info(`${d.cached ? "cached:   " : "would run:"} ${d.id} (${d.name})${d.cached ? "" : `, ${d.estimatedCredits === null ? "unknown" : Math.round((d.estimatedCredits ?? 0) * 100) / 100} credits`}`);
       view.info(`${doc.summary}. Dry run: nothing ran, no credits spent.`);
       view.info(doc.next);
       view.close();
@@ -216,33 +225,46 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       }
     }
 
+    const targetFilter = flags.target ?? io.env.PROOFED_TARGET;
+    selected = selected.map((s) => ({ ...s, resolvedTarget: resolveScenarioTarget(s, flags, io.env, io.cwd) }));
+    if (targetFilter && !text) {
+      const matches = (s: Scenario) => (s.target ?? "web") === targetFilter;
+      if (flags.only && selected.some((s) => !matches(s))) throw new SetupError("target_selection", "--only contains scenarios incompatible with --target", "Select ids with the requested target.");
+      skipped.push(...selected.filter((s) => !matches(s)).map((s) => ({ id: s.id, name: s.name, why: "different target" })));
+      selected = selected.filter(matches);
+    }
+    const needsWeb = selected.some((s) => s.resolvedTarget!.kind === "web");
     const target = resolveTarget({ flags: { url: flags.url, serve: flags.serve, build: flags.build, install: flags.install }, env: io.env, cwd: io.cwd });
+    const needsHttp = needsWeb || !!target.serve;
     const url = target.url?.value;
-    if (url !== undefined && !isHttpUrl(url)) {
+    if (needsHttp && url !== undefined && !isHttpUrl(url)) {
       throw new SetupError("url_invalid", `"${url}" (${target.url!.from}) is not an http(s) URL.`, "Pass a full URL, e.g. --url http://localhost:5173");
     }
     const baseId = base?.rev ? mergeBaseOf(io.cwd, base.rev) : "";
     let appState: "started" | "reused" | undefined;
 
+    const version = await command(io.env.KANE_CLI ?? "kane-cli", ["--version"], io.env);
+    const kaneVersion = version.ok ? version.text : "unknown";
     const cacheFile = join(out, CACHE_FILE);
     const cache = readCache(cacheFile);
     const keys = new Map<string, string>();
     const items = new Map<string, Item>();
     for (const s of selected) {
-      if (s.file && url && changed && !flags.noCache) {
-        const key = cacheKey(s, new URL(s.url, url).href, changed, undefined, baseId);
+      if (s.file && (s.resolvedTarget!.kind !== "web" || url) && changed && !flags.noCache && version.ok) {
+        const key = cacheKey(s, s.resolvedTarget!.kind === "web" ? new URL(s.url, url!).href : "", changed, undefined, baseId, kaneVersion);
         keys.set(s.id, key);
         const hit = cache.passes[s.id];
         if (hit?.key === key) items.set(s.id, { scenario: s, cached: hit });
       }
-      if (!items.has(s.id)) items.set(s.id, { scenario: s, estimate: s.file ? estimate(cache, s.id) : DEFAULT_CREDITS });
+      if (!items.has(s.id)) items.set(s.id, { scenario: s, estimate: cache.last[historyKey(s, kaneVersion)]?.credits ?? null });
     }
     const toRun = selected.filter((s) => "estimate" in items.get(s.id)!);
     const cachedPasses = selected.flatMap((s) => {
       const item = items.get(s.id)!;
       return "cached" in item ? [{ id: s.id, name: s.name, cachedAt: item.cached.passedAt }] : [];
     });
-    const estimatedCredits = toRun.reduce((sum, s) => sum + (items.get(s.id) as { estimate: number }).estimate, 0);
+    const estimates = toRun.map((s) => (items.get(s.id) as { estimate: number | null }).estimate);
+    const estimatedCredits = estimates.includes(null) ? null : estimates.reduce<number>((sum, n) => sum + (n ?? 0), 0);
     const plan: Plan = {
       run: toRun,
       cached: cachedPasses,
@@ -274,8 +296,8 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     if (!kane.path) {
       throw new SetupError("kane_missing", `Kane CLI not found (${kane.from}).`, io.env.KANE_CLI ? "Point KANE_CLI at the kane-cli binary, or unset it." : "npm install -g @testmuai/kane-cli, then kane-cli login");
     }
-    if (!findChrome()) throw new SetupError("chrome_missing", "Chrome not found.", "Install Google Chrome, or set CHROME_PATH to its binary.");
-    if (!url) {
+    if (selected.some((s) => ["web", "desktop"].includes(s.resolvedTarget!.kind)) && !findChrome()) throw new SetupError("chrome_missing", "Chrome not found.", "Install Google Chrome, or set CHROME_PATH to its binary.");
+    if (needsHttp && !url) {
       throw new SetupError("no_url", "Proofed doesn't know where the app runs.", `Pass --url http://localhost:5173 (and --serve "npm run dev" to have Proofed start it), set PROOFED_URL, or write .proofed/config.json: { "url": "http://localhost:5173", "serve": "npm run dev" }`);
     }
     const login = await kaneLogin(kane.path, io.env);
@@ -291,7 +313,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     });
 
     showPlan();
-    if (await answers(url)) {
+    if (needsHttp && await answers(url!)) {
       // With a build configured, what answers was built from some earlier code, and a pass on it
       // would be a pass nobody saw.
       if (target.build && !flags.reuse) {
@@ -303,12 +325,12 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       }
       appState = "reused";
       view.info(`The app answers at ${url}; using it as it is${target.build ? " (--reuse: not rebuilt, passes are not cached)" : ""}.`);
-    } else if (target.serve) {
+    } else if (needsHttp && target.serve) {
       const logFile = join(out, "serve.log");
       writeFileSync(logFile, "");
       const t0 = Date.now();
       app = await startApp({
-        url,
+        url: url!,
         serve: target.serve.value,
         build: target.build?.value,
         install: target.install,
@@ -320,10 +342,19 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       appState = "started";
       const from = [target.build && `build from ${target.build.from}`, `serve from ${target.serve.from}`].filter(Boolean).join(", ");
       view.info(`Started the app in ${Math.round((Date.now() - t0) / 1000)} s (${from}); its output is in ${logFile}`);
-    } else {
+    } else if (needsHttp) {
       throw new SetupError("app_not_reachable", `Nothing answers at ${url}${fromNote(target.url!)}.`, `Start the app first, or pass the command that serves it: proofed check --serve "npm run dev"`);
     }
 
+    if (!needsHttp && (target.build || target.install)) {
+      await buildApp({ build: target.build?.value, install: target.install, cwd: target.dir, logFile: join(out, "build.log"), onPhase: (line) => view.phase(line) });
+      for (const s of toRun) if (keys.has(s.id)) keys.set(s.id, cacheKey(s, "", changed ?? [], undefined, baseId, kaneVersion));
+    }
+    for (const s of toRun) {
+      const checks = await targetChecks(s.resolvedTarget!, { env: io.env, launchPending: true });
+      const failed = checks.filter((c) => c.status === "fail");
+      if (failed.length) throw new SetupError("target_not_ready", failed.map((c) => `${c.name}: ${c.detail}`).join("\n"), failed.map((c) => c.fix).join("\n"));
+    }
     view.start();
     const cacheable = !(appState === "reused" && target.build);
     const onEvent = (e: RunEvent) => {
@@ -331,8 +362,8 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       if (e.type !== "finished") return;
       finished.set(e.id, e.result);
       const key = keys.get(e.id);
-      if (!key) return;
-      if (e.result.end?.credits_consumed !== undefined) cache.last[e.id] = { credits: creditsOf(e.result) };
+      if (e.result.end?.credits_consumed !== undefined) cache.last[historyKey(selected.find((s) => s.id === e.id)!, kaneVersion)] = { credits: creditsOf(e.result) };
+      if (!key) { writeCache(cacheFile, cache); return; }
       if (e.result.outcome === "passed" && cacheable) {
         const clip = e.result.clip && { ...(e.result.clip.mp4 && { mp4: resolve(e.result.clip.mp4) }), jpg: resolve(e.result.clip.jpg) };
         cache.passes[e.id] = { key, passedAt: new Date().toISOString(), seconds: e.result.seconds, ...(clip && { clip }) } satisfies CachedPass;
@@ -341,7 +372,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       }
       writeCache(cacheFile, cache);
     };
-    const results = await runAll(toRun, out, plan.concurrency, { baseUrl: url, headless: !flags.headed, noRetry: flags.noRetry, onEvent });
+    const results = await runAll(toRun, out, plan.concurrency, { baseUrl: url ?? "", headless: !flags.headed, noRetry: flags.noRetry, onEvent });
     // A login can run out between the login check and the runs; running the check again wouldn't help then either.
     if (results.some((r) => r.notSignedIn)) throw notSignedIn("Kane CLI refused to run a scenario: it is not signed in. The scenarios it refused weren't checked.");
     const byId = new Map(results.map((r) => [r.scenario.id, r]));

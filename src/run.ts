@@ -1,7 +1,8 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stopping } from "./children.ts";
-import { launchChrome } from "./chrome.ts";
+import { prepareTarget } from "./preparetarget.ts";
+import { resolveScenarioTarget } from "./target.ts";
 import { makeClip } from "./clip.ts";
 import { live } from "./live.ts";
 import { NOT_SIGNED_IN } from "./kaneauth.ts";
@@ -31,6 +32,7 @@ export type ScenarioResult = {
   end: RunEnd | undefined;
   clip: Clip | undefined;
   error?: string;
+  recordingNote?: string;
   // The uncaught exception that left the page blank, when Proofed failed the scenario before Kane ran (precheck.ts).
   pageError?: string;
   // Wall time of the run, retries included.
@@ -158,16 +160,26 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
 
-  let chrome: Awaited<ReturnType<typeof launchChrome>>;
+  let prepared: Awaited<ReturnType<typeof prepareTarget>>;
+  const target = scenario.resolvedTarget ?? resolveScenarioTarget(scenario, {}, process.env, process.cwd());
   try {
-    chrome = await launchChrome({ headless: o.headless ?? true });
+    prepared = await prepareTarget(target, { dir, url: target.kind === "web" ? new URL(scenario.url, o.baseUrl).href : undefined, headless: o.headless });
   } catch (e) {
-    // Counts as a browser hiccup: retried, and reported as "couldn't finish", never as a bug.
     return { scenario, outcome: "error", steps: [], end: undefined, clip: undefined, error: String(e) };
   }
   let stills: NodeJS.Timeout | undefined;
   try {
-    const recorder = await startRecorder(chrome.endpoint, join(dir, "frames"));
+    const recorder = prepared.recorder;
+    if (!recorder) {
+      let nativeClip: Promise<Clip | undefined> | undefined;
+      const stopNative = () => nativeClip ??= prepared.native?.stop();
+      const kane = await runKane({ onEnd: () => { void stopNative()?.catch(() => {}); }, objective: kaneObjective(scenario.objective), kaneArgs: prepared.kaneArgs, rawFile: join(dir, "kane.ndjson"), username: o.username, accessKey: o.accessKey, onStep: (step) => o.onEvent?.({ type: "step", id: scenario.id, step }) });
+      let recordingNote = prepared.metadata.recordingNote;
+      const clip = await stopNative()?.catch((e: unknown) => { recordingNote = `Native recording failed: ${String(e)}`; return undefined; });
+      const outcome = outcomeOf(kane.end, kane.steps);
+      writeFileSync(join(dir, "metadata.json"), JSON.stringify({ ...prepared.metadata, recordingNote }));
+      return { scenario, outcome, steps: kane.steps.map((s) => ({ ...s, ...(prepared.native && { at: Math.max(0, Date.parse(s.ts) / 1000 - prepared.native.started) }) })), end: kane.end, clip, recordingNote, ...(!kane.end && { error: kaneError(kane.stderr) || "Kane exited without run_end", notSignedIn: NOT_SIGNED_IN.test(kane.stderr) }) };
+    }
     live.scenario(scenario.id, { status: "running", steps: [], startedAt: Date.now() });
     // A still for each click or typing with the cursor on it: the frame from just before it, or a
     // new screenshot when there is none to use. Between actions, one every couple of seconds.
@@ -180,10 +192,14 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     };
     stills = setInterval(() => still(false), 2000);
     let focus: Promise<Rect | undefined> = Promise.resolve(undefined);
+    const controller = new AbortController();
+    recorder.onUnexpectedPage = () => controller.abort();
+    if (recorder.unexpectedPage) controller.abort();
     const kane = await runKane({
+      signal: controller.signal,
       objective: kaneObjective(scenario.objective),
-      url: new URL(scenario.url, o.baseUrl).href,
-      cdpEndpoint: chrome.endpoint,
+      kaneArgs: prepared.kaneArgs,
+      rawFile: join(dir, "kane.ndjson"),
       username: o.username,
       accessKey: o.accessKey,
       onStep: (s) => {
@@ -198,23 +214,23 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     // Drop the blank about:blank frames from before Kane's first navigation.
     const start = Date.parse(kane.steps[0]?.ts ?? "") / 1000 || 0;
     const recorded = recorder.stop();
-    const frames = recorded.frames.filter((f) => f.time >= start);
-    const outcome = outcomeOf(kane.end, kane.steps);
+    const frames = target.kind === "web" ? recorded.frames.filter((f) => f.time >= start) : recorded.frames;
+    const outcome = recorder.unexpectedPage ? "error" : outcomeOf(kane.end, kane.steps);
     // Kane left without a verdict: all it said goes to the log, where the cause can be read later.
     if (!kane.end) log(`Kane exited with code ${kane.exitCode} and no verdict${kane.timedOut ? " (cut off by Proofed's time limit)" : ""}. Its stderr:\n${kane.stderr.trim() || "(empty)"}`);
     // Kane's reason for such a pass is "Objective completed"; the report, the run file and the fixer show ours.
     const end = kane.end && outcome === "unsure" && kane.end.status === "passed" ? { ...kane.end, reason: NOTHING_CHECKED } : kane.end;
     log(`→ ${outcome}${end?.reason ? `: ${end.reason}` : ""} (${frames.length} frames)`);
-    const error = kane.timedOut
+    const error = recorder.unexpectedPage ? "Experimental desktop attach failed: Kane opened another page instead of using the chosen renderer" : kane.timedOut
       ? "Kane stopped responding and the run was cut off"
-      : (kane.end?.reason ?? kaneError(kane.stderr));
+      : (kane.end?.reason ?? (kaneError(kane.stderr) || "Kane exited without run_end"));
     const film = { frames, actions: recorded.actions, focus: focusRect };
     writeFileSync(join(dir, "film.json"), JSON.stringify(film));
     // A step starts when Kane announces it (the "running" event), not when it reports it done.
     const announced = new Map(kane.steps.filter((s) => s.status === "running").map((s) => [s.step, s.ts]));
     const marks = kane.steps.map((s) => Date.parse(announced.get(s.step) ?? s.ts) / 1000);
     const made = await makeClip(
-      { ...film, marks, endpoint: chrome.endpoint },
+      { ...film, marks, endpoint: prepared.montage ? await prepared.montage() : prepared.clipEndpoint! },
       join(dir, "clip"),
     ).catch((e: unknown) => {
       log(`clip failed: ${String(e)}`);
@@ -232,6 +248,6 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     };
   } finally {
     clearInterval(stills);
-    chrome.close();
+    await prepared.cleanup();
   }
 }

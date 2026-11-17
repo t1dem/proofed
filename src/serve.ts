@@ -62,7 +62,7 @@ type AppOptions = {
 
 export type RunningApp = { pid: number | undefined; stop: () => Promise<void> };
 
-export async function startApp(o: AppOptions): Promise<RunningApp> {
+export async function buildApp(o: Pick<AppOptions, "cwd" | "logFile" | "build" | "install" | "onPhase">) {
   const missing = depsMissing(o.cwd);
   if (missing) {
     const install = installCommand(o.cwd, o.install);
@@ -85,6 +85,10 @@ export async function startApp(o: AppOptions): Promise<RunningApp> {
       throw new SetupError("build_failed", `The build command exited with code ${code}: ${o.build}\n${tail(o.logFile)}`, `Make the build pass, or set another one with --build "<command>". Full output: ${o.logFile}`);
     }
   }
+}
+
+export async function startApp(o: AppOptions): Promise<RunningApp> {
+  await buildApp(o);
   o.onPhase?.(`Starting the app: ${o.serve}`);
   const server = start(o.serve, o.cwd, o.logFile);
   let exitCode: number | null | undefined;

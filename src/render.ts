@@ -132,7 +132,7 @@ export type Plan = {
   // Why these: "changes against origin/main", "--only", "your text", "every scenario (not a git repository)".
   selection: string;
   url?: string;
-  estimate: number;
+  estimate: number | null;
   concurrency: number;
   dryRun?: boolean;
 };
@@ -205,7 +205,7 @@ function planLines(p: Plan, c: Palette) {
   const lines = [
     `${c.bold("Proofed")}${p.dryRun ? " (dry run)" : ""}: ${p.dryRun ? "would check" : "checking"} ${p.run.length} of ${p.total} scenario(s), ${p.selection}${p.url ? `, at ${p.url}` : ""}.`,
   ];
-  if (p.run.length) lines.push(`Estimate: about ${num(p.estimate)} Kane credits.`);
+  if (p.run.length) lines.push(`Estimate: about ${(p.estimate === null ? "unknown" : num(p.estimate))} Kane credits.`);
   if (p.cached.length) lines.push(`Cached passes, 0 credits: ${p.cached.map((s) => s.name).join(", ")}.`);
   return lines;
 }
@@ -328,7 +328,7 @@ export class LiveView implements View {
     const c = this.c;
     const parts = [
       `${p.dryRun ? "dry run: " : ""}${p.run.length} of ${p.total} scenario${p.total === 1 ? "" : "s"}`,
-      ...(p.run.length ? [`~${num(p.estimate)} credits`] : []),
+      ...(p.run.length ? [`~${(p.estimate === null ? "unknown" : num(p.estimate))} credits`] : []),
       p.selection,
       ...(p.url ? [p.url] : []),
     ];

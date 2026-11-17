@@ -4,8 +4,8 @@
 // changed files in its `paths` (every changed file, when it has none) stay as they were. Only
 // passes are kept; everything else runs again.
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
-import { matchesGlob } from "node:path";
+import { readFileSync, writeFileSync, lstatSync, readlinkSync, readdirSync } from "node:fs";
+import { matchesGlob, join } from "node:path";
 import type { Scenario } from "./scenarios.ts";
 
 export type CachedPass = {
@@ -34,7 +34,7 @@ export function readCache(file: string): Cache {
 
 export const writeCache = (file: string, cache: Cache) => writeFileSync(file, `${JSON.stringify(cache, null, 2)}\n`);
 
-export const estimate = (cache: Cache, id: string) => cache.last[id]?.credits ?? DEFAULT_CREDITS;
+export const estimate = (cache: Cache, id: string) => cache.last[id]?.credits ?? null;
 
 // The changed files a scenario depends on.
 export const relevantChanges = (s: Scenario, changed: string[]) =>
@@ -49,16 +49,35 @@ const readOrUndefined = (file: string) => {
 };
 
 // `base`: the commit the change is measured from (mergeBaseOf).
-export function cacheKey(s: Scenario, startUrl: string, changed: string[], read: (file: string) => Uint8Array | string | undefined = readOrUndefined, base = "") {
+export function cacheKey(s: Scenario, startUrl: string, changed: string[], read: (file: string) => Uint8Array | string | undefined = readOrUndefined, base = "", kaneVersion = "") {
   const hash = createHash("sha256");
   // Length-prefixed, so no two different lists of parts hash the same.
   const add = (part: Uint8Array | string) => hash.update(`${typeof part === "string" ? Buffer.byteLength(part) : part.length}:`).update(part);
   add(read(s.file) ?? s.objective);
   add(startUrl);
+  if (s.resolvedTarget) {
+    const { sources, ...target } = s.resolvedTarget;
+    add(JSON.stringify(target));
+    add(kaneVersion);
+    if ("app" in target && target.app && !target.app.startsWith("APP")) {
+      const digest = (file: string) => {
+        try {
+          if (lstatSync(file).isSymbolicLink()) add(readlinkSync(file));
+          else if (lstatSync(file).isDirectory()) for (const name of readdirSync(file).sort()) { add(name); digest(join(file, name)); }
+          else add(readFileSync(file));
+        } catch { add("missing"); }
+      };
+      digest(target.app);
+    }
+  }
   add(base);
   for (const file of relevantChanges(s, changed).toSorted()) {
     add(file);
     add(read(file) ?? "\0deleted");
   }
   return hash.digest("hex");
+}
+
+export function historyKey(s: Scenario, version: string) {
+  return cacheKey({ ...s, file: "", paths: [], objective: s.id }, "", [], () => undefined, "", version);
 }

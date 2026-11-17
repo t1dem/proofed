@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { adopt } from "./children.ts";
@@ -36,8 +37,11 @@ export type KaneResult = {
 
 type KaneOptions = {
   objective: string;
-  url: string;
-  cdpEndpoint: string;
+  url?: string;
+  cdpEndpoint?: string;
+  kaneArgs?: string[];
+  rawFile?: string;
+  signal?: AbortSignal;
   username?: string;
   accessKey?: string;
   timeoutSeconds?: number;
@@ -55,10 +59,7 @@ export function runKane(o: KaneOptions): Promise<KaneResult> {
     "run",
     o.objective,
     "--agent",
-    "--url",
-    o.url,
-    "--cdp-endpoint",
-    o.cdpEndpoint,
+    ...(o.kaneArgs ?? ["--target", "desktop", "--url", o.url!, "--cdp-endpoint", o.cdpEndpoint!]),
     "--timeout",
     String(o.timeoutSeconds ?? 300),
     ...(o.username && o.accessKey ? ["--username", o.username, "--access-key", o.accessKey] : []),
@@ -72,6 +73,9 @@ export function runKane(o: KaneOptions): Promise<KaneResult> {
       // Already gone.
     }
   };
+  const abort = () => killGroup("SIGTERM");
+  o.signal?.addEventListener("abort", abort, { once: true });
+  if (o.signal?.aborted) abort();
   const release = adopt({ kill: killGroup, exited: new Promise((r) => proc.once("exit", r)) });
 
   const steps: Step[] = [];
@@ -79,6 +83,10 @@ export function runKane(o: KaneOptions): Promise<KaneResult> {
   let stderr = "";
   proc.stderr.on("data", (d) => (stderr += d));
 
+  if (o.rawFile) {
+    proc.stdout.on("data", (data) => appendFileSync(o.rawFile!, data));
+    proc.stderr.on("data", (data) => appendFileSync(`${o.rawFile!}.stderr`, data));
+  }
   const lines = createInterface({ input: proc.stdout });
   const drained = new Promise((r) => lines.once("close", r));
   lines.on("line", (line) => {
@@ -109,8 +117,10 @@ export function runKane(o: KaneOptions): Promise<KaneResult> {
   }, (o.wallTimeoutSeconds ?? 360) * 1000);
 
   // "exit", not "close": an orphaned grandchild can hold stdout open long after Kane is gone.
-  return new Promise((resolve) =>
+  return new Promise((resolve) => {
+    proc.once("error", (error) => { clearTimeout(watchdog); release(); resolve({ steps, end, exitCode: null, stderr: String(error), timedOut }); });
     proc.on("exit", async (exitCode) => {
+      o.signal?.removeEventListener("abort", abort);
       clearTimeout(watchdog);
       clearTimeout(hardKill);
       // Let the last lines (run_end) through, but don't wait on a stream an orphan keeps open.
@@ -118,6 +128,6 @@ export function runKane(o: KaneOptions): Promise<KaneResult> {
       killGroup("SIGKILL");
       release();
       resolve({ steps, end, exitCode, stderr, timedOut });
-    }),
-  );
+    });
+  });
 }

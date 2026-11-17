@@ -32,7 +32,12 @@ export function parseScenario(file: string, text: string): Scenario {
   const meta = new Map<string, string>();
   for (const line of head.split("\n")) {
     const kv = /^(\w+):\s*(.*)$/.exec(line.trim());
-    if (kv) meta.set(kv[1]!, kv[2]!.trim().replace(/^(["'])(.*)\1$/, "$2"));
+    if (kv) {
+      const raw = kv[2]!.trim();
+      const single = /^'((?:[^']|'')*)'$/.exec(raw);
+      const double = /^"((?:[^"\\]|\\.)*)"$/.exec(raw);
+      meta.set(kv[1]!, single ? single[1]!.replaceAll("''", "'") : double ? JSON.parse(raw) as string : raw);
+    }
   }
   const list = (raw = "") =>
     raw
@@ -51,7 +56,7 @@ export function parseScenario(file: string, text: string): Scenario {
     file,
     name: meta.get("name") ?? id,
     paths: list(meta.get("paths")),
-    url: meta.get("url") ?? "/",
+    url: meta.get("url") ?? (meta.has("target") && meta.get("target") !== "web" ? "" : "/"),
     objective,
   };
 }

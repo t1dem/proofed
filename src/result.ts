@@ -16,11 +16,13 @@ export const outcomeOf = (r: ScenarioResult): Outcome => (r.outcome === "unsure"
 export type Item =
   | { scenario: Scenario; result: ScenarioResult }
   | { scenario: Scenario; cached: CachedPass }
-  | { scenario: Scenario; estimate: number };
+  | { scenario: Scenario; estimate: number | null };
 
 export type StepDoc = { remark: string; failed?: true };
 
 export type ScenarioDoc = {
+  target?: import("./target.ts").Target;
+  recordingNote?: string;
   id: string;
   name: string;
   file?: string;
@@ -40,7 +42,7 @@ export type ScenarioDoc = {
   pageError?: string;
   clip?: { mp4?: string; jpg?: string };
   credits: number;
-  estimatedCredits?: number;
+  estimatedCredits?: number | null;
   seconds?: number;
   rerun: string;
 };
@@ -60,7 +62,7 @@ export type Doc = {
   // Whether Proofed started the app for this check or tested one that was already running.
   app: "started" | "reused" | null;
   credits: number;
-  estimatedCredits: number;
+  estimatedCredits: number | null;
   seconds: number;
   scenarios: ScenarioDoc[];
   skipped: Skipped[];
@@ -99,7 +101,7 @@ const names = (docs: ScenarioDoc[]) => docs.map((d) => d.name).join(", ");
 
 export function scenarioDoc(item: Item, ctx: RerunContext): ScenarioDoc {
   const { scenario: s } = item;
-  const head = { id: s.id, name: s.name, ...(s.file && { file: s.file }) };
+  const head = { ...(s.resolvedTarget && { target: s.resolvedTarget }), id: s.id, name: s.name, ...(s.file && { file: s.file }) };
   const rerun = rerunCommand([s.id], ctx);
   if ("estimate" in item) {
     return { ...head, outcome: "would_run", cached: false, objective: s.objective, steps: [], credits: 0, estimatedCredits: item.estimate, rerun };
@@ -126,6 +128,7 @@ export function scenarioDoc(item: Item, ctx: RerunContext): ScenarioDoc {
   const reason = outcome === "passed" ? r.end?.summary || r.end?.reason : r.end?.reason || r.error;
   return {
     ...head,
+    ...(r.recordingNote && { recordingNote: r.recordingNote }),
     outcome,
     cached: false,
     objective: s.objective,
@@ -160,7 +163,7 @@ type DocInput = {
   out: string;
   rerun: RerunContext;
   dryRun?: boolean;
-  estimatedCredits: number;
+  estimatedCredits: number | null;
   // Why nothing runs, when nothing does.
   idle?: { summary: string; next: string };
 };
@@ -179,7 +182,7 @@ export function buildDoc(input: DocInput): Doc {
   const broken = scenarios.filter((d) => d.outcome !== "passed" && d.outcome !== "would_run");
   const rerun = rerunCommand(broken.map((d) => d.id), input.rerun);
   const cached = scenarios.filter((d) => d.cached).length;
-  const estimatedCredits = round(input.estimatedCredits);
+  const estimatedCredits = input.estimatedCredits === null ? null : round(input.estimatedCredits);
 
   let summary: string;
   let next: string;
@@ -187,7 +190,7 @@ export function buildDoc(input: DocInput): Doc {
     ({ summary, next } = input.idle);
   } else if (input.dryRun) {
     const would = of("would_run").length;
-    summary = `Would run ${would} scenario(s) for about ${estimatedCredits} credits${cached ? `; ${cached} cached pass(es) cost nothing` : ""}`;
+    summary = `Would run ${would} scenario(s) for ${estimatedCredits === null ? "unknown" : `about ${estimatedCredits}`} credits${cached ? `; ${cached} cached pass(es) cost nothing` : ""}`;
     next = would ? `Run it for real: ${sameCommand(input.rerun)}` : "Nothing would run.";
   } else if (counts.failed > 0) {
     summary = `${counts.failed} of ${scenarios.length} broke: ${names(of("failed"))}`;

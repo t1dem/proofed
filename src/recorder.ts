@@ -105,7 +105,7 @@ export const samePage = (a: Page, b: Page) =>
 // Kane doesn't record video, so we attach to the same Chrome over CDP and keep every
 // screencast frame with its timestamp. Frames are only sent when the page repaints,
 // which is why the clip later replays them with their real durations.
-export async function startRecorder(endpoint: string, outDir: string) {
+export async function startRecorder(endpoint: string, outDir: string, targetId?: string) {
   mkdirSync(outDir, { recursive: true });
   const cdp = await connectCdp(endpoint);
   const frames: Frame[] = [];
@@ -116,9 +116,12 @@ export async function startRecorder(endpoint: string, outDir: string) {
   // as it still is until the next comes in.
   const latest = new Map<string, { jpeg: Uint8Array; meta: ScreencastMetadata }>();
 
+  let unexpectedPage = false;
+  let onUnexpectedPage: (() => void) | undefined;
   const attached = new Set<string>();
   cdp.on("Target.targetCreated", ({ targetInfo }) => {
-    if (targetInfo.type !== "page" || attached.has(targetInfo.targetId)) return;
+    if (targetId && targetInfo.type === "page" && targetInfo.targetId !== targetId) { unexpectedPage = true; onUnexpectedPage?.(); }
+    if ((targetId && targetInfo.targetId !== targetId) || targetInfo.type !== "page" || attached.has(targetInfo.targetId)) return;
     attached.add(targetInfo.targetId);
     void cdp.send("Target.attachToTarget", { targetId: targetInfo.targetId, flatten: true }).catch(() => {});
   });
@@ -128,12 +131,13 @@ export async function startRecorder(endpoint: string, outDir: string) {
     await cdp.send("Runtime.enable", {}, sessionId);
     await cdp.send("Runtime.addBinding", { name: BINDING }, sessionId);
     await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: LISTENER }, sessionId);
+    if (targetId) await cdp.send("Runtime.evaluate", { expression: LISTENER }, sessionId);
     await cdp.send("Page.startScreencast", { format: "jpeg", quality: 80, maxWidth: MAX_WIDTH, maxHeight: MAX_HEIGHT }, sessionId);
   };
   let firstPage: (info: TargetInfo) => void = () => {};
   const ready = new Promise<TargetInfo>((resolve) => (firstPage = resolve));
   cdp.on("Target.attachedToTarget", ({ sessionId, targetInfo }) => {
-    if (targetInfo.type !== "page") return;
+    if (targetInfo.type !== "page" || (targetId && targetInfo.targetId !== targetId)) return;
     prepare(sessionId).then(
       () => firstPage(targetInfo),
       () => {}, // The page closed while we were setting it up.
@@ -184,6 +188,8 @@ export async function startRecorder(endpoint: string, outDir: string) {
   await Promise.race([ready, new Promise((r) => setTimeout(r, 5000))]);
 
   const recorder = {
+    get unexpectedPage() { return unexpectedPage; },
+    set onUnexpectedPage(callback: (() => void) | undefined) { onUnexpectedPage = callback; },
     frames,
     actions,
     // Called on each of Kane's clicks and the first keystroke in a field, with the frame from just
