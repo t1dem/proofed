@@ -22,13 +22,14 @@ test("no arguments, --help and help <command> show help; --version the version",
 });
 
 test("check takes its flags, the text as one string, and --only as ids", () => {
-  const p = parse(["check", "the", "promo code", "--url", "http://localhost:5173", "--no-cache", "--concurrency", "2", "--json"]);
+  const p = parse(["check", "the", "promo code", "--url", "http://localhost:5173", "--no-cache", "--concurrency", "2", "--no-retry", "--json"]);
   assert.ok(p.kind === "run");
   assert.equal(p.text, "the promo code");
   assert.equal(p.flags.url, "http://localhost:5173");
   assert.equal(p.flags.noCache, true);
   assert.equal(p.flags.concurrency, 2);
   assert.equal(p.flags.json, true);
+  assert.equal(p.flags.noRetry, true);
   const only = parse(["check", "--only=a, b"]);
   assert.ok(only.kind === "run");
   assert.deepEqual(only.flags.only, ["a", "b"]);

@@ -77,6 +77,10 @@ Re-run what broke: proofed check --only free-shipping --url http://localhost:417
 
 ## Credits
 
+`--no-retry` limits each selected scenario to one Kane attempt, including infrastructure errors
+and checks Kane blames on the scenario. The first verdict is returned, with its usual exit code
+and diagnostics. Without the flag, automatic retries are unchanged.
+
 A first run is estimated at 30 Kane credits per scenario. Later estimates use the last reported cost. Credits are what Kane reported for the runs; the account balance can drop slightly more. An interrupted run can spend credits before Kane reports them.
 
 ## JSON and exit codes

@@ -152,6 +152,24 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     }
   });
 
+  test("--no-retry returns the first doubted failure and infrastructure error", async () => {
+    const r = repo({ shipping: { mode: "refuted", credits: 27.42 }, broken: { mode: "error" } });
+    const port = await freePort();
+    try {
+      const ran = await cli(r, ["check", "--json", "--no-retry", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`]);
+      const doc = json(ran);
+      assert.equal(ran.code, 1);
+      assert.equal(runs(r).length, 2, "one Kane attempt per scenario");
+      assert.equal(doc.scenarios.find((s) => s.id === "shipping")!.failedCheck, "scenario_doubted");
+      assert.equal(doc.scenarios.find((s) => s.id === "broken")!.outcome, "error");
+      assert.equal(doc.credits, 27.42);
+      assert.match(doc.rerun!, /--no-retry/);
+      assert.doesNotMatch(ran.stderr, /retrying/);
+    } finally {
+      r.cleanup();
+    }
+  });
+
   test("exit 0 for a pass, without ffmpeg, in plain output", async () => {
     const r = repo({ pass: { mode: "pass" } });
     const port = await freePort();

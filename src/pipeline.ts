@@ -57,6 +57,7 @@ export function pickScenarios({ changed, only, rev }: { changed?: string[]; only
 type RunAllOptions = {
   baseUrl?: string;
   headless?: boolean;
+  noRetry?: boolean;
   onEvent?: (event: RunEvent) => void;
 };
 
@@ -94,6 +95,7 @@ export async function runAll(scenarios: Scenario[], outDir: string, concurrency 
         username: process.env.LT_USERNAME,
         accessKey: process.env.LT_ACCESS_KEY,
         headless: o.headless,
+        noRetry: o.noRetry,
         onEvent: o.onEvent,
       });
       const timed = { ...result, seconds: Math.round((Date.now() - started) / 1000) };

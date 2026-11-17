@@ -28,6 +28,7 @@ Results
   failedCheck: "scenario_doubted" is Kane's opinion; review the scenario before editing it.
   A first run is estimated at 30 credits per scenario, 1 to 4 minutes, 3 at a time.
   Cached passes cost nothing. Use --no-cache to run them again.
+  Use --no-retry when another paid attempt is forbidden.
   Give checks at least 10 minutes; don't interrupt them.`;
 
 const CHECK = `proofed check [text] [flags]
@@ -57,6 +58,7 @@ Where the app is (flag, then env, then .proofed/config.json, then the Proofed wo
 Running
   --dry-run             Show what would run and the credit estimate; spends nothing
   --no-cache            Run scenarios whose pass is cached, too
+  --no-retry            One attempt per scenario, including infrastructure errors and doubted checks
   --concurrency <n>     Scenarios at a time (default 3)
   --headed              Show Chrome
   --out <dir>           Clips, logs, cache and result.json (default .proofed-out, env PROOFED_OUT)

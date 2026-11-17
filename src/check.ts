@@ -84,7 +84,7 @@ function rerunFlags(flags: Flags) {
     ["--out", flags.out],
     ["--concurrency", flags.concurrency?.toString()],
   ];
-  const on = [flags.reuse && "--reuse", flags.headed && "--headed", flags.json && "--json"].filter((f): f is string => !!f);
+  const on = [flags.reuse && "--reuse", flags.noRetry && "--no-retry", flags.headed && "--headed", flags.json && "--json"].filter((f): f is string => !!f);
   return [...pass.flatMap(([name, v]) => (v ? [`${name} ${quote(v)}`] : [])), ...on];
 }
 
@@ -341,7 +341,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       }
       writeCache(cacheFile, cache);
     };
-    const results = await runAll(toRun, out, plan.concurrency, { baseUrl: url, headless: !flags.headed, onEvent });
+    const results = await runAll(toRun, out, plan.concurrency, { baseUrl: url, headless: !flags.headed, noRetry: flags.noRetry, onEvent });
     // A login can run out between the login check and the runs; running the check again wouldn't help then either.
     if (results.some((r) => r.notSignedIn)) throw notSignedIn("Kane CLI refused to run a scenario: it is not signed in. The scenarios it refused weren't checked.");
     const byId = new Map(results.map((r) => [r.scenario.id, r]));

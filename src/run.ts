@@ -123,6 +123,7 @@ type RunOptions = {
   accessKey?: string;
   headless?: boolean;
   attempts?: number;
+  noRetry?: boolean;
   onEvent?: (event: RunEvent) => void;
 };
 
@@ -136,7 +137,7 @@ export async function runScenario(scenario: Scenario, o: RunOptions): Promise<Sc
     return runOnce(scenario, o);
   };
   const settle = async (result: ScenarioResult) => {
-    for (let i = 2; i <= (o.attempts ?? 2) && result.outcome === "error" && !result.notSignedIn && !stopping(); i++) {
+    for (let i = 2; i <= (o.noRetry ? 1 : o.attempts ?? 2) && result.outcome === "error" && !result.notSignedIn && !stopping(); i++) {
       result = await again(result, result.error ?? "infra error");
     }
     return result;
@@ -145,7 +146,7 @@ export async function runScenario(scenario: Scenario, o: RunOptions): Promise<Sc
   // Kane gives the same verdict for a wrong value all over the app and for a page it misread (a
   // heading that is there, reported as not visible). A wrong value is wrong again on a second
   // run; a misreading rarely is. So the second run decides, whatever it comes to.
-  if (scenarioDoubted(result) && !stopping()) {
+  if (!o.noRetry && scenarioDoubted(result) && !stopping()) {
     result = await settle(await again(result, RECHECK));
   }
   return earlier ? { ...result, earlierCredits: earlier } : result;

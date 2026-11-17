@@ -26,6 +26,7 @@ export const FLAGS = {
     all: { type: "boolean" },
     "dry-run": { type: "boolean" },
     "no-cache": { type: "boolean" },
+    "no-retry": { type: "boolean" },
     headed: { type: "boolean" },
     reuse: { type: "boolean" },
     concurrency: { type: "string" },
@@ -54,6 +55,7 @@ export type Flags = {
   all: boolean;
   dryRun: boolean;
   noCache: boolean;
+  noRetry?: boolean;
   headed: boolean;
   reuse: boolean;
   verbose: boolean;
@@ -160,6 +162,7 @@ function parseFlags(command: Command, args: string[]) {
     all: on("all"),
     dryRun: on("dry-run"),
     noCache: on("no-cache"),
+    noRetry: on("no-retry"),
     headed: on("headed"),
     reuse: on("reuse"),
     verbose: on("verbose"),

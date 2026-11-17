@@ -156,7 +156,7 @@ Allow at least 10 minutes. stdout is one JSON document; progress is on stderr.
 Exit 0: passed or nothing ran. On `failed`, read `reason` and `diagnosis`, fix and run `rerun`.
 `failedCheck: "scenario_doubted"` is Kane's opinion: review the scenario's expectations.
 `not_checked` is not a pass. On `error`, retry `rerun` once. Exit 3: follow `error.fix`.
-Checks spend Kane credits; planning does not.
+Checks spend Kane credits; planning does not. Use `--no-retry` when another attempt is forbidden.
 ```
 
 ## Setup
