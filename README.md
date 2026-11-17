@@ -159,7 +159,8 @@ For an agent, add this to the app's `AGENTS.md` or `CLAUDE.md`:
 ## Checking UI changes
 
 Run the one command the task needs; `proofed check` checks its own setup first.
-- Check the change: `proofed check --json`. One behavior: `proofed check "<what>" --json`.
+- Check the change: `proofed check --json`. One scenario: `proofed check --only <id> --json`.
+- A behavior no scenario covers: `proofed check "<what>" --json`.
 - To plan without spending credits, add `--dry-run`: it shows what would run and `estimatedCredits`.
 - Only to ask which scenarios a change touches and their cost: `proofed list --json`.
 - Only for setup questions: `proofed doctor --json`.

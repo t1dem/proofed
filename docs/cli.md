@@ -35,7 +35,8 @@ last reported cost, or 30 credits for a first run. Invalid scenarios are in `err
 those before checking. These commands do not spend credits.
 
 Use `proofed check --only <id> --dry-run --json` to plan one scenario, or
-`proofed check "<what to check>" --dry-run --json` to plan an ad hoc check. Remove
+`proofed check "<what to check>" --dry-run --json` to plan a check of a behavior no scenario
+covers. Text that is a scenario's id or name is refused with exit 3 and the `--only` command. Remove
 `--dry-run` to run it. Allow at least 10 minutes. Read `reason`, `diagnosis` and `rerun`
 when a scenario fails. `not_checked` is not a pass. On exit 3, follow `error.fix`.
 

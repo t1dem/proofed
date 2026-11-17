@@ -210,6 +210,10 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.equal(e.error.code, "unknown_scenario");
       assert.match(e.error.message, /Scenarios: broken, vague/);
 
+      const named = await cli(r, ["check", "Vague", "--dry-run", "--json", "--url", url]);
+      assert.equal(named.code, 3);
+      assert.deepEqual([json<ErrorDoc>(named).error.code, json<ErrorDoc>(named).error.fix.split(".")[0]], ["text_is_scenario", "Run that scenario: proofed check --only vague"]);
+
       const down = await cli(r, ["check", "--json", "--url", "http://127.0.0.1:9"]);
       assert.equal(down.code, 3);
       assert.equal(json<ErrorDoc>(down).error.code, "app_not_reachable");

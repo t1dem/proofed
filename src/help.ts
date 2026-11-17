@@ -4,8 +4,8 @@ const MAIN = `proofed: check web app scenarios in Chrome with Kane CLI.
 
 Usage
   proofed check --json               Run affected scenarios; spends Kane credits
-  proofed check "<what to check>" --json
   proofed check --only <id> --json   Run one scenario from proofed list
+  proofed check "<behavior>" --json  Check a behavior no scenario covers
   add --dry-run to any check         Plan it with its credit estimate; free
   proofed list --json                Which scenarios a change touches, and their cost; free
   proofed doctor --json              Setup problems and fixes; check runs its own; free
