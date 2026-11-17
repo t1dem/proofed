@@ -9,7 +9,7 @@
 Kane CLI runs the user flows a pull request touches and posts the recording on the PR.<br>
 When a flow breaks, Claude Code fixes it, and the fix is pushed only after Kane has watched it pass.
 
-[**Break it yourself**](https://proofed.neptunescodm.workers.dev/try) · [Dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo) · [Demo store](https://github.com/t1dem/proofed-demo-store) · [Install on GitHub](https://proofed.neptunescodm.workers.dev/install)
+[Website](https://proofed.neptunescodm.workers.dev) · [**Break it yourself**](https://proofed.neptunescodm.workers.dev/try) · [Dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo) · [Demo store](https://github.com/t1dem/proofed-demo-store) · [Install on GitHub](https://proofed.neptunescodm.workers.dev/install)
 
 <sub>Built for the Kane CLI hackathon, November 2026.</sub>
 
