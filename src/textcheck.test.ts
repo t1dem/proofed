@@ -25,5 +25,10 @@ test("page text includes split text, open shadow roots and same-origin frames", 
     const { result } = await cdp.send<{ result: { value: string } }>('Runtime.evaluate', { expression: VISIBLE_TEXT, returnByValue: true }, sessionId);
     assert.equal(textContradiction(['Order complete', 'Shadow text', 'Frame text'], result.value), undefined);
     assert.match(textContradiction(['Missing words'], result.value)!, /Missing words/);
+    for (const html of ['<input value="Printed value">', '<style>body::before { content: "Printed value"; }</style>']) {
+      await cdp.send('Runtime.evaluate', { expression: `document.body.innerHTML = ${JSON.stringify(html)}` }, sessionId);
+      const captured = await cdp.send<{ result: { value: string | null } }>('Runtime.evaluate', { expression: VISIBLE_TEXT, returnByValue: true }, sessionId);
+      assert.equal(captured.result.value, null, 'absence from innerText cannot contradict text in a control or CSS content');
+    }
   } finally { cdp.close(); await chrome.close(); }
 });

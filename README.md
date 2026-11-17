@@ -285,7 +285,7 @@ in the reason. This costs no additional Kane credits.
 
 This is a narrow check. Unquoted names, negative checks, canvas content, images,
 colours and layout remain Kane's decision. An unreadable frame, closed shadow root
-or other incomplete capture also leaves Kane's verdict unchanged. Open shadow roots
+form control, CSS-generated content or other incomplete capture also leaves Kane's verdict unchanged. Open shadow roots
 and readable same-origin frames contribute their text. This does not validate every
 claim Kane makes, or prove that matching text is in the right container.
 

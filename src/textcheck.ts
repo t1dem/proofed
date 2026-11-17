@@ -20,9 +20,13 @@ export const VISIBLE_TEXT = `(() => {
   let complete = true;
   const read = (root) => {
     let text = root.innerText || '';
-    for (const el of root.querySelectorAll('*')) {
+    for (const el of [...(root instanceof Element ? [root] : []), ...root.querySelectorAll('*')]) {
       if (!el.checkVisibility({checkOpacity: true, checkVisibilityCSS: true})) continue;
-      if (['CANVAS', 'IMG', 'VIDEO', 'SVG', 'OBJECT', 'EMBED'].includes(el.tagName.toUpperCase())) complete = false;
+      if (['CANVAS', 'IMG', 'VIDEO', 'SVG', 'OBJECT', 'EMBED', 'INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName.toUpperCase())) complete = false;
+      for (const pseudo of ['::before', '::after']) {
+        const content = getComputedStyle(el, pseudo).content;
+        if (content && !['none', 'normal', '\"\"'].includes(content)) complete = false;
+      }
       if (el.shadowRoot) text += '\\n' + read(el.shadowRoot);
       else if (el.localName.includes('-')) complete = false;
       if (el.tagName === 'IFRAME') {
@@ -33,6 +37,6 @@ export const VISIBLE_TEXT = `(() => {
     if (root instanceof ShadowRoot) text += '\\n' + [...root.children].map(el => el.innerText || '').join('\\n');
     return text;
   };
-  const text = read(document.body);
+  const text = read(document.documentElement);
   return complete ? text : null;
 })()`;
