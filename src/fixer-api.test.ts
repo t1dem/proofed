@@ -10,7 +10,7 @@ test("the dashboard validates efforts and encrypts/syncs the Codex credential", 
       if (specifier.startsWith(".") && !/\\.[a-z]+$/i.test(specifier)) specifier += ".ts";
       return nextResolve(specifier, context);
     }});
-    const { handleApi } = await import(${JSON.stringify(new URL("../site/src/worker/api.ts", import.meta.url).href)});
+    const { handleApi, pushSecrets } = await import(${JSON.stringify(new URL("../site/src/worker/api.ts", import.meta.url).href)});
     const { encrypt, decrypt } = await import(${JSON.stringify(new URL("../site/src/worker/crypto.ts", import.meta.url).href)});
     const signing = await crypto.subtle.generateKey({name:"RSASSA-PKCS1-v1_5",modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:"SHA-256"},true,["sign","verify"]);
     const secret = Buffer.alloc(32,7).toString("base64");
@@ -52,7 +52,27 @@ test("the dashboard validates efforts and encrypts/syncs the Codex credential", 
     assert.equal(JSON.stringify(pushed).includes(key),false);
     const me=await handleApi(new Request('https://proofed.test/api/me',{headers:{cookie:'proofed_session=session'}}),env,'/api/me');
     assert.equal((await me.json()).codex,true);
+    const full = {...user, lt_username:'test-user', lt_key:await encrypt(secret,'test-key'), claude_token:await encrypt(secret,'test-claude')};
+    const previousFetch = globalThis.fetch;
+    let active = 0;
+    let peak = 0;
+    globalThis.fetch = async (url, options) => {
+      if (options.method === 'PUT' && String(url).includes('/actions/secrets/')) {
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise(resolve => setTimeout(resolve, 25));
+        active--;
+      }
+      return previousFetch(url, options);
+    };
+    const started = performance.now();
+    assert.deepEqual(await pushSecrets(env, full, 'owner/repo', 7), ['LT_USERNAME','LT_ACCESS_KEY','CLAUDE_CODE_OAUTH_TOKEN','CODEX_API_KEY']);
+    console.log('Four secret PUTs, 25 ms mock latency each: '+(performance.now()-started).toFixed(1)+' ms, peak '+peak);
+    assert.equal(active, 0);
+    assert.equal(peak, 4);
+
   `;
   const run = spawnSync(process.execPath, ["--input-type=module", "-e", script], {encoding:"utf8"});
+  console.log(run.stdout.trim());
   assert.equal(run.status,0,run.stderr+run.stdout);
 });

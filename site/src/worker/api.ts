@@ -180,14 +180,13 @@ export async function pushSecrets(env: Env, user: UserRow, repoName: string, ins
   };
   const token = await installationToken(env, installationId);
   const { key, key_id } = await gh<{ key: string; key_id: string }>(token, "GET", `/repos/${repoName}/actions/secrets/public-key`);
-  const pushed: string[] = [];
-  for (const name of SECRET_NAMES) {
-    const value = values[name];
-    if (!value) continue;
-    await gh(token, "PUT", `/repos/${repoName}/actions/secrets/${name}`, { encrypted_value: sealForGitHub(key, value), key_id });
-    pushed.push(name);
-  }
-  return pushed;
+  const names = SECRET_NAMES.filter((name) => values[name]);
+  const results = await Promise.allSettled(names.map((name) =>
+    gh(token, "PUT", `/repos/${repoName}/actions/secrets/${name}`, { encrypted_value: sealForGitHub(key, values[name]!), key_id }),
+  ));
+  const failed = results.find((r) => r.status === "rejected");
+  if (failed?.status === "rejected") throw failed.reason;
+  return names;
 }
 
 // The workflow reads vars.PROOFED_MODEL / PROOFED_EFFORT / PROOFED_AUTOFIX; a default is stored as no variable at all.
