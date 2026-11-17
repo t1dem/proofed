@@ -385,6 +385,18 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     }
   });
 
+  test("invalid concurrency in the environment fails before Kane is called", async () => {
+    const r = repo({ pass: { mode: "pass" } });
+    try {
+      const ran = await cli(r, ["check", "--json", "--url", "http://127.0.0.1:9"], { PROOFED_CONCURRENCY: "0.5" });
+      assert.equal(ran.code, 3);
+      assert.equal(json<ErrorDoc>(ran).error.code, "concurrency_invalid");
+      assert.deepEqual(calls(r), []);
+    } finally {
+      r.cleanup();
+    }
+  });
+
   test("--dry-run and a change that touches nothing never run Kane scenarios", async () => {
     const r = repo({ pass: { mode: "pass" }, other: { mode: "pass", paths: ["lib/**"] } });
     try {

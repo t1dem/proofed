@@ -15,6 +15,7 @@ import { nothingAsked } from "./requests.ts";
 import { creditsOf, scenarioDoubted, runScenario, type RunEvent, type ScenarioResult } from "./run.ts";
 import { FAILED_CHECK_ACTION, FAILED_CHECK_REASON, RUN_FILE, type RunFile } from "./runfile.ts";
 import { affectedBy, loadScenariosOr, type Scenario } from "./scenarios.ts";
+import { SetupError } from "./setuperror.ts";
 
 export const env = (name: string, fallback?: string) => {
   const value = process.env[name]?.trim() || fallback;
@@ -53,6 +54,8 @@ export function baseRev(base: { ref: string; sha: string }) {
 
 export function pickScenarios({ changed, only, rev }: { changed?: string[]; only?: string[]; rev?: string }) {
   const all = loadScenariosOr(env("PROOFED_SCENARIOS", ".proofed/scenarios"), rev);
+  const unknown = only?.filter((id) => !all.some((s) => s.id === id));
+  if (unknown?.length) throw new Error(`No scenario ${unknown.join(", ")} in ${env("PROOFED_SCENARIOS", ".proofed/scenarios")}.`);
   const selected = only?.length ? all.filter((s) => only.includes(s.id)) : changed ? affectedBy(all, changed) : all;
   return { selected, skipped: all.filter((s) => !selected.includes(s)).map((s) => s.name) };
 }
@@ -65,9 +68,20 @@ type RunAllOptions = {
   grouped?: boolean;
 };
 
+export function runConcurrency(env: NodeJS.ProcessEnv, explicit?: number) {
+  const configured = env.PROOFED_CONCURRENCY?.trim();
+  const concurrency = explicit ?? (configured ? Number(configured) : 3);
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+    const setting = explicit === undefined ? "PROOFED_CONCURRENCY" : "Concurrency";
+    throw new SetupError("concurrency_invalid", `${setting} must be a whole number of 1 or more.`, "Set PROOFED_CONCURRENCY to a positive integer or pass --concurrency.");
+  }
+  return concurrency;
+}
+
 // Web scenarios get their own Chrome and run side by side; native and desktop checks run serially.
 // A start page that crashes while loading fails its scenarios without Kane (see precheck.ts).
-export async function runAll(scenarios: Scenario[], outDir: string, concurrency = Number(process.env.PROOFED_CONCURRENCY) || 3, o: RunAllOptions = {}) {
+export async function runAll(scenarios: Scenario[], outDir: string, requestedConcurrency?: number, o: RunAllOptions = {}) {
+  const concurrency = runConcurrency(process.env, requestedConcurrency);
   scenarios = targetScenarios(scenarios);
   const baseUrl = o.baseUrl ?? process.env.PROOFED_URL ?? "";
   const web = scenarios.filter((s) => s.resolvedTarget!.kind === "web");

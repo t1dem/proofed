@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { changedFiles } from "./pipeline.ts";
+import { changedFiles, pickScenarios, runAll } from "./pipeline.ts";
+import { loadScenariosOr } from "./scenarios.ts";
 
 function inRepo(check: (git: (...args: string[]) => void) => void) {
   const cwd = process.cwd();
@@ -46,4 +47,40 @@ test("PR changes preserve non-ASCII names and embedded newlines", () => inRepo((
   git("add", "-A");
   git("commit", "-qm", "change");
   assert.deepEqual(changedFiles("main"), ["café.ts", "two\nlines.ts"]);
+}));
+
+test("invalid concurrency cannot leave a batch of scenarios unchecked", async () => {
+  for (const concurrency of [-1, 0, 0.5, Infinity]) {
+    await assert.rejects(runAll([], ".", concurrency), /concurrency.*whole number/i);
+  }
+  const before = process.env.PROOFED_CONCURRENCY;
+  try {
+    process.env.PROOFED_CONCURRENCY = "-1";
+    await assert.rejects(runAll([], "."), /PROOFED_CONCURRENCY.*whole number/);
+  } finally {
+    if (before === undefined) delete process.env.PROOFED_CONCURRENCY;
+    else process.env.PROOFED_CONCURRENCY = before;
+  }
+});
+
+test("an explicit scenario selection rejects missing IDs", () => inRepo(() => {
+  assert.throws(() => pickScenarios({ only: ["typo"] }), /No scenario typo/);
+}));
+
+test("base scenarios keep special filenames and surface invalid files", () => inRepo((git) => {
+  mkdirSync(".proofed/scenarios", { recursive: true });
+  const file = ".proofed/scenarios/café.md";
+  writeFileSync(file, "---\nname: Fallback\n---\nCheck the page.\n");
+  git("add", "-A");
+  git("commit", "-qm", "base");
+  rmSync(".proofed", { recursive: true });
+  assert.deepEqual(loadScenariosOr(".proofed/scenarios", "HEAD").map((s) => s.file), [file]);
+  assert.deepEqual(loadScenariosOr(".proofed/scenarios/", "HEAD").map((s) => s.file), [file]);
+
+  mkdirSync(".proofed/scenarios", { recursive: true });
+  writeFileSync(".proofed/scenarios/broken.md", "missing frontmatter");
+  git("add", "-A");
+  git("commit", "-qm", "invalid scenario");
+  rmSync(".proofed", { recursive: true });
+  assert.throws(() => loadScenariosOr(".proofed/scenarios", "HEAD"), /broken\.md: missing frontmatter/);
 }));

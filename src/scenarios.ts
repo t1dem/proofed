@@ -94,15 +94,11 @@ export function loadScenariosOr(dir: string, rev: string | undefined) {
   if (existsSync(dir)) return loadScenarios(dir);
   if (!rev) return [];
   const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  try {
-    return git("ls-tree", "--name-only", rev, `${gitPath(dir).replace(/\/$/, "")}/`)
-      .split("\n")
-      .filter((f) => f.endsWith(".md"))
-      .sort()
-      .map((f) => parseScenario(f, git("show", `${rev}:${f}`)));
-  } catch {
-    return [];
-  }
+  return git("ls-tree", "-z", "--name-only", rev, "--", `${gitPath(dir).replace(/\/$/, "")}/`)
+    .split("\0")
+    .filter((f) => f.endsWith(".md"))
+    .sort()
+    .map((f) => parseScenario(f, git("show", `${rev}:./${f}`)));
 }
 
 export const touches = (s: Scenario, file: string) => gitPath(file) === gitPath(s.file) || s.paths.some((glob) => matchesPath(file, glob));

@@ -11,7 +11,7 @@ import { killChildren, stopChildren } from "./children.ts";
 import { findChrome } from "./chrome.ts";
 import { KEYS_FIX, kaneLogin, LOGIN_FIX } from "./kaneauth.ts";
 import { setLog } from "./log.ts";
-import { runAll } from "./pipeline.ts";
+import { runAll, runConcurrency } from "./pipeline.ts";
 import { colorOn, LiveView, PlainView, type Plan, type Stream, type View } from "./render.ts";
 import { askedScenario } from "./requests.ts";
 import { buildDoc, errorDoc, quote, sameCommand, scenarioDoc, type Doc, type ErrorDoc, type Item, type RerunContext, type Skipped } from "./result.ts";
@@ -247,6 +247,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     const baseId = base?.rev ? mergeBaseOf(io.cwd, base.rev) : "";
     let appState: "started" | "reused" | undefined;
 
+    const concurrency = runConcurrency(io.env, flags.concurrency);
     const kaneBin = findKane(io.env).path;
     const kaneVersion = kaneBin ? readKaneVersion(kaneBin, io.env) : "unknown";
     const cacheFile = join(out, CACHE_FILE);
@@ -276,7 +277,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       selection,
       url,
       estimate: estimatedCredits,
-      concurrency: flags.concurrency ?? (Number(io.env.PROOFED_CONCURRENCY) || 3),
+      concurrency,
       dryRun: flags.dryRun,
     };
     const showPlan = () => {
