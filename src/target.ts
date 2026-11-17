@@ -6,12 +6,19 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { SetupError } from "./setuperror.ts";
 
+export const TARGET_KEYS = ["target", "execution", "app", "device", "os_version", "launch", "cdp_endpoint"] as const;
+export type TargetKey = typeof TARGET_KEYS[number];
+export type TargetFields = Partial<Record<TargetKey, string>>;
+export type Target =
+  | { kind: "web"; execution: "local"; sources: TargetFields }
+  | { kind: "ios" | "android"; execution: "local" | "cloud"; app?: string; device?: string; os_version?: string; sources: TargetFields }
+  | { kind: "desktop"; execution: "local"; app?: string; launch?: string; cdp_endpoint?: string; reuse: boolean; sources: TargetFields };
 export type Setting = { value: string; from: string };
-export type Target = { url?: Setting; serve?: Setting; build?: Setting; install?: Setting; dir: string };
+export type WebService = { url?: Setting; serve?: Setting; build?: Setting; install?: Setting; dir: string };
 
 type Layer = { from: (key: Key) => string; values: Partial<Record<Key, string>>; dir?: string };
-type Key = "url" | "serve" | "build" | "install";
-const KEYS: Key[] = ["url", "serve", "build", "install"];
+type Key = "url" | "serve" | "build" | "install" | TargetKey;
+const KEYS: Key[] = ["url", "serve", "build", "install", ...TARGET_KEYS];
 
 export const CONFIG_FILE = ".proofed/config.json";
 
@@ -104,7 +111,7 @@ type Sources = {
   cwd: string;
 };
 
-export function resolveTarget({ flags, env, cwd }: Sources): Target {
+export function resolveTarget({ flags, env, cwd }: Sources): WebService {
   const workflow = readWorkflow(cwd);
   const layers: Layer[] = [
     { from: (k) => `--${k}`, values: flags },
@@ -129,13 +136,42 @@ export function resolveTarget({ flags, env, cwd }: Sources): Target {
   // A build and an install belong with their serve command: the workflow's build is for the
   // workflow's serve. One given as a flag or in the environment applies to whichever serve is used.
   const withServe = (key: Key) => pick(key, layers.slice(0, 2)) ?? (serve && pick(key, [serve.layer]));
-  const build = withServe("build");
-  const install = withServe("install");
+  const build = withServe("build") ?? (!serve ? pick("build") : undefined);
+  const install = withServe("install") ?? (!serve ? pick("install") : undefined);
   return {
     url: url?.setting,
     serve: serve?.setting,
     build: build?.setting,
     install: install?.setting,
-    dir: resolve(cwd, serve?.layer.dir ?? "."),
+    dir: resolve(cwd, serve?.layer.dir ?? workflow?.inputs["working-directory"] ?? "."),
   };
 }
+
+export function resolveScenarioTarget(scenario: TargetFields, flags: TargetFields & { reuse?: boolean }, env: NodeJS.ProcessEnv, cwd: string): Target {
+  const config = readConfig(cwd);
+  const workflow = readWorkflow(cwd);
+  const values: TargetFields = {};
+  const sources: TargetFields = {};
+  for (const key of TARGET_KEYS) {
+    const layers = [
+      [flags[key], `--${key.replaceAll("_", "-")}`],
+      [env[`PROOFED_${key.toUpperCase()}`]?.trim(), `PROOFED_${key.toUpperCase()}`],
+      [scenario[key], "scenario"], [config[key], CONFIG_FILE],
+      [workflow?.inputs[key.replaceAll("_", "-")], workflow?.file],
+    ];
+    const found = layers.find(([value]) => value);
+    if (found) { values[key] = found[0]; sources[key] = found[1]; }
+  }
+  const kind = values.target ?? "web";
+  const execution = values.execution ?? "local";
+  if (!["web", "ios", "android", "desktop"].includes(kind) || !["local", "cloud"].includes(execution))
+    throw new SetupError("target_invalid", `Invalid target/execution: ${kind}/${execution}`, "Use web, ios, android or desktop with local or cloud.");
+  if (execution === "cloud" && (kind === "web" || kind === "desktop"))
+    throw new SetupError("target_invalid", `${kind} requires execution: local`, "Use local execution.");
+  const service = resolveTarget({ flags: {}, env, cwd });
+  const app = values.app && (/^APP[\w-]+$/.test(values.app) ? values.app : resolve(service.dir, values.app));
+  if (kind === "web") return { kind, execution: "local", sources };
+  if (kind === "desktop") return { kind, execution: "local", app, launch: values.launch, cdp_endpoint: values.cdp_endpoint, reuse: flags.reuse ?? false, sources };
+  return { kind: kind as "ios" | "android", execution: execution as "local" | "cloud", app, device: values.device, os_version: values.os_version, sources };
+}
+export const targetFields = (flags: { target?: string; execution?: string; app?: string; device?: string; os_version?: string; launch?: string; cdp_endpoint?: string; reuse?: boolean }) => flags;

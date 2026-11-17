@@ -1,8 +1,10 @@
+import type { Target, TargetFields } from "./target.ts";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, matchesGlob } from "node:path";
 
-export type Scenario = {
+export type Scenario = TargetFields & {
+  resolvedTarget?: Target;
   id: string;
   file: string;
   name: string;
@@ -30,7 +32,7 @@ export function parseScenario(file: string, text: string): Scenario {
   const meta = new Map<string, string>();
   for (const line of head.split("\n")) {
     const kv = /^(\w+):\s*(.*)$/.exec(line.trim());
-    if (kv) meta.set(kv[1]!, kv[2]!.trim());
+    if (kv) meta.set(kv[1]!, kv[2]!.trim().replace(/^(["'])(.*)\1$/, "$2"));
   }
   const list = (raw = "") =>
     raw
@@ -44,6 +46,7 @@ export function parseScenario(file: string, text: string): Scenario {
   const objective = body.trim();
   if (!objective) throw new Error(`${file}: empty objective`);
   return {
+    ...Object.fromEntries([...meta].filter(([key]) => ["target", "execution", "app", "device", "os_version", "launch", "cdp_endpoint"].includes(key))),
     id,
     file,
     name: meta.get("name") ?? id,

@@ -10,7 +10,18 @@ const COMMON = {
   out: { type: "string" },
 } as const;
 
+const TARGET = {
+  "target": { type: "string" },
+  "execution": { type: "string" },
+  "app": { type: "string" },
+  "device": { type: "string" },
+  "os-version": { type: "string" },
+  "launch": { type: "string" },
+  "cdp-endpoint": { type: "string" },
+} as const;
+
 const APP = {
+  ...TARGET,
   url: { type: "string" },
   serve: { type: "string" },
   build: { type: "string" },
@@ -33,7 +44,7 @@ export const FLAGS = {
     "serve-timeout": { type: "string" },
     verbose: { type: "boolean" },
   },
-  list: { ...COMMON, base: { type: "string" }, url: { type: "string" } },
+  list: { ...COMMON, ...TARGET, base: { type: "string" }, url: { type: "string" } },
   doctor: { ...COMMON, ...APP },
 } as const;
 
@@ -46,6 +57,13 @@ export type Flags = {
   help: boolean;
   scenarios?: string;
   out?: string;
+  target?: string;
+  execution?: string;
+  app?: string;
+  device?: string;
+  os_version?: string;
+  launch?: string;
+  cdp_endpoint?: string;
   url?: string;
   serve?: string;
   build?: string;
@@ -153,6 +171,13 @@ function parseFlags(command: Command, args: string[]) {
     help: on("help"),
     scenarios: str("scenarios"),
     out: str("out"),
+    target: str("target"),
+    execution: str("execution"),
+    app: str("app"),
+    device: str("device"),
+    os_version: str("os-version"),
+    launch: str("launch"),
+    cdp_endpoint: str("cdp-endpoint"),
     url: str("url"),
     serve: str("serve"),
     build: str("build"),
