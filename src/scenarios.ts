@@ -89,13 +89,10 @@ export function loadScenariosOr(dir: string, rev: string | undefined) {
   }
 }
 
+export const touches = (s: Scenario, file: string) => file === s.file || s.paths.some((glob) => matchesGlob(file, glob));
+
 // A scenario runs when the diff touches one of its paths, or the scenario file itself.
 // No `paths` means "always run".
 export function affectedBy(scenarios: Scenario[], changed: string[]) {
-  return scenarios.filter(
-    (s) =>
-      s.paths.length === 0 ||
-      changed.includes(s.file) ||
-      changed.some((file) => s.paths.some((glob) => matchesGlob(file, glob))),
-  );
+  return scenarios.filter((s) => s.paths.length === 0 || changed.some((file) => touches(s, file)));
 }

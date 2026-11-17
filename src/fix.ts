@@ -13,12 +13,10 @@ import { live } from "./live.ts";
 import { DEFAULT_FIXER, describeFixer, type Fixer } from "./models.ts";
 import { changedFiles, ctx, env, pickScenarios, publish, putReport, readEvent, runAll } from "./pipeline.ts";
 import { pushHead } from "./push.ts";
-import { fixRequested, FIX_BOX, readReportData, WORKING, type FailureData, type FixAttempt } from "./report.ts";
-import { nothingAsked } from "./requests.ts";
+import { fixLoop, settled } from "./fixloop.ts";
+import { fixRequested, FIX_BOX, readReportData, WORKING, type FailureData } from "./report.ts";
 import type { ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
-
-const MAX_ATTEMPTS = 3;
 
 type CommentEvent = { action: string; comment: { id: number; body: string }; issue: { number: number; pull_request?: object } };
 const event = readEvent<CommentEvent>();
@@ -108,7 +106,7 @@ function askFixer(text: string) {
 
 // Put the original report back, untick the box, and say why. Claude not running at all is an edit;
 // Claude giving up (`ended`) is the end of the fix, so the report is posted again for the notification.
-async function restoreReport(note: string, ended = false) {
+async function restoreReport(note: string, ended = false, status = "Fix didn't run; the original failure stands") {
   await live.end();
   if (!repo || !prNumber || !report) return;
   const box = `- [ ] **${FIX_BOX}**`;
@@ -116,7 +114,7 @@ async function restoreReport(note: string, ended = false) {
   const quoted = `> ${note}`;
   const restored = original.includes(box) ? original.replace(box, `${quoted}\n\n${box}`) : withLine(original, quoted);
   await (ended ? putReport(repo, prNumber, restored, true) : editComment(repo, report.id, restored));
-  await setStatus(repo, git("rev-parse", "HEAD"), "failure", "Fix didn't run; the original failure stands", runUrl);
+  await setStatus(repo, git("rev-parse", "HEAD"), "failure", status, runUrl);
 }
 
 async function serve() {
@@ -142,86 +140,71 @@ async function serve() {
   throw new Error(`App didn't come up at ${url}`);
 }
 
-// A fix counts only when Kane saw the scenario pass; an unsure run hasn't shown anything. A PR
-// description that names nothing to check isn't a failure and can't be fixed, so it never holds a fix back.
-const settled = (r: ScenarioResult) => r.outcome === "passed" || nothingAsked(r);
-const notPassing = (results: ScenarioResult[]) =>
-  results
-    .filter((r) => !settled(r))
-    .map((r) =>
-      r.outcome === "unsure"
-        ? `"${r.scenario.name}" wasn't confirmed: ${r.end?.reason}`
-        : `"${r.scenario.name}" still fails: ${r.end?.reason ?? r.error}${r.pageError ? ` Browser console: ${r.pageError}` : ""}`,
-    );
-const describe = (results: ScenarioResult[]) => notPassing(results).map((line) => `- ${line}`).join("\n");
+// What the fix has changed so far, new files included. -z: names as they are.
+const fixChanges = () => [
+  ...git("diff", "--name-only", "--no-renames", "-z", "HEAD").split("\0"),
+  ...git("ls-files", "--others", "--exclude-standard", "-z").split("\0"),
+].filter(Boolean);
 
-let failures = data.failures;
-let feedback = "";
-let summary = "";
-let lastResults: ScenarioResult[] = [];
-const tries: FixAttempt[] = [];
-let fixed = false;
-let attempt = 0;
+const loop = await fixLoop({
+  fixer,
+  failures: data.failures,
+  open: data.open ?? data.failures.map((f) => f.id),
+  checked: pickScenarios({ changed: changedFiles(base), rev }).selected.map((s) => s.id),
+  ask: (failures, feedback) => askFixer(prompt(failures, feedback)),
+  putBack: () => putBack(env("PROOFED_SCENARIOS", ".proofed/scenarios")),
+  hasChanges: () => !!git("status", "--porcelain"),
+  build: () => {
+    try {
+      execSync(buildCommand, { stdio: "pipe" });
+      return undefined;
+    } catch (e) {
+      return e instanceof Error && "stdout" in e && "stderr" in e ? `${e.stdout}${e.stderr}` : String(e);
+    }
+  },
+  changedFiles: fixChanges,
+  allScenarios: () => pickScenarios({ rev }).selected,
+  scenariosFor,
+  check: async (scenarios, attempt) => {
+    const stop = await serve();
+    try {
+      return await runAll(scenarios, `${outDir}/attempt-${attempt}`);
+    } finally {
+      stop();
+    }
+  },
+});
+const { attempt, summary, tries, feedback } = loop;
+const lastResults = loop.results;
 
-while (!fixed && attempt < MAX_ATTEMPTS) {
-  attempt++;
-  console.log(`\n=== Attempt ${attempt}: asking ${fixer.model} (${fixer.effort}) about ${failures.map((f) => f.name).join(", ")}`);
-  live.fix({ attempt, of: MAX_ATTEMPTS, doing: "writing", ...fixer, tries: [...tries] });
-  const answer = askFixer(prompt(failures, feedback));
-  if (!answer.ok) {
-    console.log(`Claude Code couldn't run: ${answer.message}`);
-    git("checkout", "--", ".");
-    await restoreReport(`Claude Code couldn't run: ${answer.message}. Tick the box, or comment \`/proofed fix\` with a model, to try again.`);
-    process.exit(1);
-  }
-  summary = answer.summary;
-  console.log(`Claude: ${summary}`);
-
-  // The scenarios and the workflows are not the fixer's to change (guard.ts): what it did there is undone.
-  const undone = putBack(env("PROOFED_SCENARIOS", ".proofed/scenarios"));
-  if (undone.length > 0) console.log(`Put back, the fixer may not change these: ${undone.join(", ")}`);
-  if (!git("status", "--porcelain")) {
-    feedback = undone.length > 0
-      ? `You changed only ${undone.join(", ")}. Scenarios and workflows are off limits and were put back. Fix the application code.`
-      : "You made no changes to the code.";
-    tries.push({ summary, result: undone.length > 0 ? "It edited the scenario instead of the code. Proofed put the scenario back." : "No change to the code." });
-    continue;
-  }
-  live.fix({ doing: "building" });
-  try {
-    execSync(buildCommand, { stdio: "pipe" });
-  } catch (e) {
-    const output = e instanceof Error && "stdout" in e && "stderr" in e ? `${e.stdout}${e.stderr}` : String(e);
-    feedback = `Your change didn't build:\n${output.slice(-3000)}`;
-    tries.push({ summary, result: "It didn't build." });
-    continue;
-  }
-
-  live.fix({ doing: "checking" });
-  const stop = await serve();
-  try {
-    lastResults = await runAll(scenariosFor(failures.map((f) => f.id)), `${outDir}/attempt-${attempt}`);
-  } finally {
-    stop();
-  }
-  fixed = lastResults.some((r) => r.outcome === "passed") && lastResults.every(settled);
-  tries.push({ summary, result: fixed ? "Kane saw it pass." : notPassing(lastResults).join("; ") });
-  if (!fixed) {
-    feedback = `Your change was: ${summary}\nThe scenarios were checked again in Chrome:\n${describe(lastResults)}`;
-    failures = data.failures.filter((f) => lastResults.some((r) => r.scenario.id === f.id && !settled(r)));
-  }
+if (loop.status === "no-claude") {
+  console.log(`Claude Code couldn't run: ${feedback}`);
+  git("checkout", "--", ".");
+  await restoreReport(`Claude Code couldn't run: ${feedback}. Tick the box, or comment \`/proofed fix\` with a model, to try again.`);
+  process.exit(1);
 }
 
-if (!fixed) {
+if (loop.status === "gave-up") {
   git("checkout", "--", ".");
   // Kane never got to re-run anything (no change, or it didn't build): keep the original report.
   if (lastResults.length === 0) {
     await restoreReport(`Claude tried ${attempt} times without a change that builds. Last note: ${feedback.split("\n")[0]}`, true);
     process.exit(1);
   }
+  // What the last attempt made pass, it broke elsewhere. Nothing was pushed, so the report's failures still stand.
+  if (loop.fixing.every(settled)) {
+    const names = (results: ScenarioResult[]) => results.map((r) => `"${r.scenario.name}"`).join(", ");
+    await restoreReport(
+      `Claude tried ${attempt} times. The last fix Kane checked made ${names(loop.fixing)} pass but broke ${names(loop.broke)}, so nothing was pushed.`,
+      true,
+      "Claude's fix broke another scenario; nothing was pushed",
+    );
+    process.exit(1);
+  }
   await live.end();
+  // Only the scenarios the report had broken: the others ran on Claude's change, which isn't on the branch.
   await publish({
-    repo, pr: prNumber, sha: git("rev-parse", "HEAD"), results: lastResults, skipped: [], runUrl, outDir, asked, previous: data,
+    repo, pr: prNumber, sha: git("rev-parse", "HEAD"), results: loop.fixing, skipped: [], runUrl, outDir, asked, previous: data,
     fix: { status: "gave-up", attempts: attempt, summary, ...fixer, tries },
   });
   process.exit(1);
