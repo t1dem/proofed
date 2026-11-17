@@ -1,10 +1,34 @@
 name: Proofed fix
-description: When the fix checkbox is ticked in the Proofed comment, the selected agent fixes the broken scenario and Kane checks the fix in Chrome before it is pushed.
+description: When the fix checkbox is ticked in the Proofed comment, the selected agent fixes the broken scenario and Kane checks the rebuild before it is pushed.
 
 inputs:
   url:
-    description: Where the app runs once served, e.g. http://localhost:4173
-    required: true
+    description: Required for web scenarios, e.g. http://localhost:4173
+    required: false
+  target:
+    description: web, ios, android or experimental desktop
+    default: ""
+  execution:
+    description: local or cloud
+    default: ""
+  app:
+    description: Rebuilt app artifact path
+    default: ""
+  device:
+    description: Exact device name
+    default: ""
+  os-version:
+    description: Device OS version
+    default: ""
+  launch:
+    description: Owned desktop launch command with remote debugging
+    default: ""
+  cdp-endpoint:
+    description: Desktop browser CDP endpoint
+    default: ""
+  working-directory:
+    description: Folder for install, build and serve, and relative app paths
+    default: "."
   install:
     description: Command that installs dependencies (runs once)
     required: true
@@ -12,8 +36,8 @@ inputs:
     description: Command that builds the app (runs after every fix attempt)
     required: true
   serve:
-    description: Command that serves the built app on `url` (Proofed starts and stops it)
-    required: true
+    description: Command that serves the built web app on `url` (required for web scenarios)
+    required: false
   lt-username:
     required: true
   lt-access-key:
@@ -80,7 +104,13 @@ runs:
             *) sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null ;;
           esac
         fi
-        ${{ inputs.install }}
+
+    - name: Install the app's dependencies
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PROOFED_INSTALL: ${{ inputs.install }}
+      run: bash -e -o pipefail -c "$PROOFED_INSTALL"
 
     - name: Log Kane in
       shell: bash
@@ -94,6 +124,14 @@ runs:
     - name: Fix, verify with Kane
       shell: bash
       env:
+        PROOFED_TARGET: ${{ inputs.target }}
+        PROOFED_EXECUTION: ${{ inputs.execution }}
+        PROOFED_APP: ${{ inputs.app }}
+        PROOFED_DEVICE: ${{ inputs.device }}
+        PROOFED_OS_VERSION: ${{ inputs.os-version }}
+        PROOFED_LAUNCH: ${{ inputs.launch }}
+        PROOFED_CDP_ENDPOINT: ${{ inputs.cdp-endpoint }}
+        PROOFED_DIR: ${{ inputs.working-directory }}
         PROOFED_URL: ${{ inputs.url }}
         PROOFED_BUILD: ${{ inputs.build }}
         PROOFED_SERVE: ${{ inputs.serve }}

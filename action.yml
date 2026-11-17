@@ -1,5 +1,5 @@
 name: Proofed
-description: Runs the scenarios a PR touches in real Chrome with Kane CLI, records each run, reports on the PR, and has the selected agent fix what broke when asked.
+description: Runs the scenarios a PR touches with Kane CLI, records each run, reports on the PR, and has the selected agent fix what broke when asked.
 branding:
   icon: eye
   color: orange
@@ -10,7 +10,7 @@ branding:
 # serves; the fixer is then t1dem/proofed/fix in a second workflow.
 inputs:
   url:
-    description: Where the app under test runs, e.g. http://localhost:4173
+    description: Required for web scenarios, e.g. http://localhost:4173
     required: false
   target:
     description: web, ios, android or experimental desktop
@@ -40,7 +40,7 @@ inputs:
     description: Command that builds the app (also after every fix attempt)
     default: ""
   serve:
-    description: Command that serves the built app on `url`. Setting it makes this action do the whole job.
+    description: Command that serves the built web app on `url`. Only needed for web scenarios.
     default: ""
   working-directory:
     description: Folder the app lives in, when it isn't the repo root (e.g. site). install, build and serve run there.
@@ -94,25 +94,9 @@ runs:
       with:
         node-version: 24
 
-    - name: Validate target inputs
-      shell: bash
-      env:
-        TARGET: ${{ inputs.target }}
-        FIX: ${{ inputs.fix }}
-        URL: ${{ inputs.url }}
-      run: |
-        if [ -n "$TARGET" ] && [ "$TARGET" != web ] && [ "$FIX" = true ]; then
-          echo 'fix is only supported for web: the fixer restarts an HTTP server. Set fix: false.' >&2
-          exit 1
-        fi
-        if { [ -z "$TARGET" ] || [ "$TARGET" = web ]; } && [ -z "$URL" ]; then
-          echo 'url is required for web checks.' >&2
-          exit 1
-        fi
-
     - name: Decide what to run
       id: mode
-      if: inputs.serve != '' || inputs.target != ''
+      if: inputs.serve != '' || inputs.build != '' || inputs.target != ''
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
@@ -133,6 +117,20 @@ runs:
         token: ${{ inputs.github-token }}
         # The agent can read the checkout. src/push.ts passes the token to git push itself.
         persist-credentials: false
+
+    - name: Resolve scenario targets
+      id: targets
+      if: steps.mode.outputs.mode == 'check'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PROOFED_URL: ${{ inputs.url }}
+        PROOFED_TARGET: ${{ inputs.target }}
+        PROOFED_SCENARIOS: ${{ inputs.scenarios }}
+        PROOFED_ONLY: ${{ inputs.only }}
+        PROOFED_SHA: ${{ steps.mode.outputs.head_sha }}
+        PROOFED_BASE_SHA: ${{ steps.mode.outputs.base_sha }}
+      run: node "$GITHUB_ACTION_PATH/src/actiontarget.ts"
 
     - uses: actions/setup-node@v4
       if: inputs.cache != '' && (steps.mode.outputs.mode == 'check' || steps.mode.outputs.mode == 'fix')
@@ -240,7 +238,7 @@ runs:
         echo build > "$RUNNER_TEMP/proofed-stage"
         bash -e -o pipefail -c "$PROOFED_BUILD" 2>&1 | tee "$RUNNER_TEMP/proofed-app.log"
         echo serve > "$RUNNER_TEMP/proofed-stage"
-        if [ -n "$PROOFED_SERVE" ]; then
+        if [ "${{ steps.targets.outputs.web }}" = true ] && [ -n "$PROOFED_SERVE" ]; then
           (bash -c "$PROOFED_SERVE" > "$RUNNER_TEMP/proofed-app.log" 2>&1 &)
           npx --yes wait-on@8 -t 60000 "$PROOFED_URL"
         fi
@@ -285,6 +283,8 @@ runs:
       if: steps.mode.outputs.mode != 'none' && steps.mode.outputs.mode != 'fix' && steps.mode.outputs.generate != 'true'
       shell: bash
       env:
+        PROOFED_BUILD: ${{ inputs.build }}
+        PROOFED_DIR: ${{ inputs.working-directory }}
         PROOFED_URL: ${{ inputs.url }}
         PROOFED_TARGET: ${{ inputs.target }}
         PROOFED_EXECUTION: ${{ inputs.execution }}
@@ -353,14 +353,16 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         PROOFED_SERVER: ${{ inputs.proofed-url }}
       run: |
-        port=$(node -e 'const u = new URL(process.argv[1]); console.log(u.port || (u.protocol === "https:" ? 443 : 80))' "$PROOFED_URL")
-        if [ "$RUNNER_OS" = Windows ]; then
-          PROOFED_PORT="$port" powershell.exe -NoProfile -NonInteractive -Command \
-            'Get-NetTCPConnection -LocalPort ([int]$env:PROOFED_PORT) -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { & taskkill.exe /PID $_ /T /F }' >/dev/null 2>&1 || true
-        else
-          (fuser -k "$port/tcp" || lsof -ti "tcp:$port" | xargs -r kill) >/dev/null 2>&1 || true
+        if [ -n "$PROOFED_URL" ]; then
+          port=$(node -e 'const u = new URL(process.argv[1]); console.log(u.port || (u.protocol === "https:" ? 443 : 80))' "$PROOFED_URL")
+          if [ "$RUNNER_OS" = Windows ]; then
+            PROOFED_PORT="$port" powershell.exe -NoProfile -NonInteractive -Command \
+              'Get-NetTCPConnection -LocalPort ([int]$env:PROOFED_PORT) -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { & taskkill.exe /PID $_ /T /F }' >/dev/null 2>&1 || true
+          else
+            (fuser -k "$port/tcp" || lsof -ti "tcp:$port" | while IFS= read -r pid; do kill "$pid"; done) >/dev/null 2>&1 || true
+          fi
+          for i in $(seq 1 20); do curl -s -o /dev/null "$PROOFED_URL" || break; sleep 0.5; done
         fi
-        for i in $(seq 1 20); do curl -s -o /dev/null "$PROOFED_URL" || break; sleep 0.5; done
         if [ "$PROOFED_PROVIDER" = codex ]; then npm install -g @openai/codex@0.169.0 >/dev/null; else npm install -g @anthropic-ai/claude-code >/dev/null; fi
         node "$GITHUB_ACTION_PATH/src/fix.ts"
 

@@ -21,7 +21,7 @@ If the app isn't running, Proofed starts it and stops it at the end. It installs
 
 ## Caching and output
 
-A passed scenario isn't run again until its file, the URL, the base commit or a changed file in its `paths` changes. `--dry-run` shows what would run and the credit estimate, for free. In a terminal the scenarios update in place; in a pipe each event is one line, with a "still running" line at least every 30 seconds.
+A passed scenario isn't run again until its file, the URL, the base commit or a changed file in its `paths` changes. Native and desktop checks with a build command always rebuild and run again; an old artifact's pass cannot skip the build. `--dry-run` shows what would run and the credit estimate, for free. In a terminal the scenarios update in place; in a pipe each event is one line, with a "still running" line at least every 30 seconds.
 
 ## For an agent
 
@@ -129,22 +129,23 @@ Relative app paths resolve from the app working directory.
 `--target` filters scenario files; it sets the target for an ad hoc objective.
 `--only` with ids from another target is an error.
 
-- Local iOS needs full Xcode, an installed simulator runtime, Kane's managed simulator
+- Local iOS needs an Apple Silicon Mac (macOS arm64), full Xcode, an installed simulator runtime, Kane's managed simulator
   dependencies, and exactly one matching booted device. Supply a simulator `.app` or
   `.zip`, or a Kane `APP…` ID. Proofed temporarily zips `.app` bundles for Kane.
   A device `.ipa` cannot run in Simulator.
-- Local Android needs Kane's managed emulator dependencies, `adb` on PATH, and exactly
+- Local Android needs an Apple Silicon Mac (macOS arm64), Kane's managed emulator dependencies, `adb` on PATH, and exactly
   one matching online emulator. Supply an `.apk` or `APP…` ID. A local `.aab` is rejected.
   Device names and OS versions must identify the same device in Kane and adb.
 - Cloud iOS uses `.ipa` or `APP…`; cloud Android uses `.apk`, `.aab`, or `APP…`.
-  Kane provisions real devices. Evidence is screenshot-only in Kane's session directory;
+  Kane provisions real devices; the TestMu plan must include real-device automation. Evidence is screenshot-only in Kane's session directory;
   Proofed reports a recording note and does not promise a cloud MP4.
 - Desktop is experimental and limited to a single Electron Chromium page renderer.
   Set `launch` to the executable and its remote debugging arguments, and set
   `cdp_endpoint` to its browser CDP endpoint. Proofed waits for `/json/version` and
   rejects multiple page renderers. An already running app requires `--reuse` with no
   `launch`; Proofed never terminates that app. Owned launch processes run in their own
-  process group. Clip rendering uses a separate Proofed Chrome.
+  process group. Alternatively, set `app` to the desktop executable or macOS `.app` bundle;
+  Proofed adds the debugging port from `cdp_endpoint`. Clip rendering uses a separate Proofed Chrome.
 
 ```markdown
 ---
@@ -200,10 +201,106 @@ cost remains unknown until the first run reports `credits_consumed`; JSON uses `
 for mobile and desktop targets without history. Web scenarios fall back to 30 credits. History is separate by app digest, device, OS and Kane version.
 Doubted failures use the same retry rules as web checks; `--no-retry` permits one attempt.
 
-In `action.yml`, pass the same target fields, omit `url` for native/desktop, and set
-`fix: false`. The fixer only rebuilds and restarts an HTTP server. Prepare SDKs,
-runtimes and Kane managed dependencies in explicit steps before the action. iOS
-requires a macOS runner with full Xcode. Android requires an online emulator; Electron
-on Linux needs a display such as Xvfb for the entire check. The action's existing web
-workflow remains supported. Native action jobs have only fake local coverage here;
-SDK runner jobs still need a real CI smoke test.
+Fixing uses the same checkbox, `/proofed fix` command and **Fix automatically** setting
+on every target. Set `build` to produce the artifact named by `app`, or the desktop
+app started by `launch`. Every attempt rebuilds, then Kane re-checks through the normal
+target preparation. Local mobile installs the rebuilt artifact; cloud mobile uploads
+changed artifact bytes and starts a fresh device session; desktop launches a new process.
+Kane keys its upload cache by the artifact SHA-256, platform, account and environment,
+so an identical rebuild may reuse that upload; a changed artifact gets a new upload.
+The final check rebuilds and runs the whole selection again before the fix is
+committed and pushed. These checks never use a cached pass. Only web scenarios start the HTTP server, so native and desktop jobs
+need no `url` or `serve`.
+
+A pre-uploaded `APP…` ID cannot receive a rebuild. A desktop `cdp_endpoint` without
+`launch` or `app` cannot be restarted. These cases, and a non-web target without a
+build command, get a “Fix didn't run” note instead of an offered fix. Ordinary checks
+of uploaded IDs and explicitly reused desktop sessions still work.
+
+### GitHub Actions examples
+
+Use the PR/comment triggers, permissions and concurrency from the [README workflow](../README.md#setup).
+Pass `vars: ${{ toJSON(vars) }}` to carry the dashboard's **Fix automatically** setting.
+Set the matching `target` in the scenario frontmatter; the action's `target` input
+filters scenario files. Prepare SDKs and devices before the action; Proofed installs
+none of them.
+
+Android cloud on Ubuntu builds an APK locally and gives Kane its path for each check. This
+needs a TestMu plan with real-device automation; an Ubuntu emulator is not a supported
+Kane local target.
+
+```yaml
+runs-on: ubuntu-latest
+steps:
+  - uses: actions/checkout@v4
+  - uses: actions/setup-java@v4
+    with: { distribution: temurin, java-version: '17' }
+  - uses: android-actions/setup-android@v3
+  - uses: t1dem/proofed@main
+    with:
+      target: android
+      execution: cloud
+      build: ./gradlew :app:assembleDebug
+      app: app/build/outputs/apk/debug/app-debug.apk
+      device: Pixel 8
+      os-version: '14'
+      lt-username: ${{ secrets.LT_USERNAME }}
+      lt-access-key: ${{ secrets.LT_ACCESS_KEY }}
+      codex-api-key: ${{ secrets.CODEX_API_KEY }}
+      vars: ${{ toJSON(vars) }}
+```
+
+Local Android can use a self-hosted Apple Silicon Mac with Java 17, Android SDK,
+Kane's managed dependencies and a matching emulator already booted. Replace the device
+name and version with that runner's inventory. Local iOS uses the same runner class
+with Xcode and a booted simulator.
+
+```yaml
+runs-on: [self-hosted, macOS, ARM64]
+steps:
+  - uses: t1dem/proofed@main
+    with:
+      target: android
+      execution: local
+      build: ./gradlew :app:assembleDebug
+      app: app/build/outputs/apk/debug/app-debug.apk
+      device: Pixel 8 API 35
+      os-version: '15'
+      lt-username: ${{ secrets.LT_USERNAME }}
+      lt-access-key: ${{ secrets.LT_ACCESS_KEY }}
+      codex-api-key: ${{ secrets.CODEX_API_KEY }}
+      vars: ${{ toJSON(vars) }}
+```
+
+Electron on macOS: Proofed launches and stops the app for each check. The build must
+produce the code loaded by `main.js`.
+
+```yaml
+runs-on: macos-latest
+steps:
+  - uses: t1dem/proofed@main
+    with:
+      target: desktop
+      install: npm ci
+      build: npm run build
+      launch: "./node_modules/.bin/electron main.js --remote-debugging-port=9223"
+      cdp-endpoint: http://127.0.0.1:9223
+      lt-username: ${{ secrets.LT_USERNAME }}
+      lt-access-key: ${{ secrets.LT_ACCESS_KEY }}
+      codex-api-key: ${{ secrets.CODEX_API_KEY }}
+      vars: ${{ toJSON(vars) }}
+```
+
+### Platform support
+
+Fake Kane tests check the build, install/upload arguments, process cleanup, cache and
+fix ordering. They do not prove device automation, cloud uploads or runner setup.
+
+| Target / host | Verified with real Kane runs |
+|---|---|
+| Web, GitHub-hosted Linux/macOS/Windows | Linux/macOS: verified; Windows: not yet verified |
+| Desktop Electron, macOS runner | Not yet verified |
+| Android local, Apple Silicon Mac / self-hosted runner | Not yet verified |
+| Android/iOS cloud real devices, needs a TestMu plan with real devices | Not yet verified |
+| iOS local simulator, Apple Silicon Mac | Not yet verified |
+| Windows host | Not yet verified; web, cloud mobile and desktop paths have fake coverage; local mobile requires an Apple Silicon Mac |

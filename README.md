@@ -85,7 +85,7 @@ Three merged pull requests from open-source projects, replayed with Proofed. Eac
 - Kane doesn't record video, so Proofed records Chrome itself. The clip cuts the waiting, shows where Kane clicked and zooms in on what it checks.
 - When Kane blames the test rather than the code, the scenario shows as "not checked", never as a pass.
 - A fix starts when someone ticks **Fix with Claude** or **Fix with Codex**, or on its own with [Fix automatically](#fix-automatically) on.
-- Nothing is pushed until Kane has seen the broken flows pass. Then every scenario the pull request touches runs on the fix commit.
+- Each attempt rebuilds and re-checks the broken flows and affected neighbors. The final check rebuilds and runs the full selection before committing and pushing.
 - The fix commit's `Fixed-by:` line names the model.
 
 ## Scenarios
@@ -231,12 +231,13 @@ jobs:
 
 A scenario can set `target: ios`, `android` or `desktop`; scenarios without it stay web checks.
 
-- **iOS and Android** need a built app, Kane's managed simulator or emulator dependencies and one device you booted yourself, picked by `device` and `os_version`. `proofed doctor --target ios` (or `android`) lists what is missing and installs nothing. The clip keeps portrait orientation. The credit estimate is unknown until the first run.
-- **Desktop** is experimental and covers one Electron Chromium window: give `launch` and `cdp_endpoint`. Native menus, OS file dialogs, Safari, Tauri and WKWebView are not supported.
-- **Tested so far:** Android on a real Pixel 8 (Android 14) and iOS on a real iPhone 16 (iOS 18) in the TestMu cloud, with `execution: cloud`, and desktop with VS Code on macOS.
-- Cloud mobile runs give Kane's screenshots, not a Proofed MP4. In the action, set `fix: false` for these targets: the fixer only restarts an HTTP server.
+- **Local iOS and Android** need an Apple Silicon Mac (macOS arm64), a built app, Kane's managed dependencies and one device you booted yourself, picked by `device` and `os_version`. GitHub Actions can use a self-hosted `[self-hosted, macOS, ARM64]` runner. `proofed doctor --target ios` (or `android`) lists what is missing and installs nothing.
+- **Cloud iOS and Android** run on real TestMu devices from Linux, macOS or Windows. The plan must include real-device automation. These runs give Kane's screenshots, without a Proofed MP4.
+- **Desktop** is experimental and covers one Electron Chromium window: give `launch` (or `app`) and `cdp_endpoint`. Native menus, OS file dialogs, Safari, Tauri and WKWebView are not supported.
+- **Fixing** uses the same checkbox and auto-fix setting on every target. Set `build` to produce the artifact in `app`, or the desktop code started by `launch`. Each check installs, uploads or launches the rebuild. `url` and `serve` are needed only for web scenarios. Pre-uploaded `APP…` IDs and desktop endpoints without a launch command or app path cannot verify a rebuild, so the report says why fixing didn't run.
 
-Requirements and commands: [docs/cli.md](docs/cli.md#mobile-and-electron-targets).
+Commands and Android cloud, self-hosted Android and macOS Electron Actions examples: [docs/cli.md](docs/cli.md#github-actions-examples).
+Real-run verification by target and host is listed in [Platform support](docs/cli.md#platform-support); only web on Linux/macOS is verified so far.
 
 ## Limits
 
