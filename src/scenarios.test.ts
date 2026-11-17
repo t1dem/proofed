@@ -25,3 +25,9 @@ test("picks scenarios by diff", () => {
   assert.deepEqual(affectedBy([promo], ["src/pages/Cart.tsx"]).map((s) => s.id), ["promo-code"]);
   assert.deepEqual(affectedBy([promo], [".proofed/scenarios/promo-code.md"]).map((s) => s.id), ["promo-code"]);
 });
+
+test("scenario filenames cannot name the output directory or its parent", () => {
+  for (const file of [".md", "..md", "...md"]) {
+    assert.throws(() => parseScenario(file, "---\nname: unsafe\n---\nOpen the app."), /unsafe scenario id/);
+  }
+});

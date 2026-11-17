@@ -11,6 +11,10 @@ export type Scenario = {
   objective: string;
 };
 
+export function checkScenarioId(id: string) {
+  if (!id || id === "." || id === ".." || /[/\\\0]/.test(id)) throw new Error("unsafe scenario id");
+}
+
 // A scenario is a Markdown file: a small frontmatter block, then the plain-English objective Kane runs.
 //   ---
 //   name: Promo code total
@@ -36,6 +40,7 @@ export function parseScenario(file: string, text: string): Scenario {
       .filter(Boolean);
 
   const id = basename(file, ".md");
+  checkScenarioId(id);
   const objective = body.trim();
   if (!objective) throw new Error(`${file}: empty objective`);
   return {

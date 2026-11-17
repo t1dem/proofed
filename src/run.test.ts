@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Step } from "./kane.ts";
-import { focusWords, kaneError, kaneObjective, outcomeOf } from "./run.ts";
+import { focusWords, kaneError, kaneObjective, outcomeOf, runScenario } from "./run.ts";
 
 test("a failed check is located by the words of its quoted expectation", () => {
   const words = focusWords({ type: "run_end", status: "failed", reason: "The bag shows “That code doesn’t work,” leaving no discount." });
@@ -62,4 +62,12 @@ test("a check the page refuted is a failure, whatever Kane thinks of the scenari
   const end = { ...pass, status: "failed", reason: 'Final verification failed: "shipping is now Free and the total is €51.00"' };
   assert.equal(outcomeOf({ ...end, verdict: { family: "automation_bug" } }, steps), "failed");
   assert.equal(outcomeOf({ ...end, verdict: { family: "automation_bug" } }, [...steps.slice(0, 3), step("click: Click “Apply”", "failed")]), "unsure");
+});
+
+test("a supplied scenario id is checked before recording deletes any output", async () => {
+  for (const id of ["", ".", "..", "../outside", "nested/file", "nested\\file", "bad\0id"]) {
+    await assert.rejects(runScenario({id, file:"", name:"test", paths:[], url:"/", objective:"Open the app."}, {
+      baseUrl:"http://localhost:5400", outDir:"/unused-proofed-output",
+    }), /unsafe scenario id/);
+  }
 });

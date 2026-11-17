@@ -9,7 +9,7 @@ import { log as logLine } from "./log.ts";
 import { runKane, type RunEnd, type Step } from "./kane.ts";
 import { NOTHING_CHECKED } from "./runfile.ts";
 import { startRecorder, type Rect } from "./recorder.ts";
-import type { Scenario } from "./scenarios.ts";
+import { checkScenarioId, type Scenario } from "./scenarios.ts";
 
 // "unsure": the run says nothing about the code. Either Kane decided the test itself looks wrong
 // before it could check the page (verdict family automation_bug, no failed assert), or it reported
@@ -127,6 +127,7 @@ type RunOptions = {
 };
 
 export async function runScenario(scenario: Scenario, o: RunOptions): Promise<ScenarioResult> {
+  checkScenarioId(scenario.id);
   let earlier = 0;
   const again = (last: ScenarioResult, why: string) => {
     earlier += last.end?.credits_consumed ?? 0;
