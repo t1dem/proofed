@@ -24,7 +24,13 @@ export function blockedReport({ stage, command, dir, url, log, runUrl, sha, prev
       : stage === "build"
         ? `the build (\`${command}\`${where}) failed`
         : `\`${command}\`${where} didn't answer at ${url} within a minute`;
-  const tail = plain(log).trim().split("\n").slice(-LOG_LINES).join("\n");
+  let tail = plain(log).trim().split("\n").slice(-LOG_LINES).join("\n");
+  // Actions masks console output, not files copied into a comment through the API.
+  const secrets = ["GITHUB_TOKEN", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "CODEX_API_KEY", "ACTIONS_ID_TOKEN_REQUEST_TOKEN"]
+    .flatMap((name) => process.env[name] ? [process.env[name]!] : []);
+  const token = process.env.GITHUB_TOKEN;
+  if (token) secrets.push(Buffer.from(`x-access-token:${token}`).toString("base64"));
+  for (const value of secrets.sort((a, b) => b.length - a.length)) tail = tail.replaceAll(value, "***");
   return [
     `${MARKER}\n### Proofed\n\nProofed couldn't finish this check: ${what}, so Kane had no app to open.`,
     tail ? `\`\`\`\n${tail}\n\`\`\`` : "The command printed nothing.",

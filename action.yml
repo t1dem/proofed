@@ -204,6 +204,9 @@ runs:
         PROOFED_NUMBER: ${{ steps.mode.outputs.number }}
         PROOFED_SHA: ${{ steps.mode.outputs.head_sha }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
+        LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
+        CODEX_API_KEY: ${{ inputs.codex-api-key }}
       run: node "$GITHUB_ACTION_PATH/src/blocked.ts"
 
     - name: Log Kane in
