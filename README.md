@@ -9,7 +9,7 @@
 Kane CLI runs the user flows a pull request touches and posts the recording on the PR.<br>
 When a flow breaks, Claude Code fixes it, and the fix is pushed only after Kane has watched it pass.
 
-[Website](https://proofed.neptunescodm.workers.dev) · [**Break it yourself**](https://proofed.neptunescodm.workers.dev/try) · [Dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo) · [Demo store](https://github.com/t1dem/proofed-demo-store) · [Install on GitHub](https://proofed.neptunescodm.workers.dev/install)
+[Website](https://proofed.neptunescodm.workers.dev) · [**Break it yourself**](https://proofed.neptunescodm.workers.dev/try) · [Dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo) · [Install on GitHub](https://proofed.neptunescodm.workers.dev/install) · [CLI](#locally-and-from-an-ai-agent)
 
 <sub>Built for the Kane CLI hackathon, November 2026.</sub>
 
@@ -40,13 +40,7 @@ When a flow breaks, Claude Code fixes it, and the fix is pushed only after Kane 
 
 ## For judges
 
-- **[Break it yourself](https://proofed.neptunescodm.workers.dev/try)**, no account. Pick one of four prepared pull requests and watch Kane catch the break and Claude fix it on the real [demo store](https://github.com/t1dem/proofed-demo-store). A run takes 8 to 14 minutes, one at a time, 3 per visitor a day.
-- **[Dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo)**, no sign-in. `sample-coffee-store` in it is made up and labelled "Sample data"; the rest is copied from GitHub.
-- **Proofed checks itself.** Every pull request here runs five dashboard scenarios through Kane, for example [#25](https://github.com/t1dem/proofed/pull/25#issuecomment-6897255024).
-
-<img src="docs/try-run.jpg" alt="A finished run on /try: Kane caught a break, Claude fixed it, Kane confirmed. The fix and a before and after comparison of the page.">
-
-If you'd rather read than wait, all four changes have already run:
+Four pull requests on the [demo store](https://github.com/t1dem/proofed-demo-store) each break one flow. All four have already run:
 
 | PR | What Kane found | What happened next |
 |---|---|---|
@@ -54,6 +48,20 @@ If you'd rather read than wait, all four changes have already run:
 | [#9](https://github.com/t1dem/proofed-demo-store/pull/9) | The confirmation page charges €13.00 instead of €17.90 | Kane rejected the first attempt, the second passed ([`f9fa5a6`](https://github.com/t1dem/proofed-demo-store/commit/f9fa5a6)) |
 | [#11](https://github.com/t1dem/proofed-demo-store/pull/11) | The + button in the bag leaves the quantity at 1 | Fixed on the first attempt ([`9999a0d`](https://github.com/t1dem/proofed-demo-store/commit/9999a0d)), 8.5 minutes |
 | [#12](https://github.com/t1dem/proofed-demo-store/pull/12) | A €44.50 bag ships free | Fixed on the first attempt ([`f54f1b5`](https://github.com/t1dem/proofed-demo-store/commit/f54f1b5)), 8.5 minutes |
+
+To watch one run live, open [Break it yourself](https://proofed.neptunescodm.workers.dev/try). It needs no account and takes 8 to 14 minutes.
+
+<img src="docs/try-run.jpg" alt="A finished run on /try: Kane caught a break, Claude fixed it, Kane confirmed. The fix and a before and after comparison of the page.">
+
+To run Proofed on your machine, with a signed-in [Kane CLI](https://www.npmjs.com/package/@testmuai/kane-cli), Node 22.18+, Chrome and ffmpeg:
+
+```sh
+git clone https://github.com/t1dem/proofed-demo-store
+cd proofed-demo-store
+npx proofed-cli check "the promo code welcome10 takes 10% off"
+```
+
+The [dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo) needs no sign-in. Proofed also checks its own pull requests, for example [#25](https://github.com/t1dem/proofed/pull/25#issuecomment-6897255024).
 
 ## How it works
 
@@ -119,14 +127,7 @@ gh variable delete PROOFED_AUTOFIX --repo owner/repo            # off
 
 It needs Node 22.18 or later, Chrome, [Kane CLI](https://www.npmjs.com/package/@testmuai/kane-cli) signed in (`kane-cli login`) and ffmpeg for the clips.
 
-Install it with any of the three:
-
-| | npm | pnpm | bun |
-|---|---|---|---|
-| Install | `npm install -g proofed-cli` | `pnpm add -g proofed-cli` | `bun add -g proofed-cli` |
-| Run without installing | `npx proofed-cli` | `pnpm dlx proofed-cli` | `bunx proofed-cli` |
-| Update | `npm install -g proofed-cli@latest` | `pnpm add -g proofed-cli@latest` | `bun add -g proofed-cli@latest` |
-| Uninstall | `npm uninstall -g proofed-cli` | `pnpm remove -g proofed-cli` | `bun remove -g proofed-cli` |
+Install it with `npm install -g proofed-cli` (or `pnpm add -g`, `bun add -g`), or run it once with `npx proofed-cli`.
 
 The command is `proofed`; `proofed doctor` says what else is missing. On a Node older than 22.18 it stops with an error that says so. The package is built JavaScript with no dependencies and no install scripts. From a clone, `npm link` runs the TypeScript source instead.
 
