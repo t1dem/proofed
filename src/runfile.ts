@@ -13,6 +13,8 @@ export type RunScenario = {
   steps?: { remark: string; failed?: boolean; at?: number }[];
   clip?: { mp4?: string; gif?: string; jpg?: string };
   credits?: number;
+  creditsSource?: "kane_estimate";
+  accountBalance?: { before: number; after: number; debit: number };
   seconds?: number;
 };
 

@@ -417,6 +417,17 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     }
   });
 
+  test("Kane credits are labelled as an estimate", async () => {
+    const r = repo({ cost: { mode: "pass", credits: 7 } });
+    const port = await freePort();
+    try {
+      const ran = await cli(r, ["check", "--json", "--no-retry", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`]);
+      const doc = json(ran);
+      assert.equal(doc.scenarios[0]!.credits, 7);
+      assert.equal(doc.scenarios[0]!.creditsSource, "kane_estimate");
+    } finally { r.cleanup(); }
+  });
+
   test("a quoted text pass contradicted by the page is not checked", async () => {
     const r = repo({ text: { mode: "text" } });
     const port = await freePort();

@@ -39,7 +39,7 @@ if (args[0] === "balance") {
     console.error('Not authenticated [prod]. Run "kane-cli login" first.');
     process.exit(2);
   }
-  console.log("Available credits: 1234.5");
+  console.log(`Available credits: ${process.env.FAKE_KANE_BALANCE_FILE ? readFileSync(process.env.FAKE_KANE_BALANCE_FILE, "utf8").trim() : "1234.5"}`);
   process.exit(0);
 }
 if (args[0] !== "run") {

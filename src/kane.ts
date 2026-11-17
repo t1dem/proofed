@@ -1,6 +1,7 @@
 import { appendFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { creditMeter } from "./creditmeter.ts";
 import { adopt } from "./children.ts";
 
 export type Step = { step: number; status: "running" | "done" | "failed"; remark: string; ts: string };
@@ -33,6 +34,7 @@ export type KaneResult = {
   exitCode: number | null;
   stderr: string;
   timedOut: boolean;
+  accountBalance?: { before: number; after: number; debit: number };
 };
 
 type KaneOptions = {
@@ -54,7 +56,15 @@ type KaneOptions = {
 const isStep = (e: object): e is Step => "step" in e && "status" in e;
 const isRunEnd = (e: object): e is RunEnd => "type" in e && e.type === "run_end";
 
-export function runKane(o: KaneOptions): Promise<KaneResult> {
+export async function runKane(o: KaneOptions): Promise<KaneResult> {
+  const finish = await creditMeter({ ...process.env, ...(o.username && o.accessKey && { LT_USERNAME: o.username, LT_ACCESS_KEY: o.accessKey }) });
+  try {
+    const result = await runUnmetered(o);
+    return { ...result, accountBalance: await finish() };
+  } catch (e) { await finish(); throw e; }
+}
+
+function runUnmetered(o: KaneOptions): Promise<KaneResult> {
   const args = [
     "run",
     o.objective,

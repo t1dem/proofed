@@ -66,8 +66,8 @@ test("the plain view: one line per event, a heartbeat, then the details and the 
       "[0:00] started free-shipping: Free shipping from €50",
       "[0:00] started promo: Promo code total",
       '[0:30] still running: free-shipping 0:30 at "assert: shipping is €4.90"; promo 0:30',
-      "[1:10] failed free-shipping: Free shipping from €50 (1:10, 27 credits)",
-      "[1:10] passed promo: Promo code total (1:10, 25 credits)",
+      "[1:10] failed free-shipping: Free shipping from €50 (1:10, 27 credits (Kane estimate))",
+      "[1:10] passed promo: Promo code total (1:10, 25 credits (Kane estimate))",
       "",
       "✗ Free shipping from €50 failed after 1:10",
       "  Kane saw    Shipping shows Free.",
@@ -76,8 +76,8 @@ test("the plain view: one line per event, a heartbeat, then the details and the 
       "  Clip        /out/x/clip.mp4",
       "  Scenario    .proofed/scenarios/free-shipping.md",
       "",
-      "✗ 1 passed, 1 failed · 52 credits · 1m 14s",
-      "Credits are Kane's report; balance may drop slightly more.",
+      "✗ 1 passed, 1 failed · 52 credits (Kane estimate) · 1m 14s",
+      "Credits are Kane estimates; account debit can be higher.",
       "1 of 2 broke: Free shipping from €50",
       "Re-run what broke: proofed check --only free-shipping",
       "",
@@ -103,8 +103,8 @@ test("the terminal view settles on one line per scenario, then the same ending",
   const settled = stripAnsi(out.text.slice(out.text.lastIndexOf("\x1b[J") + 3, shown)).split("\n").filter(Boolean);
   assert.deepEqual(settled, [
     `✓ Place an order  cached, unchanged since ${since("2026-11-16T10:00:00.000Z", now)}`,
-    "✗ Free shipping from €50  1:10 · 27 credits",
-    "✓ Promo code total  1:10 · 25 credits",
+    "✗ Free shipping from €50  1:10 · 27 credits (Kane estimate)",
+    "✓ Promo code total  1:10 · 25 credits (Kane estimate)",
   ]);
   assert.equal(stripAnsi(out.text.slice(shown)).trim(), ending(doc, palette(false)).join("\n").trim());
   for (const line of stripAnsi(out.text).split(/\n|\x1b\[\d+F/)) assert.ok(textWidth(line) < 60, line);
@@ -166,7 +166,7 @@ test("zero reported credits does not claim an unfinished run was free", () => {
   const interrupted = buildDoc({ items: [ran("x", "error")], skipped: [], base: null, changedFiles: null, url: null, seconds: 11, out: "/out", rerun: { flags: [] }, estimatedCredits: 30 });
   const text = ending(interrupted, palette(false)).join("\n");
   assert.match(text, /no credits reported/);
-  assert.match(text, /balance may drop slightly more/);
+  assert.match(text, /account debit can be higher/);
   assert.doesNotMatch(text, /0 credits/);
 });
 

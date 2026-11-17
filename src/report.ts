@@ -443,7 +443,7 @@ function compose(
     ...(open.length && { open }),
   };
 
-  const footer = [`Run by Kane CLI on ${short(sha)}`, credits > 0 && `${Math.round(credits)} credits`, runUrl && `[logs](${runUrl})`]
+  const footer = [`Run by Kane CLI on ${short(sha)}`, credits > 0 && `${Math.round(credits)} credits (Kane estimate)`, runUrl && `[logs](${runUrl})`]
     .filter(Boolean)
     .join(" · ");
   const canFix = failed.length > 0 && fixEnabled && (!fixSetup || fixSetup.comment);

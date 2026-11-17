@@ -181,6 +181,8 @@ export function runFile({ sha, results, skipped, runUrl, fix }: PublishInput, cl
         .map((s) => ({ remark: s.remark.slice(0, 200), ...(s.status === "failed" && { failed: true }), ...(s.at !== undefined && { at: s.at }) })),
       clip: clips.get(r.scenario.id),
       credits: r.end?.credits_consumed === undefined ? undefined : creditsOf(r),
+      creditsSource: "kane_estimate",
+      accountBalance: r.accountBalance,
       seconds: r.seconds,
     })),
     fix: fix && {

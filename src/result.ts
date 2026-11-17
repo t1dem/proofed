@@ -44,6 +44,8 @@ export type ScenarioDoc = {
   pageError?: string;
   clip?: { mp4?: string; jpg?: string };
   credits: number;
+  creditsSource?: "kane_estimate";
+  accountBalance?: { before: number; after: number; debit: number };
   estimatedCredits?: number | null;
   seconds?: number;
   rerun: string;
@@ -148,6 +150,8 @@ export function scenarioDoc(item: Item, ctx: RerunContext): ScenarioDoc {
     ...(r.pageError && { pageError: r.pageError }),
     ...(r.clip && { clip: { ...(r.clip.mp4 && { mp4: resolve(r.clip.mp4) }), jpg: resolve(r.clip.jpg) } }),
     credits: round(creditsOf(r)),
+    creditsSource: "kane_estimate",
+    ...(r.accountBalance && { accountBalance: r.accountBalance }),
     ...(r.seconds !== undefined && { seconds: r.seconds }),
     rerun,
   };

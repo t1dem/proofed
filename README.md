@@ -291,3 +291,18 @@ claim Kane makes, or prove that matching text is in the right container.
 
 If a failed assert is retried because Kane doubts the scenario, two failures stay
 failed. A failure followed by a pass is `not_checked`: both runs' reasons are kept.
+
+### Credit figures
+
+`credits` is Kane's estimate, including reported costs of retries. The terminal,
+reports and dashboard label it as an estimate; JSON includes
+`creditsSource: "kane_estimate"`. An interrupted run can spend credits before Kane
+reports any cost.
+
+The free `kane-cli balance` command can also provide `accountBalance` before and
+after the final attempt, with the observed account debit. Proofed takes the shared
+`/tmp/proofed-kane.lock` while measuring. Concurrent local Proofed runs invalidate
+that observation; a failed balance read also discards it. These snapshots do not
+replace the estimate: the CLI exposes no transaction attribution, and another
+machine can spend from the same account without holding this local lock. Account
+debit is therefore an account observation, not a measured scenario price.

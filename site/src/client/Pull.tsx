@@ -1,7 +1,6 @@
 import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeftRight, Maximize, Minimize, Pause, Play, RotateCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { modelLabel, providerLabel, providerOf } from "../worker/models";
-import { NOTHING_CHECKED } from "../../../src/runfile";
 import type { PullDetail, PullView, Run, RunScenario } from "../worker/runs";
 import { ago, fixerName, movingName, titleName, useLoad, type Ask, type Route, type useAsk } from "./lib";
 import { LiveRun } from "./Live";
@@ -24,7 +23,7 @@ function story(runs: Run[], id: string) {
 
 function verdict({ outcome, reason, suggestion }: RunScenario) {
   if (outcome === "passed") return reason || "Passes.";
-  if (outcome === "unsure") return [reason, suggestion].filter(Boolean).join(" ") || "The test may be wrong, not the code.";
+  if (outcome === "unsure") return [reason, suggestion].filter(Boolean).join(" ") || "The check was not confirmed.";
   return reason || (outcome === "error" ? "Kane couldn't finish this run." : "Broke.");
 }
 
@@ -292,7 +291,7 @@ function runCost(run: Run) {
   const sum = (pick: (s: RunScenario) => number | undefined) => run.scenarios.reduce((total, s) => total + (pick(s) ?? 0), 0);
   const seconds = Math.round(sum((s) => s.seconds));
   const credits = Math.round(sum((s) => s.credits));
-  return [seconds > 0 && duration(seconds), credits > 0 && `${credits} credits`].filter((part): part is string => !!part);
+  return [seconds > 0 && duration(seconds), credits > 0 && `${credits} credits (Kane estimate)`].filter((part): part is string => !!part);
 }
 
 // The line under the title: how the shown run went and where it came from. With more than one run

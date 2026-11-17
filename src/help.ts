@@ -75,8 +75,8 @@ JSON (also written to <out>/result.json)
   failedStep, steps [{remark, failed}], pageError, clip {mp4, jpg}, kaneReport, credits, seconds, rerun}]
   failedCheck is only set on failed checks Kane blames on the scenario. suggestion gives the
   conditional next step: if the app change was intended, update the scenario; otherwise fix the app.
-  credits is the sum Kane reported, not the balance change; the balance can drop slightly more.
-  First-run estimate: 30 credits. An interrupted run can spend credits before reporting them.
+  credits is Kane’s estimate, not an attributed account debit.
+  First-run estimate: 30 credits. Reported costs are Kane estimates. Interrupted runs can spend unreported credits.
   Proofed couldn't run: {ok: false, exitCode: 3, error: {code, message, fix}}
   Interrupted: the same shape with exitCode 130 and scenarios [...] for what had finished
 

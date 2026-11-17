@@ -34,6 +34,7 @@ export type ScenarioResult = {
   clip: Clip | undefined;
   error?: string;
   recordingNote?: string;
+  accountBalance?: { before: number; after: number; debit: number };
   notChecked?: "runs_disagreed" | "text_contradicted";
   // The uncaught exception that left the page blank, when Proofed failed the scenario before Kane ran (precheck.ts).
   pageError?: string;
@@ -198,7 +199,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
       const clip = await stopNative()?.catch((e: unknown) => { recordingNote = `Native recording failed: ${String(e)}`; return undefined; });
       const outcome = outcomeOf(kane.end, kane.steps);
       writeFileSync(join(dir, "metadata.json"), JSON.stringify({ ...prepared.metadata, recordingNote }));
-      return { scenario, outcome, steps: kane.steps.map((s) => ({ ...s, ...(prepared.native && { at: Math.max(0, Date.parse(s.ts) / 1000 - prepared.native.started) }) })), end: kane.end, clip, recordingNote, ...(!kane.end && { error: kane.timedOut ? cutOffReason(kane.stderr, target, kane.steps.length > 0) : kaneError(kane.stderr) || "Kane exited without run_end", notSignedIn: NOT_SIGNED_IN.test(kane.stderr) }) };
+      return { scenario, outcome, accountBalance: kane.accountBalance, steps: kane.steps.map((s) => ({ ...s, ...(prepared.native && { at: Math.max(0, Date.parse(s.ts) / 1000 - prepared.native.started) }) })), end: kane.end, clip, recordingNote, ...(!kane.end && { error: kane.timedOut ? cutOffReason(kane.stderr, target, kane.steps.length > 0) : kaneError(kane.stderr) || "Kane exited without run_end", notSignedIn: NOT_SIGNED_IN.test(kane.stderr) }) };
     }
     live.scenario(scenario.id, { status: "running", steps: [], startedAt: Date.now() });
     // A still for each click or typing with the cursor on it: the frame from just before it, or a
@@ -266,6 +267,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     const clip = made && { mp4: made.mp4, gif: made.gif, jpg: made.jpg };
     return {
       scenario,
+      accountBalance: kane.accountBalance,
       ...(contradiction && { notChecked: "text_contradicted" as const }),
       outcome,
       steps: kane.steps.map((s, i) => ({ ...s, at: made?.marks[i] })),
