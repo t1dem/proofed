@@ -7,8 +7,10 @@ import { pathOf, type Route } from "./lib";
 export const focus = "outline-none focus-visible:ring-2 focus-visible:ring-fg/50";
 // 44px tall on a phone: a finger, not a pointer.
 const button = `inline-flex h-8 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 text-[13px] font-medium transition-colors disabled:opacity-50 max-md:h-11 max-md:rounded-lg max-md:px-4 max-md:text-[15px] ${focus}`;
-export const solid = `${button} bg-fg text-bg hover:bg-fg/85`;
-export const outline = `${button} border border-edge hover:bg-hover`;
+export const solid = `${button} bg-fg text-bg hover:bg-fg/85 disabled:hover:bg-fg`;
+export const outline = `${button} border border-edge hover:bg-hover disabled:hover:bg-transparent`;
+// The title of a button that's there but greyed out: the signed-in user can't push to the repo.
+export const NEEDS_WRITE = "Needs write access to this repository";
 export const iconButton = `inline-grid size-8 shrink-0 place-items-center rounded-md text-dim transition-colors hover:bg-hover hover:text-fg active:bg-hover max-md:size-11 ${focus}`;
 export const field = `h-9 w-full rounded-md border border-edge bg-panel px-3 font-mono text-[13px] max-md:h-11 max-md:rounded-lg ${focus}`;
 export const link = "underline decoration-edge underline-offset-4 hover:decoration-fg";

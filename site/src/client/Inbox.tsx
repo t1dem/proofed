@@ -3,7 +3,7 @@ import { Component, createRef, useCallback, useEffect, useRef, useState, type Re
 import { NOTHING_CHECKED } from "../../../src/runfile";
 import type { PullView } from "../worker/runs";
 import { ago, DEMO, installed, movingName, plural, prefetch, titleName, type Ask, type Load, type Route, type useAsk } from "./lib";
-import { Backdrop, bone, focus, iconButton, kindOf, Link, Mark, outline, PageTitle, Pips, plain, popover, sha7, soft, solid, useDismiss, useSheetDrag } from "./ui";
+import { Backdrop, bone, focus, iconButton, kindOf, Link, Mark, NEEDS_WRITE, outline, PageTitle, Pips, plain, popover, sha7, soft, solid, useDismiss, useSheetDrag } from "./ui";
 
 type AskedOf = ReturnType<typeof useAsk>[0];
 
@@ -118,8 +118,8 @@ function Action({ pull, asked, ask }: { pull: PullView; asked: AskedOf; ask: Ask
     <button
       type="button"
       className={fix ? solid : outline}
-      disabled={state === "sending"}
-      title={`Comments /proofed${fix ? " fix" : ""} on the pull request as you`}
+      disabled={state === "sending" || pull.readOnly}
+      title={pull.readOnly ? NEEDS_WRITE : `Comments /proofed${fix ? " fix" : ""} on the pull request as you`}
       onClick={() => ask(pull, fix ? "fix" : "rerun")}
     >
       {fix ? "Fix with Claude" : "Run again"}
@@ -132,7 +132,7 @@ type RowProps = { pull: PullView; selected: boolean; go: (route: Route) => void;
 // What a phone's swipe on a row offers: the same one action the desktop row has (Action).
 function swipeAction(pull: PullView, asked: AskedOf) {
   const kind = kindOf(pull);
-  if (pull.paused || asked(pull) || (kind !== "failed" && kind !== "error")) return undefined;
+  if (pull.paused || pull.readOnly || asked(pull) || (kind !== "failed" && kind !== "error")) return undefined;
   return kind === "failed" && pull.fix?.status !== "gave-up"
     ? { does: "fix" as const, label: "Fix", icon: Wrench, tone: "bg-work text-bg" }
     : { does: "rerun" as const, label: "Run again", icon: RotateCw, tone: "bg-busy text-bg" };
@@ -592,8 +592,8 @@ export function Inbox({ pulls, onRefresh, repo, onRepo, filter, onFilter, go, as
     else if (e.key === "j" || e.key === "ArrowDown") move(1);
     else if (e.key === "k" || e.key === "ArrowUp") move(-1);
     else if (e.key === "Enter") go({ page: "pull", repo: selected.repo, pr: selected.pr });
-    else if (e.key === "f" && kindOf(selected) === "failed" && !selected.paused && !asked(selected)) ask(selected, "fix");
-    else if (e.key === "r" && !selected.paused && !asked(selected)) ask(selected, "rerun");
+    else if (e.key === "f" && kindOf(selected) === "failed" && !selected.paused && !selected.readOnly && !asked(selected)) ask(selected, "fix");
+    else if (e.key === "r" && !selected.paused && !selected.readOnly && !asked(selected)) ask(selected, "rerun");
     else return;
     e.preventDefault();
   };

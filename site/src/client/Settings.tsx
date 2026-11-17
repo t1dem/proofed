@@ -5,7 +5,7 @@ import { EFFORTS, modelLabel, MODELS } from "../worker/models";
 import type { PullView } from "../worker/runs";
 import type { Theme } from "./App";
 import { api, DEMO, message, mutate, useLoad } from "./lib";
-import { Avatar, Backdrop, field, focus, link, outline, PageTitle, popover, soft, solid, useDismiss, useSheetDrag } from "./ui";
+import { Avatar, Backdrop, field, focus, link, NEEDS_WRITE, outline, PageTitle, popover, soft, solid, useDismiss, useSheetDrag } from "./ui";
 
 // The services' own marks: TestMu's "T" in the text colour, Claude's spark in its orange.
 const TestMuMark = () => (
@@ -245,7 +245,14 @@ function FixerMenu({ repo }: { repo: RepoView }) {
 
   return (
     <div ref={box} className="relative">
-      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} title="The model Claude fixes with in this repository" className={`${outline} max-md:w-full`}>
+      <button
+        type="button"
+        aria-expanded={open}
+        disabled={repo.access === "read"}
+        onClick={() => setOpen(!open)}
+        title={repo.access === "read" ? NEEDS_WRITE : "The model Claude fixes with in this repository"}
+        className={`${outline} max-md:w-full`}
+      >
         {custom ? <span className="max-w-40 truncate font-mono text-[12px]">{fixer.model}</span> : modelLabel(fixer.model)}
         <span className="font-normal text-dim">· {fixer.effort}</span>
         <ChevronDown size={14} className="text-dim" />
@@ -351,6 +358,7 @@ function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange:
   const [note, setNote] = useState<ReactNode>();
   const keysMissing = SECRETS.some((s) => !repo.secrets.includes(s));
   const haveKeys = !!me.testmu && me.claude;
+  const readOnly = repo.access === "read";
 
   const [paused, setPaused] = useState(repo.paused);
   useEffect(() => setPaused(repo.paused), [repo.paused]);
@@ -415,13 +423,19 @@ function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange:
   let action: ReactNode = null;
   if (repo.setup === "none") {
     action = (
-      <button type="button" className={outline} disabled={!!busy} onClick={() => act("setup")}>
+      <button type="button" className={outline} disabled={!!busy || readOnly} title={readOnly ? NEEDS_WRITE : undefined} onClick={() => act("setup")}>
         {busy === "setup" ? "Opening a PR…" : "Set up"}
       </button>
     );
   } else if (keysMissing && haveKeys) {
     action = (
-      <button type="button" className={outline} disabled={!!busy} onClick={() => act("secrets")} title="Puts your saved keys into this repository's Actions secrets">
+      <button
+        type="button"
+        className={outline}
+        disabled={!!busy || repo.access !== "admin"}
+        onClick={() => act("secrets")}
+        title={repo.access === "admin" ? "Puts your saved keys into this repository's Actions secrets" : "Needs admin access to this repository"}
+      >
         {busy === "secrets" ? "Adding…" : "Add keys to repo"}
       </button>
     );
@@ -456,9 +470,9 @@ function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange:
             <button
               type="button"
               className={outline}
-              disabled={!!busy}
+              disabled={!!busy || readOnly}
               onClick={togglePause}
-              title={paused ? "Switches Proofed's workflow back on in this repository" : "Switches Proofed's workflow off on GitHub; nothing in the repository changes"}
+              title={readOnly ? NEEDS_WRITE : paused ? "Switches Proofed's workflow back on in this repository" : "Switches Proofed's workflow off on GitHub; nothing in the repository changes"}
             >
               {paused ? <Play size={14} /> : <Pause size={14} />}
               {busy === "pause" ? "Pausing…" : busy === "resume" ? "Resuming…" : paused ? "Resume" : "Pause"}

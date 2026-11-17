@@ -26,6 +26,8 @@ export type PullView = {
   fix?: Pick<RunFix, "status" | "model" | "effort" | "commit"> & { attempts: number };
   // The repo's workflow is switched off: nothing would answer "Fix with Claude" or "Run again". Set by the API.
   paused?: boolean;
+  // The signed-in user can't push to the repo, so the workflow wouldn't answer their /proofed. Set by the API.
+  readOnly?: boolean;
   // Where the run is now, while Kane or Claude is at work and the action reports it (src/live.ts).
   live?: LiveSummary;
   // The commit Kane or Claude is at work on, before its run reports.

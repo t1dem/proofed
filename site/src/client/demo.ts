@@ -629,11 +629,11 @@ const pulls: PullView[] = [
 
 const secrets = ["LT_USERNAME", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN"];
 const repos: RepoView[] = [
-  { name: store, url: `https://github.com/${store}`, private: false, installationId: 1, setup: "active", paused: false, secrets: [...secrets], fixer: { model: "claude-opus-5-5", effort: "high", auto: false } },
-  { name: proofed, url: `https://github.com/${proofed}`, private: false, installationId: 1, setup: "active", paused: false, secrets: [...secrets], fixer: { model: "claude-haiku-5-5", effort: "xhigh", auto: false } },
-  { name: sample, url: "#", private: true, installationId: 1, setup: "active", paused: false, secrets: [...secrets], fixer: { model: "claude-opus-5-5", effort: "high", auto: false } },
-  { name: "sample/landing-page", url: "#", private: true, installationId: 1, setup: "pr-open", setupPr: "#", paused: false, secrets: ["LT_USERNAME"], fixer: { model: "claude-haiku-5-5", effort: "xhigh", auto: false } },
-  { name: "sample/docs-site", url: "#", private: true, installationId: 1, setup: "none", paused: false, secrets: [], fixer: null },
+  { name: store, url: `https://github.com/${store}`, private: false, installationId: 1, access: "admin", setup: "active", paused: false, secrets: [...secrets], fixer: { model: "claude-opus-5-5", effort: "high", auto: false } },
+  { name: proofed, url: `https://github.com/${proofed}`, private: false, installationId: 1, access: "admin", setup: "active", paused: false, secrets: [...secrets], fixer: { model: "claude-haiku-5-5", effort: "xhigh", auto: false } },
+  { name: sample, url: "#", private: true, installationId: 1, access: "admin", setup: "active", paused: false, secrets: [...secrets], fixer: { model: "claude-opus-5-5", effort: "high", auto: false } },
+  { name: "sample/landing-page", url: "#", private: true, installationId: 1, access: "admin", setup: "pr-open", setupPr: "#", paused: false, secrets: ["LT_USERNAME"], fixer: { model: "claude-haiku-5-5", effort: "xhigh", auto: false } },
+  { name: "sample/docs-site", url: "#", private: true, installationId: 1, access: "admin", setup: "none", paused: false, secrets: [], fixer: null },
 ];
 
 // The sample pull request that broke, which "Fix with Claude" fixes. /app?demo=fixed shows it after

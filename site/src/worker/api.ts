@@ -18,6 +18,8 @@ export type RepoView = {
   url: string;
   private: boolean;
   installationId: number;
+  // What the signed-in user may change here: keys need admin, everything else write access.
+  access: Access;
   setup: "active" | "pr-open" | "none";
   setupPr?: string;
   // The workflow is switched off on GitHub: pull requests aren't checked until it's switched back on.
@@ -66,7 +68,11 @@ export async function serveClip(request: Request, token: string | undefined, rep
 }
 
 type Installation = { id: number; account: { login: string } };
-type InstallationRepo = { id: number; full_name: string; html_url: string; private: boolean };
+// `permissions` is the signed-in user's, as /user/installations/{id}/repositories answers it.
+type InstallationRepo = { id: number; full_name: string; html_url: string; private: boolean; permissions?: { admin?: boolean; push?: boolean } };
+
+export type Access = "admin" | "write" | "read";
+const accessOf = (repo: InstallationRepo): Access => (repo.permissions?.admin ? "admin" : repo.permissions?.push ? "write" : "read");
 
 // Every API call starts here, so the answer is kept for a minute per user token.
 const listRepos = (env: Env, token: string) => memo(`repos:${token}`, 60_000, () => fetchRepos(token));
@@ -127,6 +133,7 @@ async function describeRepo(env: Env, repo: InstallationRepo & { installationId:
     url: repo.html_url,
     private: repo.private,
     installationId: repo.installationId,
+    access: accessOf(repo),
     setup: active ? "active" : prs[0] ? "pr-open" : "none",
     setupPr: prs[0]?.html_url,
     paused: active && paused,
@@ -248,8 +255,8 @@ export async function handleApi(request: Request, env: Env, path: string) {
       .run();
     const fresh = (await env.DB.prepare("SELECT * FROM users WHERE id = ?1").bind(user.id).first<UserRow>())!;
 
-    // New keys go straight into every repo this user has connected.
-    const repos = await listRepos(env, token);
+    // New keys go straight into every repo this user has connected and administers.
+    const repos = (await listRepos(env, token)).filter((r) => accessOf(r) === "admin");
     const synced = await Promise.allSettled(repos.map((r) => pushSecrets(env, fresh, r.full_name, r.installationId)));
     return json({ ok: true, synced: synced.filter((s) => s.status === "fulfilled").length, of: repos.length });
   }
@@ -258,7 +265,8 @@ export async function handleApi(request: Request, env: Env, path: string) {
     const repos = await listRepos(env, token);
     const pulls = await listPulls(env, repos.map((r) => r.full_name));
     const paused = await pausedRepos(env, repos.filter((r) => pulls.some((p) => p.repo === r.full_name)));
-    return json(pulls.map((p) => ({ ...p, paused: paused.has(p.repo) })));
+    const readOnly = new Set(repos.filter((r) => accessOf(r) === "read").map((r) => r.full_name));
+    return json(pulls.map((p) => ({ ...p, paused: paused.has(p.repo), readOnly: readOnly.has(p.repo) })));
   }
 
   const clip = CLIP_PATH.exec(path.slice("/api".length));
@@ -286,9 +294,11 @@ export async function handleApi(request: Request, env: Env, path: string) {
     if (!action && request.method === "GET") {
       const [detail, paused] = await Promise.all([getPull(env, repoName, Number(number)), pausedRepos(env, [repo])]);
       if (!detail) return json({ error: "Proofed hasn't reported on that pull request." }, 404);
-      return json({ ...detail, pull: { ...detail.pull, paused: paused.has(repoName) } });
+      return json({ ...detail, pull: { ...detail.pull, paused: paused.has(repoName), readOnly: accessOf(repo) === "read" } });
     }
     if (action && request.method === "POST") {
+      // On a public repo anyone can comment, but the workflow ignores /proofed from people without write access.
+      if (accessOf(repo) === "read") return json({ error: "You need write access to this repository." }, 403);
       let command = action === "fix" ? "/proofed fix" : "/proofed";
       if (action === "check") {
         // "/proofed <what to check>": one line, as the workflow reads it. "fix …" would start a fix instead.
@@ -319,6 +329,9 @@ export async function handleApi(request: Request, env: Env, path: string) {
     const [, owner, name, action] = repoAction;
     const repo = (await listRepos(env, token)).find((r) => r.full_name === `${owner}/${name}`);
     if (!repo) return json({ error: "Proofed isn't installed on that repository." }, 404);
+    const access = accessOf(repo);
+    if (action === "secrets" && access !== "admin") return json({ error: "Adding keys needs admin access to this repository." }, 403);
+    if (access === "read") return json({ error: "You need write access to this repository." }, 403);
     if (action === "fixer") {
       const body = (await request.json()) as Partial<FixerView>;
       const model = body.model?.trim().toLowerCase() ?? "";
