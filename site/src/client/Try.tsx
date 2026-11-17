@@ -8,6 +8,7 @@ import type { TryRun, TryView } from "../worker/try";
 import { providerLabel, providerOf } from "../worker/models";
 import { ago, api, fixerName, message, useLoad } from "./lib";
 import { LiveRun } from "./Live";
+import { fixedSummary, latestScenarios } from "../run-summary";
 import { GitHubMark, RunMeta, Scenarios } from "./Pull";
 import { bone, focus, kindOf, link, Mark, outline, panel, soft, solid, type Kind } from "./ui";
 
@@ -24,7 +25,7 @@ function useTryRoute() {
     return () => removeEventListener("popstate", onPop);
   }, []);
   const go = useCallback((next?: number) => {
-    history.pushState(null, "", next ? `/try/${next}` : "/try");
+    history.pushState(null, "", (next ? `/try/${next}` : "/try") + location.search);
     setPr(next);
     scrollTo({ top: 0, behavior: "instant" });
   }, []);
@@ -41,7 +42,7 @@ function To({ pr, go, className, children }: { pr?: number; go: Go; className?: 
     go(pr);
   };
   return (
-    <a href={pr ? `/try/${pr}` : "/try"} onClick={onClick} className={`${focus} ${className ?? ""}`}>
+    <a href={(pr ? `/try/${pr}` : "/try") + location.search} onClick={onClick} className={`${focus} ${className ?? ""}`}>
       {children}
     </a>
   );
@@ -66,11 +67,11 @@ function Top() {
 }
 
 const kindOfRun = (run: TryRun): Kind =>
-  run.fixed ? "passed" : run.state === "fixing" ? "fixing" : run.state === "running" ? "running" : run.state === "failing" ? "failed" : run.state === "blocked" ? "error" : run.unsure ? "unsure" : "passed";
+  run.fixed ? (run.unsure ? "unsure" : "passed") : run.state === "fixing" ? "fixing" : run.state === "running" ? "running" : run.state === "failing" ? "failed" : run.state === "blocked" ? "error" : run.unsure ? "unsure" : "passed";
 
 const saysOf = (run: TryRun) =>
   run.fixed
-    ? `Kane caught it, ${providerLabel(providerOf(run.model || ""))} fixed it`
+    ? run.result ?? `${providerLabel(providerOf(run.model || ""))} fixed it${run.unsure ? "; some scenarios unconfirmed" : ", Kane confirmed"}`
     : run.state === "running"
       ? "Kane is checking"
       : run.state === "fixing"
@@ -174,14 +175,14 @@ function Picker({ view, go, reload }: { view: TryView; go: Go; reload: () => Pro
 }
 
 // Where the pull request is on its way from opened to fixed.
-function Track({ state, fixed, gaveUp, reported, unsure, provider }: { provider: string; state: PullState; fixed: boolean; gaveUp: boolean; reported: boolean; unsure: boolean }) {
+function Track({ state, fixed, gaveUp, reported, unsure, provider, result }: { provider: string; result?: string; state: PullState; fixed: boolean; gaveUp: boolean; reported: boolean; unsure: boolean }) {
   const check: Kind =
     state === "running" && !reported ? "running" : state === "blocked" && !reported ? "error" : state === "passing" && !fixed ? (unsure ? "unsure" : "passed") : "failed";
-  const fix: Kind = fixed ? "passed" : gaveUp ? "error" : state === "fixing" ? "fixing" : "waiting";
+  const fix: Kind = fixed ? (unsure ? "unsure" : "passed") : gaveUp ? "error" : state === "fixing" ? "fixing" : "waiting";
   const steps: [Kind, string][] = [
     ["passed", "Pull request opened"],
     [check, check === "running" ? "Kane is checking it" : check === "failed" ? "Kane caught a break" : check === "error" ? "The run didn't finish" : check === "unsure" ? "Kane didn't confirm it either way" : "Kane found nothing broken"],
-    [fix, fix === "passed" ? `${provider} fixed it, Kane confirmed` : fix === "error" ? `${provider} couldn't fix it` : fix === "fixing" ? `${provider} is fixing, Kane re-checks` : `${provider} fixes, Kane re-checks`],
+    [fix, fixed ? result ?? `${provider} fixed it, Kane confirmed` : fix === "error" ? `${provider} couldn't fix it` : fix === "fixing" ? `${provider} is fixing, Kane re-checks` : `${provider} fixes, Kane re-checks`],
   ];
   return (
     <ol className="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-[13px]">
@@ -233,7 +234,7 @@ function Run({ repo, pr, go }: { repo: string; pr: number; go: Go }) {
         </a>
       </header>
 
-      {pull && <Track provider={fixerName(pull)} state={pull.state} fixed={fix?.status === "fixed"} gaveUp={fix?.status === "gave-up"} reported={runs.length > 0} unsure={kind === "unsure"} />}
+      {pull && <Track provider={fixerName(pull)} state={pull.state} fixed={fix?.status === "fixed"} gaveUp={fix?.status === "gave-up"} reported={runs.length > 0} unsure={latestScenarios(runs).some((s) => s.outcome !== "passed")} result={fixedSummary(runs, fixerName(pull))} />}
 
       {detail.status === "error" && <p className="mt-8 text-bad">{detail.message}</p>}
       {detail.status === "loading" && <span className={`${bone} mt-8 block aspect-video w-full rounded-lg`} />}

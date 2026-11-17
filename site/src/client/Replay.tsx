@@ -1,13 +1,13 @@
-// The central piece of the landing: PR #2 of the demo store, replayed step by step.
+// The central piece of the landing: PR #12 of the demo store, replayed step by step.
 // Everything shown here happened on that PR: the diff, Kane's recordings, the fix commit.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
-const PR_URL = "https://github.com/t1dem/proofed-demo-store/pull/2";
-const FIX_URL = "https://github.com/t1dem/proofed-demo-store/commit/84514dbd32279572679948eb3baa665756740ba7";
+const PR_URL = "https://github.com/t1dem/proofed-demo-store/pull/12#issuecomment-6900830885";
+const FIX_URL = "https://github.com/t1dem/proofed-demo-store/commit/f54f1b5947452882dc2070f0e8ea2ad90e7d7612";
 
 type DiffLine = { sign: "+" | "-" | " "; text: string };
 
-// `commit` is the real one this diff is from, with its time on 13 November (UTC).
+// `commit` is the real one this diff is from, with its time on 15 November (UTC).
 function Diff({ lines, commit }: { lines: DiffLine[]; commit: string }) {
   return (
     <figure className="overflow-hidden rounded-xl border border-line bg-card">
@@ -37,7 +37,7 @@ export function Status({ pass, children }: { pass: boolean; children: ReactNode 
         {pass ? "✓" : "✗"}
       </span>
       <span>
-        <strong className="font-semibold">Proofed</strong> <span className="text-ink/80">— {children}</span>
+        <strong className="font-semibold">Proofed</strong> <span className="text-ink/80">· {children}</span>
       </span>
     </p>
   );
@@ -119,9 +119,8 @@ export function Clip({ src, poster, active, note, loop, onEnded }: ClipProps) {
   );
 }
 
-// Proofed's real comment on PR #2. The visitor ticks the box, as the PR's author did at 08:26; the comment
-// is then edited in place to the passing report, as the real one was at 08:30. Four and a half minutes,
-// told here in a few seconds.
+// Replay the initial and fixed reports on PR #12. The real fix started automatically;
+// the button only advances this local replay.
 type TickState = "waiting" | "fixing" | "passed";
 
 function Tick({ onPassed }: { onPassed: () => void }) {
@@ -139,8 +138,7 @@ function Tick({ onPassed }: { onPassed: () => void }) {
   return (
     <div className="rounded-xl border border-line bg-card">
       <p className="border-b border-line px-5 py-3 text-[14px] text-muted">
-        <strong className="font-semibold text-ink">github-actions</strong> commented on PR #2 at 08:25
-        {state === "passed" && <span> · edited 08:30</span>}
+        <strong className="font-semibold text-ink">github-actions</strong> reported on PR #12 at {state === "passed" ? "20:26" : "20:22"}
       </p>
       <div className="space-y-4 px-5 py-5 text-[15px] leading-relaxed">
         <p className="font-serif text-2xl">Proofed</p>
@@ -150,7 +148,7 @@ function Tick({ onPassed }: { onPassed: () => void }) {
             aria-hidden={state === "passed"}
           >
             <p>
-              <strong>2 of 3</strong> scenarios broke on this PR.
+              <strong>2 of 4</strong> scenarios broke on this PR.
             </p>
             <p className="border-l-2 border-fail/40 pl-3 text-fail">
               ✗ Free shipping from €50: Checkpoint assertion failed: "shipping is €4.90 and the total is €49.40"
@@ -160,9 +158,9 @@ function Tick({ onPassed }: { onPassed: () => void }) {
             className={`col-start-1 row-start-1 space-y-4 transition-opacity duration-500 ${state === "passed" ? "" : "pointer-events-none opacity-0"}`}
             aria-hidden={state !== "passed"}
           >
-            <p>All 3 affected scenarios pass in a real browser.</p>
+            <p>2 of 3 scenarios pass in a real browser; checkout remains unconfirmed.</p>
             <p className="border-l-2 border-pass/40 pl-3 text-pass">
-              ✓ Claude fixed it in <span className="font-mono text-[0.9em]">84514db</span> after 1 attempt.
+              ✓ Kane confirmed the shipping fix in <span className="font-mono text-[0.9em]">f54f1b5</span> after 1 attempt.
             </p>
           </div>
         </div>
@@ -183,11 +181,11 @@ function Tick({ onPassed }: { onPassed: () => void }) {
             </svg>
           </span>
           <span>
-            <strong>Fix with Claude</strong>
+            <strong>Replay Claude's fix</strong>
             {state === "fixing" ? (
-              <span className="text-muted"> — Claude Code is fixing it on this branch, then Proofed runs it again…</span>
+              <span className="text-muted">. Claude Code fixes the code, then Proofed checks it with Kane…</span>
             ) : (
-              <> — Claude Code gets the failure, the steps and the diff, pushes a fix to this branch, and Proofed checks again.</>
+              <>. The real run used Fix automatically. This button replays the reports.</>
             )}
           </span>
         </button>
@@ -200,14 +198,14 @@ function Tick({ onPassed }: { onPassed: () => void }) {
 type StageProps = { active: boolean; next: () => void };
 type Step = { time: string; title: string; tone?: "fail" | "pass"; body: ReactNode; stage: (p: StageProps) => ReactNode };
 
-// The times are the real ones on PR #2, 13 November (UTC).
+// The times are the real ones on PR #12, 15 November (UTC).
 const steps: Step[] = [
   {
-    time: "08:23",
+    time: "20:18",
     title: "A one-line tidy-up",
     body: (
       <>
-        PR #2 writes the free shipping threshold as <code className="font-mono text-[0.9em]">50</code> so it reads as euros.
+        PR #12 writes the free shipping threshold as <code className="font-mono text-[0.9em]">50</code> so it reads as euros.
         The rest of the store still counts cents, so every bag now ships free.
       </>
     ),
@@ -216,19 +214,19 @@ const steps: Step[] = [
         {/* The PR as it was opened: its real title, branch and size. */}
         <div className="mb-4 rounded-xl border border-line bg-card px-5 py-4">
           <p className="font-serif text-2xl leading-snug">
-            Make the free shipping threshold easier to read <span className="text-muted">#2</span>
+            Make the free shipping threshold easier to read <span className="text-muted">#12</span>
           </p>
           <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[14px] text-muted">
             <span className="rounded-full bg-pass px-2.5 py-0.5 text-[12.5px] font-medium text-paper">Open</span>
-            <span className="font-mono text-[13px]">readable-shipping-threshold</span>
-            <span>opened at 08:23</span>
+            <span className="font-mono text-[13px]">check-shipping-threshold</span>
+            <span>opened at 20:18</span>
             <span>
               <span className="text-pass">+1</span> <span className="text-fail">−1</span>
             </span>
           </p>
         </div>
         <Diff
-          commit="886a15c · 08:23"
+          commit="c1aaa79"
           lines={[
             { sign: " ", text: "export const SHIPPING_FEE = 490;" },
             { sign: "-", text: "export const FREE_SHIPPING_FROM = 5000;" },
@@ -239,7 +237,7 @@ const steps: Step[] = [
     ),
   },
   {
-    time: "08:25",
+    time: "20:22",
     title: "Proofed goes shopping",
     tone: "fail",
     body: (
@@ -251,38 +249,37 @@ const steps: Step[] = [
     stage: (p) => <FailStage {...p} />,
   },
   {
-    time: "08:26",
-    title: "One box to tick",
+    time: "20:22",
+    title: "Proofed starts the fix",
     body: (
       <>
-        The recording and the verdict land in a single comment on the PR. Tick <strong>Fix with Claude</strong>, and Claude Code
-        gets the failure, the steps and the diff. Go on, tick it.
+        The recording and the verdict land on the PR. With <strong>Fix automatically</strong> enabled, Claude Code
+        gets the failure, the steps and the diff. Replay the fix below.
       </>
     ),
     stage: ({ next }) => <Tick onPassed={next} />,
   },
   {
-    time: "08:30",
+    time: "20:26",
     title: "Fixed, then watched",
     tone: "pass",
     body: (
       <>
         Claude writes <code className="font-mono text-[0.9em]">50 * 100</code> and keeps the readable number. Proofed rebuilds the
-        store and runs the broken scenarios again before anything is pushed. Four and a half minutes after the tick, the
-        check is green.
+        store and has Kane check the fix independently. Kane confirms the shipping flow passes; checkout remains unconfirmed.
       </>
     ),
     stage: ({ active }) => (
       <div className="space-y-4">
         <Diff
-          commit="84514db · 08:29"
+          commit="f54f1b5 · 20:24"
           lines={[
             { sign: "-", text: "export const FREE_SHIPPING_FROM = 50; // €50" },
-            { sign: "+", text: "export const FREE_SHIPPING_FROM = 50 * 100; // €50, in cents" },
+            { sign: "+", text: "export const FREE_SHIPPING_FROM = 50 * 100; // €50" },
           ]}
         />
-        <Clip src="/clips/fixed.mp4" poster="/clips/fixed.jpg" active={active} />
-        <Status pass>3 scenarios pass in Chrome</Status>
+        <Clip src="https://raw.githubusercontent.com/t1dem/proofed-demo-store/proofed-clips/pr-12/f54f1b5-43757307941/free-shipping.mp4" poster="https://raw.githubusercontent.com/t1dem/proofed-demo-store/proofed-clips/pr-12/f54f1b5-43757307941/free-shipping.jpg" active={active} />
+        <Status pass>Shipping fixed and confirmed by Kane; checkout unconfirmed</Status>
       </div>
     ),
   },
@@ -298,8 +295,8 @@ function FailStage({ active, next }: StageProps) {
     <After active={active && ended} ms={4500} next={next}>
       <div className="space-y-4">
         <Clip
-          src="/clips/fail.mp4"
-          poster="/clips/fail.jpg"
+          src="https://raw.githubusercontent.com/t1dem/proofed-demo-store/proofed-clips/pr-12/c1aaa79-43757307941/free-shipping.mp4"
+          poster="https://raw.githubusercontent.com/t1dem/proofed-demo-store/proofed-clips/pr-12/c1aaa79-43757307941/free-shipping.jpg"
           active={active}
           onEnded={() => setEnded(true)}
           note={
@@ -308,7 +305,7 @@ function FailStage({ active, next }: StageProps) {
             </>
           }
         />
-        <Status pass={false}>2 of 3 broke: Place an order, Free shipping from €50</Status>
+        <Status pass={false}>Shipping is free below €50; Kane caught the break</Status>
       </div>
     </After>
   );
@@ -341,7 +338,7 @@ function useDesktop() {
 }
 
 // The PR's conversation, replayed: a timeline of what happened when, and a stage that shows it. It plays on by
-// itself while on screen, and waits at the comment for the visitor to tick the box, as the PR's author did.
+// itself while on screen, and waits for the visitor to replay the automatic fix.
 export function Replay() {
   const desktop = useDesktop();
   const [active, setActive] = useState(0);
@@ -362,7 +359,7 @@ export function Replay() {
   return (
     <section id="replay" className="py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-4 sm:px-8">
-        <h2 className="max-w-2xl font-serif text-4xl leading-tight sm:text-6xl">PR #2, as it happened.</h2>
+        <h2 className="max-w-2xl font-serif text-4xl leading-tight sm:text-6xl">PR #12, as it happened.</h2>
         <p className="mt-4 max-w-xl text-lg leading-relaxed text-ink/80">
           A real pull request on our demo coffee shop. Every clip here is an actual run, recorded by Proofed.{" "}
           <a href={PR_URL} className="text-ink underline underline-offset-4">

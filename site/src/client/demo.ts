@@ -781,6 +781,10 @@ const looping = new Set(asked.keys());
 // this page's memory only.
 export async function demo(path: string, init?: RequestInit): Promise<unknown> {
   await new Promise((done) => setTimeout(done, 150));
+  if (path === "/api/try" || path === `/api/pulls/${store}/14`) {
+    const sample = await import("./demo-try");
+    return path === "/api/try" ? sample.view : sample.detail;
+  }
   const ask = /^\/api\/pulls\/(.+\/\d+)\/(fix|rerun|check)$/.exec(path);
   if (ask && init?.method === "POST") {
     const { what } = init.body ? (JSON.parse(String(init.body)) as { what?: string }) : {};

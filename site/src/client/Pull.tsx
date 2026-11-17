@@ -4,22 +4,10 @@ import { modelLabel, providerLabel, providerOf } from "../worker/models";
 import type { PullDetail, PullView, Run, RunScenario } from "../worker/runs";
 import { ago, fixerName, movingName, titleName, useLoad, type Ask, type Route, type useAsk } from "./lib";
 import { LiveRun } from "./Live";
+import { creditSummary, defaultScenario, fixedSummary, latestScenarios, scenarioStory as story } from "../run-summary";
 import { Backdrop, bone, focus, iconButton, kindOf, Link, link, Mark, marks, MobileBar, NEEDS_WRITE, outline, PageTitle, panel, popover, useSheetDrag, plain, Segmented, sha7, soft, solid, useDismiss } from "./ui";
 
 type Seen = { run: Run; scenario: RunScenario };
-
-// A scenario as the page shows it: how it ended in the latest run it was part of, and, when
-// that's a pass, the last run where it was broken. Runs come newest first.
-function story(runs: Run[], id: string) {
-  const seen = runs.flatMap((run): Seen[] => {
-    const scenario = run.scenarios.find((s) => s.id === id);
-    return scenario ? [{ run, scenario }] : [];
-  });
-  const [now, ...earlier] = seen;
-  if (!now) return undefined;
-  const before = now.scenario.outcome === "passed" ? earlier.find((s) => s.scenario.outcome === "failed") : undefined;
-  return { now, before };
-}
 
 function verdict({ outcome, reason, suggestion }: RunScenario) {
   if (outcome === "passed") return reason || "Passes.";
@@ -271,9 +259,9 @@ function Steps({ steps, current, onSeek }: { steps: Step[]; current: number; onS
   );
 }
 
-function runLabel(run: Run) {
+function runLabel(run: Run, runs: Run[]) {
   const count = (outcome: RunScenario["outcome"]) => run.scenarios.filter((s) => s.outcome === outcome).length;
-  if (run.fix?.status === "fixed") return `fixed by ${providerLabel(providerOf(run.fix.model))}`;
+  if (run.fix?.status === "fixed") return fixedSummary(runs, providerLabel(providerOf(run.fix.model)));
   if (count("failed") > 0) return `${count("failed")} of ${run.scenarios.length} broke`;
   if (count("error") > 0) return "couldn't finish";
   const unsure = run.scenarios.filter((s) => s.outcome === "unsure");
@@ -285,14 +273,6 @@ const runDot = (run: Run) =>
   run.scenarios.some((s) => s.outcome === "failed") ? "bg-bad" : run.scenarios.some((s) => s.outcome !== "passed") ? "bg-busy" : "bg-ok";
 
 const duration = (seconds: number) => (seconds >= 60 ? `${Math.floor(seconds / 60)} min ${seconds % 60} s` : `${seconds} s`);
-
-// What one run took and cost, as separate parts of the line under the title.
-function runCost(run: Run) {
-  const sum = (pick: (s: RunScenario) => number | undefined) => run.scenarios.reduce((total, s) => total + (pick(s) ?? 0), 0);
-  const seconds = Math.round(sum((s) => s.seconds));
-  const credits = Math.round(sum((s) => s.credits));
-  return [seconds > 0 && duration(seconds), credits > 0 && `${credits} credits (Kane estimate)`].filter((part): part is string => !!part);
-}
 
 // The line under the title: how the shown run went and where it came from. With more than one run
 // the commit opens the list of them, and picking one shows the pull request as that run left it.
@@ -306,12 +286,13 @@ export function RunMeta({ runs, at, onAt, checking }: { runs: Run[]; at: number;
   const sheet = useSheetDrag<HTMLSpanElement>(close);
   const run = runs[at];
   if (!run) return null;
-  const cost = runCost(run);
+  const seconds = Math.round(run.scenarios.reduce((sum, s) => sum + (s.seconds ?? 0), 0));
+  const cost = [seconds > 0 ? duration(seconds) : undefined, creditSummary(runs.slice(at), at === 0)].filter((part): part is string => !!part);
   const when = ago(run.at) === "now" ? "just now" : `${ago(run.at)} ago`;
   const dot = <span aria-hidden>·</span>;
   return (
     <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 pl-7 text-[13px] text-faint">
-      <span className="text-dim">{runLabel(run)}</span>
+      <span className="text-dim">{runLabel(run, runs.slice(at))}</span>
       {dot}
       <span>{when} on</span>
       {runs.length > 1 || checking ? (
@@ -350,7 +331,7 @@ export function RunMeta({ runs, at, onAt, checking }: { runs: Run[]; at: number;
                 >
                   <span className={`size-2 shrink-0 rounded-full ${runDot(r)}`} />
                   <span className="font-mono text-[12px] text-fg">{sha7(r.sha)}</span>
-                  <span className="min-w-0 flex-1 truncate text-dim">{runLabel(r)}</span>
+                  <span className="min-w-0 flex-1 truncate text-dim">{runLabel(r, runs.slice(i))}</span>
                   <span className="tabular-nums text-faint">{ago(r.at)}</span>
                   <span className="w-3.5 shrink-0 text-fg">{i === at && <Check size={14} />}</span>
                 </button>
@@ -528,11 +509,11 @@ type ScenariosProps = { runs: Run[]; at: number; scenario: string | undefined };
 
 export function Scenarios({ runs, at, scenario }: ScenariosProps) {
   const view = runs.slice(at);
-  // Every scenario any run touched, the latest run's first; open on the one asked for in the
-  // address, else on the one that needs a look.
-  const scenarios = [...new Map(view.flatMap((r) => r.scenarios).map((s) => [s.id, s])).values()];
-  const [picked, setPicked] = useState(() => runs.flatMap((r) => r.scenarios).find((s) => s.name === scenario)?.id);
-  const current = scenarios.find((s) => s.id === picked) ?? scenarios.find((s) => s.outcome !== "passed") ?? scenarios[0];
+  // Open on a requested scenario, then a repaired flow after a successful fix.
+  // Manual tab choices stay selected as new reports arrive.
+  const scenarios = latestScenarios(view);
+  const [picked, setPicked] = useState<string>();
+  const current = scenarios.find((s) => s.id === picked) ?? defaultScenario(view, scenario);
   // The tabs are drawn anew with each scenario (ScenarioView is keyed by it), so the strip keeps its
   // sideways scroll here and shows the picked tab, instead of jumping back to the first one.
   const scrolled = useRef(0);

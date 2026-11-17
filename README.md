@@ -53,7 +53,7 @@ To watch one run live, open [Break it yourself](https://proofed.neptunescodm.wor
 
 <img src="docs/try-run.jpg" alt="A finished run on /try: Kane caught a break, Claude fixed it, Kane confirmed. The fix and a before and after comparison of the page.">
 
-To run Proofed on your machine, with a signed-in [Kane CLI](https://www.npmjs.com/package/@testmuai/kane-cli), Node 22.18+, Chrome and ffmpeg:
+To run Proofed on your machine, with a signed-in [Kane CLI](https://www.npmjs.com/package/@testmuai/kane-cli), Node 22.18+, Chrome, ffmpeg and pnpm (`npm install -g pnpm`):
 
 ```sh
 git clone https://github.com/t1dem/proofed-demo-store
@@ -61,7 +61,7 @@ cd proofed-demo-store
 npx proofed-cli check "the promo code welcome10 takes 10% off"
 ```
 
-The [dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo) needs no sign-in. Proofed also checks its own pull requests, for example [#25](https://github.com/t1dem/proofed/pull/25#issuecomment-6897255024).
+The [dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo) needs no sign-in. In [demo-store #11](https://github.com/t1dem/proofed-demo-store/pull/11#issuecomment-6897672103), Kane caught a broken quantity button, Claude fixed it, and Kane confirmed both affected scenarios passed. Proofed also checks its own pull requests.
 
 ### Bugs from real projects
 
@@ -179,7 +179,7 @@ Checks spend Kane credits; planning does not. Use `--no-retry` when another atte
 2. Install the GitHub App on a repo. Proofed opens a PR with the workflow and puts the keys into the repo's secrets.
 3. On that PR, the selected provider writes up to five scenarios for the app's main flows. Only the ones Kane saw pass are committed.
 
-A scenario takes 1 to 4 minutes and about 30 Kane credits the first time. A fix attempt re-runs only the scenarios that broke.
+A scenario takes 1 to 4 minutes and about 30 Kane credits the first time. A fix attempt re-runs the broken scenarios and affected neighboring scenarios before pushing.
 
 <details>
 <summary><b>Setting it up by hand</b></summary>

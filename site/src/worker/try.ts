@@ -10,6 +10,7 @@ import type { Env } from "./index";
 import { getLive, liveFrame } from "./live";
 import { providerLabel, providerOf } from "./models";
 import { memo } from "./memo";
+import { fixedSummary, latestScenarios } from "../run-summary";
 import { getPull, type PullState } from "./runs";
 
 // What the visitor picks from. `title` and `says` are the pull request's own title and description:
@@ -23,7 +24,7 @@ const BUGS = [
 
 export type TryBug = { id: string; title: string; says: string };
 // `unsure`: nothing broke in the last run, but Kane didn't confirm a scenario either.
-export type TryRun = { pr: number; bug: string; title: string; startedAt: number; finishedAt?: number; state: PullState; fixed: boolean; unsure: boolean; model?: string };
+export type TryRun = { pr: number; bug: string; title: string; startedAt: number; finishedAt?: number; state: PullState; fixed: boolean; unsure: boolean; model?: string; result?: string };
 export type TryView = {
   repo: string;
   provider?: string;
@@ -78,7 +79,8 @@ async function describe(env: Env, row: TryRow & { pr: number }): Promise<TryRun 
     state,
     fixed: fix?.status === "fixed",
     model: detail?.pull.live?.fix?.model || fix?.model,
-    unsure: state === "passing" && !!detail?.pull.scenarios.some((s) => s.outcome === "unsure"),
+    unsure: state === "passing" && !!detail && latestScenarios(detail.runs).some((s) => s.outcome !== "passed"),
+    ...(fix?.status === "fixed" && detail && { result: fixedSummary(detail.runs, providerLabel(providerOf(fix.model))) }),
     over,
   };
 }

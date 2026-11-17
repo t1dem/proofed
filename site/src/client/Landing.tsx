@@ -20,7 +20,7 @@ import {
 } from "./SetupScenes";
 
 const REPO = "https://github.com/t1dem/proofed";
-const DEMO_PR = "https://github.com/t1dem/proofed-demo-store/pull/2";
+const DEMO_PR = "https://github.com/t1dem/proofed-demo-store/pull/12#issuecomment-6900830885";
 
 function Header() {
   return (
@@ -88,7 +88,7 @@ function Hero() {
 const SETUP = [
   {
     title: "Install the GitHub app",
-    body: "Pick the repos. Proofed opens a pull request in each that adds a workflow and an example scenario.",
+    body: "Pick the repos. Proofed opens a pull request in each that adds the workflow and generates scenarios for your app.",
     scene: <GlyphScene draw={drawInstall} loop={INSTALL_LOOP} rest={4.5} label="A plug pushed into a socket, which lights up green" />,
   },
   {
@@ -102,11 +102,10 @@ const SETUP = [
     scene: <GlyphScene draw={drawSecrets} loop={SECRETS_LOOP} rest={5} label="Three keys in a padlock, locked and green" />,
   },
   {
-    title: "Describe your flows in plain English",
+    title: "Review the generated scenarios",
     body: (
       <>
-        One Markdown file per flow. <code className="font-mono text-[0.9em]">paths</code> says which files it guards, so a PR only runs
-        the flows it can break.
+        Your selected provider writes up to five scenarios. Kane checks each in Chrome, and only the ones that pass are committed to the setup PR. Review them before merging.
       </>
     ),
     scene: <GlyphScene draw={drawScenario} loop={SCENARIO_LOOP} rest={6} label="A page of four sentences, each ticked, with a green stamp" />,
@@ -183,7 +182,7 @@ const FOOTER_LINKS = [
     links: [
       ["Proofed on GitHub", REPO],
       ["proofed-cli on npm", "https://www.npmjs.com/package/proofed-cli"],
-      ["The demo store's PR #2", DEMO_PR],
+      ["The demo store's PR #12", DEMO_PR],
       ["Kane CLI", "https://github.com/LambdaTest/kane-cli"],
     ],
   },

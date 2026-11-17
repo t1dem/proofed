@@ -98,7 +98,7 @@ A first run is estimated at 30 Kane credits per scenario. Later estimates use th
 | 3 | The check couldn't start. The message says why and how to fix it; running it again unchanged won't help |
 | 130 | Ctrl-C or a closed terminal. Kane, Chrome and the app are stopped first |
 
-`failedCheck: "scenario_doubted"` means a scenario's check failed, but Kane believes the scenario is out of date. `diagnosis` is Kane's opinion; `suggestion` and `next` say to update the scenario if the app change was intended, otherwise fix the app. Such a failure is run a second time, at the scenario's cost again, and the second run is the result: Kane gives the same verdict when it misreads a page that is fine, and a misreading rarely repeats. A check that fails both times is a failure (exit 1). `notChecked: "scenario_doubted"` means Kane doubted the scenario without a failed check (exit 2).
+`failedCheck: "scenario_doubted"` means a scenario's check failed, but Kane believes the scenario is out of date. `diagnosis` is Kane's opinion; `suggestion` and `next` say to update the scenario if the app change was intended, otherwise fix the app. Such a failure is run a second time, at the scenario's cost again. A check that fails both times is a failure (exit 1). A failure followed by a pass stays unconfirmed and is reported as not checked (exit 2). `notChecked: "scenario_doubted"` means Kane doubted the scenario without a failed check (exit 2).
 
 ## Mobile and Electron targets
 
