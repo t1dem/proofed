@@ -67,7 +67,7 @@ If you'd rather read than wait, all four changes have already run:
 - Kane doesn't record video, so Proofed records Chrome itself. The clip cuts the waiting, shows where Kane clicked and zooms in on what it checks.
 - When Kane blames the test rather than the code, the scenario shows as "not checked", never as a pass.
 - A fix starts when someone ticks **Fix with Claude**, or on its own with [Fix automatically](#fix-automatically) on.
-- Nothing is pushed until Kane has seen a fix pass. The commit's `Fixed-by:` line names the model.
+- Nothing is pushed until Kane has seen the broken flows pass. Then every scenario the pull request touches runs on the fix commit. The commit's `Fixed-by:` line names the model.
 
 ## Scenarios
 
