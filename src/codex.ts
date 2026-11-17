@@ -12,6 +12,11 @@ export function askCodex(prompt: string, o: Options): CodexAnswer {
   const dir = mkdtempSync(join(tmpdir(), "proofed-codex-"));
   try {
     const output = join(dir, "answer.txt");
+    // Keep job tokens and unrelated provider keys out of the agent process.
+    const env = Object.fromEntries(
+      ["PATH", "HOME", "USER", "TMPDIR", "TMP", "TEMP", "SystemRoot", "CODEX_HOME", "CODEX_API_KEY"]
+        .flatMap((name) => process.env[name] === undefined ? [] : [[name, process.env[name]!]]),
+    );
     // Codex has no equivalent of Claude's per-command/per-path tool allowlist. The sandbox
     // limits writes, blocks network and protects .git; the prompt restricts shell use to
     // reading code and the build. fix.ts/generate.ts undo edits outside their allowed files.
@@ -20,12 +25,14 @@ export function askCodex(prompt: string, o: Options): CodexAnswer {
       "exec", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--color", "never",
       "--sandbox", "workspace-write", "-c", 'approval_policy="never"',
       "-c", "sandbox_workspace_write.network_access=false",
+      "-c", 'shell_environment_policy.inherit="none"',
+      "-c", `shell_environment_policy.set.PATH=${JSON.stringify(env.PATH ?? "/usr/bin:/bin")}`,
       "-c", "sandbox_workspace_write.exclude_slash_tmp=true",
       "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
       "-c", `model_reasoning_effort=${JSON.stringify(o.effort)}`,
       "--model", o.model, "--json", "--output-last-message", output, "-",
     ], {
-      input: prompt, cwd: o.cwd, encoding: "utf8", maxBuffer: 50 * 1024 * 1024,
+      input: prompt, cwd: o.cwd, env, encoding: "utf8", maxBuffer: 50 * 1024 * 1024,
       timeout: o.timeoutMs ?? 10 * 60_000, killSignal: "SIGKILL",
     });
     if (run.error) {
