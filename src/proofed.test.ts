@@ -93,6 +93,7 @@ function cli(r: Repo, args: string[], extra: NodeJS.ProcessEnv = {}, onSpawn?: (
 // stdout must be exactly one JSON document.
 const json = <T = Doc>(ran: Ran) => {
   assert.match(ran.stdout, /^\{[\s\S]*\}\n$/, `stdout isn't only JSON:\n${ran.stdout}\n--- stderr:\n${ran.stderr}`);
+  assert.equal(ran.stdout.trimEnd().split("\n").length, 1, "JSON stdout is compact");
   return JSON.parse(ran.stdout) as T;
 };
 
@@ -141,6 +142,7 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       // The progress went to stderr, the same document to result.json, and the clips stay out of git.
       assert.match(ran.stderr, /started pass: Scenario pass/);
       assert.deepEqual(JSON.parse(readFileSync(join(r.out, "result.json"), "utf8")), doc);
+      assert.match(readFileSync(join(r.out, "result.json"), "utf8"), /\n  "ok":/);
       assert.equal(readFileSync(join(r.out, ".gitignore"), "utf8"), "*\n");
       // An error is tried twice, like in CI.
       assert.equal(runs(r).length, 6);
@@ -335,11 +337,19 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.deepEqual([second.exitCode, second.credits, second.scenarios[0]!.cached], [0, 0, true]);
       assert.ok(second.scenarios[0]!.cachedAt);
       assert.equal(runs(r).length, 1, "the cached pass didn't call Kane");
+      const listed = json<{ estimatedCredits: number; scenarios: { selected: boolean; cached: boolean; estimatedCredits: number }[] }>(
+        await cli(r, ["list", "--json", "--url", `http://127.0.0.1:${port}`]),
+      );
+      assert.equal(listed.estimatedCredits, 0);
+      assert.deepEqual(listed.scenarios.map((s) => [s.selected, s.cached, s.estimatedCredits]), [[true, true, 0]]);
 
       writeFileSync(join(r.dir, "src/app.js"), "export const price = 3;\n");
       const third = json(await check());
       assert.deepEqual([third.credits, third.scenarios[0]!.cached], [7, false]);
       assert.equal(runs(r).length, 2);
+      writeFileSync(join(r.dir, "src/app.js"), "export const price = 4;\n");
+      const estimate = json<{ estimatedCredits: number }>(await cli(r, ["list", "--json", "--url", `http://127.0.0.1:${port}`]));
+      assert.equal(estimate.estimatedCredits, 7, "a changed scenario uses its last reported cost");
 
       const forced = json(await cli(r, ["check", "--json", "--no-cache", "--dry-run", "--url", `http://127.0.0.1:${port}`]));
       assert.equal(forced.scenarios[0]!.outcome, "would_run");
@@ -459,6 +469,36 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
 });
 
 describe("proofed list and doctor", () => {
+  test("list estimates only selected scenarios without calling Kane", async () => {
+    const r = repo({ pricing: { mode: "pass", paths: ["src/app.js"] }, docs: { mode: "pass", paths: ["docs/**"] } });
+    try {
+      type ListDoc = { estimatedCredits: number; scenarios: { id: string; selected: boolean; estimatedCredits: number; touched: boolean | null }[] };
+      const doc = json<ListDoc>(await cli(r, ["list", "--json"]));
+      assert.equal(doc.estimatedCredits, 30);
+      assert.deepEqual(doc.scenarios.map((s) => [s.id, s.selected, s.estimatedCredits]), [["docs", false, 0], ["pricing", true, 30]]);
+      writeFileSync(join(r.dir, "src/app.js"), "export const price = 1;\n");
+      assert.equal(json<ListDoc>(await cli(r, ["list", "--json"])).estimatedCredits, 0);
+      rmSync(join(r.dir, ".git"), { recursive: true });
+      const all = json<ListDoc>(await cli(r, ["list", "--json"]));
+      assert.equal(all.estimatedCredits, 60);
+      assert.ok(all.scenarios.every((s) => s.selected && s.touched === null));
+      assert.deepEqual(calls(r), []);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  test("JSON usage errors keep their fields on one line", () => {
+    const ran = spawnSync(process.execPath, [CLI, "check", "--jsn", "--json"], { encoding: "utf8" });
+    assert.equal(ran.status, 3);
+    const doc = JSON.parse(ran.stdout) as ErrorDoc;
+    assert.equal(ran.stdout.trimEnd().split("\n").length, 1);
+    assert.equal(doc.error.code, "usage");
+    assert.match(doc.error.message, /Did you mean: --json/);
+    assert.equal(doc.error.fix, "See proofed --help.");
+    assert.equal(ran.stderr, "");
+  });
+
   test("list shows each scenario and a file that doesn't parse", async () => {
     const r = repo({ pricing: { mode: "pass", paths: ["src/app.js"] }, docs: { mode: "pass", paths: ["docs/**"] } });
     writeFileSync(join(r.dir, ".proofed/scenarios/bad.md"), "no frontmatter\n");

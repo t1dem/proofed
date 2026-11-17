@@ -25,7 +25,7 @@ async function main(): Promise<number> {
   } catch (e) {
     if (!(e instanceof UsageError)) throw e;
     if (argv.includes("--json")) {
-      io.stdout.write(`${JSON.stringify({ ok: false, exitCode: 3, error: { code: "usage", message: e.message, fix: "See proofed --help." } }, null, 2)}\n`);
+      io.stdout.write(`${JSON.stringify({ ok: false, exitCode: 3, error: { code: "usage", message: e.message, fix: "See proofed --help." } })}\n`);
     } else {
       io.stderr.write(`proofed: ${e.message}\n`);
     }
@@ -55,7 +55,7 @@ async function main(): Promise<number> {
 const code = await main().catch((e: unknown) => {
   const message = `Proofed hit an unexpected error: ${e instanceof Error ? e.message : String(e)}`;
   if (argv.includes("--json")) {
-    io.stdout.write(`${JSON.stringify({ ok: false, exitCode: 3, error: { code: "internal", message, fix: "Run it again with --verbose; nothing was checked." } }, null, 2)}\n`);
+    io.stdout.write(`${JSON.stringify({ ok: false, exitCode: 3, error: { code: "internal", message, fix: "Run it again with --verbose; nothing was checked." } })}\n`);
   } else {
     io.stderr.write(`proofed: ${message}\n`);
   }

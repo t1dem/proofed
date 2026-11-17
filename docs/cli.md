@@ -23,6 +23,20 @@ If the app isn't running, Proofed starts it and stops it at the end. It installs
 
 A passed scenario isn't run again until its file, the URL, the base commit or a changed file in its `paths` changes. `--dry-run` shows what would run and the credit estimate, for free. In a terminal the scenarios update in place; in a pipe each event is one line, with a "still running" line at least every 30 seconds.
 
+## For an agent
+
+Run `proofed doctor --json` to find setup problems and their fixes. Run `proofed list --json`
+to get each scenario's `selected`, `cached` and `estimatedCredits`, plus the total
+`estimatedCredits`. A selected scenario is touched by the change, or all scenarios when
+there is no Git base. Untouched scenarios and cached passes cost zero. Estimates use the
+last reported cost, or 30 credits for a first run. Invalid scenarios are in `errors`; fix
+those before checking. These commands do not spend credits.
+
+Use `proofed check --only <id> --dry-run --json` to plan one scenario, or
+`proofed check "<what to check>" --dry-run --json` to plan an ad hoc check. Remove
+`--dry-run` to run it. Allow at least 10 minutes. Read `reason`, `diagnosis` and `rerun`
+when a scenario fails. `not_checked` is not a pass. On exit 3, follow `error.fix`.
+
 ## A sample run
 
 A real run on the demo store with the free shipping threshold changed to €60. Kane blamed the scenario, so it ran twice, and the credits are for both runs:
@@ -67,7 +81,7 @@ A first run is estimated at 30 Kane credits per scenario. Later estimates use th
 
 ## JSON and exit codes
 
-`--json` prints one JSON document on stdout and the progress on stderr. Every run also writes it to `.proofed-out/result.json`, next to the clips; the folder has its own `.gitignore`.
+`--json` prints one compact JSON document on stdout and the progress on stderr. Every check also writes the same fields, with indentation, to `.proofed-out/result.json`, next to the clips; the folder has its own `.gitignore`.
 
 | Exit | Meaning |
 |---|---|

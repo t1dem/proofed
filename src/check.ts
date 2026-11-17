@@ -99,7 +99,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
   const write = (doc: Doc | ErrorDoc) => {
     ensureOut(out);
     writeFileSync(join(out, RESULT_FILE), `${JSON.stringify(doc, null, 2)}\n`);
-    if (flags.json) io.stdout.write(`${JSON.stringify(doc, null, 2)}\n`);
+    if (flags.json) io.stdout.write(`${JSON.stringify(doc)}\n`);
   };
 
   // Ctrl-C (or a kill) mid-run: Kane, every Chrome and the app go first, then the exit.

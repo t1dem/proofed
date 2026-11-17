@@ -148,15 +148,15 @@ For an agent, add this to the app's `AGENTS.md` or `CLAUDE.md`:
 ```md
 ## Checking UI changes
 
-After changing UI code, run `proofed check --json` with a timeout of at least 10 minutes, and
-don't interrupt it. stdout is one JSON document. Exit 0: everything checked passed.
-- `failed`: read `reason` and `diagnosis`, fix the cause, run `rerun`.
-  With `failedCheck: "scenario_doubted"`, diagnosis is Kane's opinion. If the app change was
-  intended, update the scenario; otherwise fix the app.
-- `not_checked` is not a pass: fix the scenario or tell the user why Kane doubts it.
-- `error`: run its `rerun` command once more. Exit 3: do what `error.fix` says.
-Each run costs Kane credits; `proofed check --dry-run --json` shows what would run, for free.
-To check one thing without a scenario: `proofed check "the cart total updates" --json`.
+Use `proofed doctor --json` for setup and fixes. Use `proofed list --json` for affected
+scenarios (`selected`), cache and `estimatedCredits`; neither command spends credits.
+Use `proofed check --dry-run --json` to plan a specific `--only <id>` or text check.
+Run `proofed check --json` to check affected flows, or `proofed check "<what>" --json`.
+Allow at least 10 minutes. stdout is one JSON document; progress is on stderr.
+Exit 0: passed or nothing ran. On `failed`, read `reason` and `diagnosis`, fix and run `rerun`.
+`failedCheck: "scenario_doubted"` is Kane's opinion: review the scenario's expectations.
+`not_checked` is not a pass. On `error`, retry `rerun` once. Exit 3: follow `error.fix`.
+Checks spend Kane credits; planning does not.
 ```
 
 ## Setup

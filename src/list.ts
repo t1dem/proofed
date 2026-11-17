@@ -2,7 +2,7 @@
 // cached. Reads files and git only; spends nothing.
 import { join } from "node:path";
 import type { Flags } from "./args.ts";
-import { CACHE_FILE, cacheKey, readCache } from "./cache.ts";
+import { CACHE_FILE, cacheKey, estimate, readCache } from "./cache.ts";
 import { findBase, localChanges, mergeBaseOf } from "./changes.ts";
 import { outDirOf, scenariosDirOf, scenariosMissing, type Io } from "./check.ts";
 import { colorOn, palette, since, textWidth, truncate } from "./render.ts";
@@ -17,7 +17,7 @@ export function list(flags: Flags, io: Io): number {
     return show();
   } catch (e) {
     if (!(e instanceof SetupError)) throw e;
-    if (flags.json) io.stdout.write(`${JSON.stringify(errorDoc(e), null, 2)}\n`);
+    if (flags.json) io.stdout.write(`${JSON.stringify(errorDoc(e))}\n`);
     else io.stderr.write(`${c.red("✗")} ${e.message}\n  ${c.dim("Fix")} ${e.fix}\n`);
     return 3;
   }
@@ -34,21 +34,25 @@ export function list(flags: Flags, io: Io): number {
     const scenarios = loaded.scenarios.map((s) => {
       const hit = cache.passes[s.id];
       const cached = !!(hit && url && isHttpUrl(url) && changed && hit.key === cacheKey(s, new URL(s.url, url).href, changed, undefined, baseId));
+      const touched = changed ? affectedBy([s], changed).length > 0 : null;
+      const selected = touched !== false;
       return {
         id: s.id,
         name: s.name,
         file: s.file,
         url: s.url,
         paths: s.paths,
-        touched: changed ? affectedBy([s], changed).length > 0 : null,
+        touched,
+        selected,
+        estimatedCredits: selected && !cached ? estimate(cache, s.id) : 0,
         cached,
         ...(cached && { cachedAt: hit!.passedAt }),
       };
     });
     const exitCode = loaded.errors.length ? 3 : 0;
     if (flags.json) {
-      const doc = { ok: exitCode === 0, exitCode, base: base.rev ?? null, changedFiles: changed?.length ?? null, url: url ?? null, scenarios, errors: loaded.errors };
-      io.stdout.write(`${JSON.stringify(doc, null, 2)}\n`);
+      const doc = { ok: exitCode === 0, exitCode, base: base.rev ?? null, changedFiles: changed?.length ?? null, url: url ?? null, scenarios, errors: loaded.errors, estimatedCredits: scenarios.reduce((sum, s) => sum + s.estimatedCredits, 0) };
+      io.stdout.write(`${JSON.stringify(doc)}\n`);
       return exitCode;
     }
 

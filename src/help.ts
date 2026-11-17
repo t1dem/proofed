@@ -1,63 +1,34 @@
 import type { Command } from "./args.ts";
 
-const MAIN = `proofed: check a web app in real Chrome with Kane CLI before you call a change done.
-It runs the plain-English scenarios in .proofed/scenarios/ that your local change touches.
+const MAIN = `proofed: check web app scenarios in Chrome with Kane CLI.
 
 Usage
-  proofed check [text] [flags]   Run the scenarios the local change touches, or check just [text]
-  proofed list [flags]           Every scenario: does the change touch it, is a pass cached
-  proofed doctor [flags]         Is Kane CLI (and its login), Chrome, ffmpeg and the app ready
-  proofed <command> --help       The flags of one command
+  proofed doctor --json              Check setup and get fixes; no credits spent
+  proofed list --json                Scenarios, touched files, cache and credit estimate
+  proofed check --dry-run --json     Plan the affected scenarios; no credits spent
+  proofed check --json               Run affected scenarios; spends Kane credits
+  proofed check --only <id> --json   Run one scenario from proofed list
+  proofed check "<what to check>" --json
+  proofed <command> --help           All flags and JSON fields
   proofed --version
 
-Install (macOS and Linux; Node 22.18+ is required, including with bun)
-  npm install -g proofed-cli    pnpm add -g proofed-cli    bun add -g proofed-cli
-  Run without installing: npx proofed-cli | pnpm dlx proofed-cli | bunx proofed-cli
-  Update: npm install -g proofed-cli@latest | pnpm add -g proofed-cli@latest | bun add -g proofed-cli@latest
-  Uninstall: npm uninstall -g proofed-cli | pnpm remove -g proofed-cli | bun remove -g proofed-cli
-  Pick one manager. The command runs on Node, with bun too.
+Setup
+  Node 22.18+, Chrome, Kane CLI signed in; ffmpeg for clips.
+  Install: npm install -g proofed-cli | pnpm add -g proofed-cli | bun add -g proofed-cli
+  Without installing: npx proofed-cli | pnpm dlx proofed-cli | bunx proofed-cli
+  Update: npm install -g proofed-cli@latest.
+  Uninstall: npm uninstall -g proofed-cli.
+  App settings come from flags, env, .proofed/config.json, or the Proofed workflow.
 
-Usual runs, in the app's repo
-  proofed check                  url and serve come from the Proofed workflow, if the repo has one
-  proofed check --url http://localhost:5173 --serve "npm run dev"
-  proofed check "the promo code welcome10 takes 10% off"
-  proofed check --only free-shipping
-
-Time and credits
-  A scenario takes 1 to 4 minutes; 3 run at a time. A first run is estimated at 30 Kane credits.
-  Credits are what Kane reported, not the account balance change, which can be slightly higher.
-  An interrupted run can spend credits before Kane reports them.
-  A passed scenario isn't run again (0 credits, shown as "cached") until its file, the URL, or a
-  changed file in its paths changes. --dry-run shows what would run and the estimate, for free.
-  --no-cache runs them anyway.
-
-Outcomes
-  passed        Kane checked what the scenario says, and it held
-  failed        A scenario's check did not hold on the page. Review the failure and fix it.
-                When Kane blames the scenario for it, the scenario is run a second time, at
-                its cost again, and the second run is the result.
-  not_checked   Kane asserted nothing, or thinks the scenario text is wrong. Not a pass.
-  error         Kane couldn't finish, even on one automatic retry (browser or service trouble).
-                Says nothing about the app.
-
-Exit codes
-  0    everything that ran passed, or nothing needed to run
-  1    at least one scenario failed
-  2    nothing failed, but at least one was not_checked or error
-  3    Proofed couldn't run: usage, setup (such as no Kane login), app not reachable
-  130  interrupted
-
-For AI agents
-  After changing UI code, run: proofed check --json
-  Give the command a timeout of at least 10 minutes, and don't interrupt it.
-  stdout is one JSON document (progress goes to stderr); see proofed check --help.
-  On "failed", read reason and diagnosis, then run "rerun" after fixing the cause.
-  failedCheck: "scenario_doubted" means the check failed but Kane believes it is out of date.
-  Diagnosis is Kane's opinion. If the app change was intended, update the scenario; otherwise fix the app.
-  Never treat "not_checked" as a pass: fix the scenario or tell the user why Kane doubts it.
-  On "error", run the "rerun" command once more. On exit 3, do what error.fix says; running the
-  same command again without that won't help. kane_not_signed_in needs the user: kane-cli login;
-  kane_keys_rejected needs working LT_USERNAME and LT_ACCESS_KEY from the user.`;
+Results
+  JSON stdout is one document; progress is on stderr, details in .proofed-out/.
+  Exit 0: passed or nothing to run; 1: failed; 2: not_checked or error; 3: setup/usage;
+  130: interrupted. not_checked is not a pass. Fix error.fix for exit 3.
+  On failed, read reason and diagnosis, fix the cause, then run rerun.
+  failedCheck: "scenario_doubted" is Kane's opinion; review the scenario before editing it.
+  A first run is estimated at 30 credits per scenario, 1 to 4 minutes, 3 at a time.
+  Cached passes cost nothing. Use --no-cache to run them again.
+  Give checks at least 10 minutes; don't interrupt them.`;
 
 const CHECK = `proofed check [text] [flags]
 
@@ -117,13 +88,14 @@ const LIST = `proofed list [flags]
 
 Every scenario with its id, name, start URL and paths, whether the local change touches it, and
 whether a pass of it is cached. A file that doesn't parse is shown with its error (exit 3).
-Spends nothing.
+Spends nothing. JSON includes selected and estimatedCredits per scenario, plus the total.
+Untouched scenarios and cached passes cost zero; first runs are estimated at 30 credits.
 
   --base <rev>          Compare against this (default: the remote's default branch)
   --url <url>           The app's URL, for the cache (default: as proofed check finds it)
   --scenarios <dir>     Default .proofed/scenarios
   --out <dir>           Where the cache is (default .proofed-out)
-  --json                One JSON document: {ok, exitCode, base, url, scenarios [...], errors [{file, message}]}`;
+  --json                One JSON document: {ok, exitCode, base, url, estimatedCredits, scenarios [...], errors [{file, message}]}`;
 
 const DOCTOR = `proofed doctor [flags]
 

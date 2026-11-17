@@ -120,7 +120,7 @@ export async function doctor(flags: Flags, io: Io) {
   const checks = await doctorChecks(flags, io);
   const exitCode = checks.some((c) => c.status === "fail") ? 3 : 0;
   if (flags.json) {
-    io.stdout.write(`${JSON.stringify({ ok: exitCode === 0, exitCode, checks }, null, 2)}\n`);
+    io.stdout.write(`${JSON.stringify({ ok: exitCode === 0, exitCode, checks })}\n`);
     return exitCode;
   }
   const c = palette(colorOn(io.env, !!io.stdout.isTTY));
