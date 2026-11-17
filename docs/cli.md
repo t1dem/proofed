@@ -208,9 +208,12 @@ target preparation. Local mobile installs the rebuilt artifact; cloud mobile upl
 changed artifact bytes and starts a fresh device session; desktop launches a new process.
 Kane keys its upload cache by the artifact SHA-256, platform, account and environment,
 so an identical rebuild may reuse that upload; a changed artifact gets a new upload.
-The final check rebuilds and runs the whole selection again before the fix is
-committed and pushed. These checks never use a cached pass. Only web scenarios start the HTTP server, so native and desktop jobs
-need no `url` or `serve`.
+The final check reuses this job's last attempt results when the tree is unchanged,
+including native results. It rebuilds and runs only missing scenarios; a changed tree
+requires checking the full selection again. If every result is already known, it skips
+the build and Kane. Verification finishes before committing and pushing. These checks
+never use a pass from the CLI cache. Only web scenarios start the HTTP server,
+so native and desktop jobs need no `url` or `serve`.
 
 A pre-uploaded `APP…` ID cannot receive a rebuild. A desktop `cdp_endpoint` without
 `launch` or `app` cannot be restarted. These cases, and a non-web target without a

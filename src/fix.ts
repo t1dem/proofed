@@ -171,6 +171,10 @@ const fixChanges = () => [
   ...git("ls-files", "--others", "--exclude-standard", "-z").split("\0"),
 ].filter(Boolean);
 
+// Include new files and their contents when deciding whether an in-job result still applies.
+const treeBeforeCheck = () => fixChanges().map((file) => `${file}\0${existsSync(file) ? git("hash-object", "--", file) : "deleted"}`).join("\0");
+let lastAttemptTree: string | undefined;
+
 // Checked before the change is built, served to Kane and recorded, since clips and reports are public.
 function discardLeak() {
   const leaked = fileWithSecret(fixChanges());
@@ -209,6 +213,7 @@ const loop = await fixLoop({
   check: (scenarios, attempt) => {
     const refusal = fixRefusal(scenarios, process.env.PROOFED_BUILD);
     if (refusal) throw new Error(refusal);
+    lastAttemptTree = treeBeforeCheck();
     return checkFix(scenarios, serve, (selected) => runAll(selected, `${outDir}/attempt-${attempt}`));
   },
 });
@@ -248,20 +253,35 @@ if (loop.status === "gave-up") {
   process.exit(1);
 }
 
-// Rebuild and check the complete final selection before committing or pushing. Native targets
-// go through prepareTarget again, even when the last attempt passed; no cached pass counts here.
+// Reuse this job's last attempt on the same tree, including native results. Rebuild and check
+// only missing scenarios; if the tree changed since that attempt or during the build, re-check all.
+// Verification and the tree guards still finish before anything is committed or pushed.
 const picked = pickScenarios({ changed: [...new Set([...changedFiles(base), ...fixChanges()])], rev });
 const final: Scenario[] = targetScenarios([...new Map([...picked.selected, ...scenariosFor(data.failures.map((f) => f.id)), ...asked].map((s) => [s.id, s])).values()]);
-const finalRefusal = fixRefusal(final, process.env.PROOFED_BUILD);
-const buildError = finalRefusal ?? build();
-// Record the files before Kane starts. A check or a commit hook must not add unverified code.
-const treeBeforeCheck = () => fixChanges().map((file) => `${file}\0${existsSync(file) ? git("hash-object", "--", file) : "deleted"}`).join("\0");
-const verifiedFiles = treeBeforeCheck();
+let verifiedFiles = treeBeforeCheck();
+const known = new Map(lastAttemptTree === verifiedFiles ? lastResults.map((r) => [r.scenario.id, r]) : []);
+let missing = final.filter((s) => !known.has(s.id));
 let results: ScenarioResult[] = [];
 try {
-  if (buildError) throw new Error(buildError);
-  live.fix({ doing: "checking" });
-  results = await checkFix(final, serve, (selected) => runAll(selected, `${outDir}/final`));
+  const refusal = fixRefusal(final, process.env.PROOFED_BUILD);
+  if (refusal) throw new Error(refusal);
+  if (missing.length > 0) {
+    const buildError = build();
+    if (buildError !== undefined) throw new Error(buildError);
+    verifiedFiles = treeBeforeCheck();
+    // A build can change tracked output or add files. Those results must be checked on this tree.
+    if (lastAttemptTree !== verifiedFiles) {
+      known.clear();
+      missing = final;
+    }
+  }
+  console.log(`Final check: ${final.length - missing.length} result(s) from the last attempt, ${missing.length} to run.`);
+  if (missing.length > 0) {
+    live.fix({ doing: "checking" });
+    const ran = await checkFix(missing, serve, (selected) => runAll(selected, `${outDir}/final`));
+    for (const result of ran) known.set(result.scenario.id, result);
+  }
+  results = final.map((s) => known.get(s.id)!);
 } catch (e) {
   git("checkout", "--", ".");
   await restoreReport(`The final check couldn't run: ${String(e)}. Nothing was pushed.`, true, "The final check couldn't run; nothing was pushed");

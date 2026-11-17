@@ -85,7 +85,7 @@ Three merged pull requests from open-source projects, replayed with Proofed. Eac
 - Kane doesn't record video, so Proofed records Chrome itself. The clip cuts the waiting, shows where Kane clicked and zooms in on what it checks.
 - When Kane blames the test rather than the code, the scenario shows as "not checked", never as a pass.
 - A fix starts when someone ticks **Fix with Claude** or **Fix with Codex**, or on its own with [Fix automatically](#fix-automatically) on.
-- Each attempt rebuilds and re-checks the broken flows and affected neighbors. The final check rebuilds and runs the full selection before committing and pushing.
+- Each attempt rebuilds and re-checks the broken flows and affected neighbors. The final check reuses the last attempt's results on the same tree and rebuilds only when scenarios still need to run, before committing and pushing.
 - The fix commit's `Fixed-by:` line names the model.
 
 ## Scenarios
