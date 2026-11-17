@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildDoc, exitCodeOf, rerunCommand, type Item } from "./result.ts";
@@ -31,7 +32,7 @@ test("a failed scenario carries what Kane saw, its verdict, the failed step and 
   assert.equal(failed.suggestion, "Use 50.");
   assert.equal(failed.failedStep, "assert: shipping is €4.90");
   assert.deepEqual(failed.steps.at(-1), { remark: "assert: shipping is €4.90", failed: true });
-  assert.deepEqual(failed.clip, { mp4: "/out/x/clip.mp4", jpg: "/out/x/clip.jpg" });
+  assert.deepEqual(failed.clip, { mp4: resolve("/out/x/clip.mp4"), jpg: resolve("/out/x/clip.jpg") });
   assert.equal(failed.rerun, "proofed check --only free-shipping --json");
   assert.equal(doc.rerun, "proofed check --only free-shipping --json");
   assert.equal(doc.next, "Fix the failed scenarios, then run: proofed check --only free-shipping --json");
@@ -68,7 +69,7 @@ test("a cached pass costs nothing and says since when", () => {
 });
 
 test("the re-run of a free-text check repeats the text, quoted for a shell", () => {
-  assert.equal(rerunCommand(["asked"], { text: "the kettle's price is €45", flags: [] }), `proofed check 'the kettle'\\''s price is €45'`);
+  assert.equal(rerunCommand(["asked"], { text: "the kettle's price is €45", flags: [] }), process.platform === "win32" ? "proofed check 'the kettle''s price is €45'" : `proofed check 'the kettle'\\''s price is €45'`);
 });
 
 test("a refuted check keeps the failure and gives a conditional next step instead of Kane's suggestion", () => {

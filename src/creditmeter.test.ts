@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,7 +10,7 @@ test("balance snapshots are observations, and concurrent meters discard their de
   const dir = mkdtempSync(join(tmpdir(), "proofed-meter-"));
   const lock = join(dir, "lock");
   const balance = join(dir, "balance");
-  const env = { ...process.env, KANE_CLI: new URL('./testing/fake-kane.ts', import.meta.url).pathname, FAKE_KANE_BALANCE_FILE: balance };
+  const env = { ...process.env, KANE_CLI: fileURLToPath(new URL('./testing/fake-kane.ts', import.meta.url)), FAKE_KANE_BALANCE_FILE: balance };
   try {
     writeFileSync(balance, "100");
     const finish = await creditMeter(env, lock);
@@ -29,7 +30,7 @@ test("a dead owner's lock is reclaimed and balance metering resumes", async () =
   const dir = mkdtempSync(join(tmpdir(), "proofed-meter-"));
   const lock = join(dir, "lock");
   const balance = join(dir, "balance");
-  const env = { ...process.env, KANE_CLI: new URL("./testing/fake-kane.ts", import.meta.url).pathname, FAKE_KANE_BALANCE_FILE: balance };
+  const env = { ...process.env, KANE_CLI: fileURLToPath(new URL("./testing/fake-kane.ts", import.meta.url)), FAKE_KANE_BALANCE_FILE: balance };
   try {
     mkdirSync(lock);
     writeFileSync(join(lock, "meter"), "2147483647");
@@ -47,7 +48,7 @@ test("a dead owner's lock is reclaimed and balance metering resumes", async () =
 test("live owners and fresh missing pids stay contended; old unreadable pids are reclaimed", async () => {
   const dir = mkdtempSync(join(tmpdir(), "proofed-meter-"));
   const lock = join(dir, "lock");
-  const env = { ...process.env, KANE_CLI: new URL("./testing/fake-kane.ts", import.meta.url).pathname };
+  const env = { ...process.env, KANE_CLI: fileURLToPath(new URL("./testing/fake-kane.ts", import.meta.url)) };
   try {
     mkdirSync(lock);
     writeFileSync(join(lock, "meter"), String(process.pid));
@@ -70,7 +71,7 @@ test("live owners and fresh missing pids stay contended; old unreadable pids are
 test("a lock removed mid-run loses the snapshot instead of failing the run", async () => {
   const dir = mkdtempSync(join(tmpdir(), "proofed-meter-"));
   const lock = join(dir, "lock");
-  const env = { ...process.env, KANE_CLI: new URL("./testing/fake-kane.ts", import.meta.url).pathname };
+  const env = { ...process.env, KANE_CLI: fileURLToPath(new URL("./testing/fake-kane.ts", import.meta.url)) };
   try {
     const finish = await creditMeter(env, lock);
     rmSync(lock, { recursive: true, force: true });
@@ -81,7 +82,7 @@ test("a lock removed mid-run loses the snapshot instead of failing the run", asy
 test("takeover preserves a live contender's credit attribution warning", async () => {
   const dir = mkdtempSync(join(tmpdir(), "proofed-meter-"));
   const lock = join(dir, "lock");
-  const env = { ...process.env, KANE_CLI: new URL("./testing/fake-kane.ts", import.meta.url).pathname };
+  const env = { ...process.env, KANE_CLI: fileURLToPath(new URL("./testing/fake-kane.ts", import.meta.url)) };
   try {
     mkdirSync(lock);
     writeFileSync(join(lock, "meter"), "2147483647");

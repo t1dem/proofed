@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildDoc } from "./result.ts";
@@ -73,7 +74,7 @@ test("the plain view: one line per event, a heartbeat, then the details and the 
       "  Kane saw    Shipping shows Free.",
       "  Diagnosis   The threshold is €40.",
       "  Failed step assert: shipping is €4.90",
-      "  Clip        /out/x/clip.mp4",
+      `  Clip        ${resolve("/out/x/clip.mp4")}`,
       "  Scenario    .proofed/scenarios/free-shipping.md",
       "",
       "✗ 1 passed, 1 failed · 52 credits (Kane estimate) · 1m 14s",

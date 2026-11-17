@@ -1,3 +1,4 @@
+import { delimiter } from "node:path";
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -68,11 +69,11 @@ test("fake device tools select one booted device; doctor only discovers and reje
     executable(dir, "xcodebuild", record + "console.log('Xcode 26');");
     const bin = executable(dir, "kane", record + "console.log('all dependencies ready');");
     executable(dir, "adb", record + `const a=process.argv.slice(2); console.log(a[0]==='devices'?'List of devices attached\\nemulator-5554\\tdevice':a.includes('name')?'Pixel\\nOK':a.includes('ro.build.version.release')?'15':'Pixel');`);
-    const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, KANE_CLI: bin };
+    const env = { ...process.env, PATH: `${dir}${delimiter}${process.env.PATH}`, KANE_CLI: bin };
     const ios = resolveScenarioTarget({ target: "ios", app: "bad.ipa", device: "iPhone 17", os_version: "26.4" }, {}, {}, dir);
     assert.ok(ios.kind === "ios");
     assert.equal(await localDevice(ios, env), "OWNED");
-    const checks = await targetChecks(ios, { env });
+    const checks = await targetChecks(ios, { env, platform: "darwin" });
     assert.ok(checks.some((c) => c.name === "App artifact type" && c.status === "fail"));
     assert.ok(checks.every((c) => c.fix));
     const android = resolveScenarioTarget({ target: "android", device: "Pixel", os_version: "15" }, {}, {}, dir);

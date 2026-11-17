@@ -1,3 +1,4 @@
+import { matchesPath } from "./paths.ts";
 // Passes Proofed doesn't pay for twice. A coding agent runs the check again after each fix, and a
 // scenario it didn't touch would cost another 20 to 30 credits to come out the same. A pass stays
 // good while its scenario file, its start URL, the commit the change is measured from and the
@@ -5,7 +6,7 @@
 // passes are kept; everything else runs again.
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, lstatSync, readlinkSync, readdirSync } from "node:fs";
-import { matchesGlob, join } from "node:path";
+import { join } from "node:path";
 import type { Scenario } from "./scenarios.ts";
 
 export type CachedPass = {
@@ -40,7 +41,7 @@ export const estimate = (cache: Cache, s: Scenario, kaneVersion: string) =>
 
 // The changed files a scenario depends on.
 export const relevantChanges = (s: Scenario, changed: string[]) =>
-  s.paths.length ? changed.filter((f) => s.paths.some((glob) => matchesGlob(f, glob))) : changed;
+  s.paths.length ? changed.filter((f) => s.paths.some((glob) => matchesPath(f, glob))) : changed;
 
 const readOrUndefined = (file: string) => {
   try {

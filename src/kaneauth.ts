@@ -1,3 +1,4 @@
+import { executableCommand } from "./process.ts";
 // Whether Kane can start a run: signed in with `kane-cli login`, or given LT_USERNAME and
 // LT_ACCESS_KEY, which Proofed passes to every run. `proofed check` asks before it builds anything:
 // without a working login every run ends at once, and a retry ends the same way.
@@ -44,7 +45,8 @@ const reasonIn = (output: string) =>
 export function kaneLogin(bin: string, env: NodeJS.ProcessEnv, timeout = 20_000): Promise<Login> {
   const creds = kaneCredentials(env);
   return new Promise((resolve) => {
-    execFile(bin, ["balance", ...creds], { env, timeout }, (error, stdout, stderr) => {
+    const cmd = executableCommand(bin, ["balance", ...creds], env);
+    execFile(cmd.file, cmd.args, { env, timeout, windowsHide: true }, (error, stdout, stderr) => {
       const output = `${stdout}\n${stderr}`.replace(ANSI, "");
       if (!error) {
         return resolve(creds.length ? { state: "keys", detail: "LT_USERNAME and LT_ACCESS_KEY work; Kane uses them", balance: output } : { state: "signed_in", detail: "signed in", balance: output });

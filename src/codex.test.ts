@@ -1,3 +1,4 @@
+import { delimiter } from "node:path";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -24,7 +25,7 @@ test("Codex runs once on PATH with a bounded sandbox, stdin prompt and final mes
       else if (mode !== 'fix this') {console.log(JSON.stringify({type:'turn.failed',error:{message:mode}}));process.exit(1);}
       else {fs.writeFileSync(args[args.indexOf('--output-last-message')+1], ' SUMMARY: fixed it.\\n');console.log(JSON.stringify({type:'turn.completed'}));}
     `, {mode:0o755});
-    process.env.PATH = `${dir}:${before}`;
+    process.env.PATH = `${dir}${delimiter}${before}`;
     const options = {model:"gpt-6.1-sol",effort:"low",cwd:dir,timeoutMs:2000};
     assert.deepEqual(askCodex("fix this", options), {ok:true,text:"SUMMARY: fixed it."});
     const called = JSON.parse(readFileSync(capture,"utf8")) as {args:string[];input:string;cwd:string;env:Record<string,string>};

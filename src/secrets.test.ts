@@ -1,3 +1,4 @@
+import { delimiter } from "node:path";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -59,7 +60,7 @@ test("Claude runs without the job's tokens, keeps its own and the build's enviro
   `, { mode: 0o755 });
   try {
     withEnv({
-      PATH: `${dir}:${process.env.PATH}`, GITHUB_TOKEN: TOKEN, GH_TOKEN: TOKEN, LT_ACCESS_KEY: "lt-key-not-real-123",
+      PATH: `${dir}${delimiter}${process.env.PATH}`, GITHUB_TOKEN: TOKEN, GH_TOKEN: TOKEN, LT_ACCESS_KEY: "lt-key-not-real-123",
       ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-request-not-real", ACTIONS_ID_TOKEN_REQUEST_URL: "https://example.invalid",
       CLAUDE_CODE_OAUTH_TOKEN: "claude-oauth-not-real", NPM_CONFIG_REGISTRY: "https://registry.example",
     }, () => {
@@ -75,7 +76,7 @@ test("Claude runs without the job's tokens, keeps its own and the build's enviro
   }
 });
 
-test("without credentials in .git/config, the push sends the job token as a header and never on the command line", async () => {
+test("without credentials in .git/config, the push sends the job token as a header and never on the command line", { skip: process.platform === "win32" ? "The git interception fixture is a POSIX shebang executable" : false }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "proofed-fake-git-"));
   const capture = join(dir, "git.json");
   writeFileSync(join(dir, "git"), `#!/usr/bin/env node
@@ -85,7 +86,7 @@ test("without credentials in .git/config, the push sends the job token as a head
   const { pushHead } = await import("./push.ts");
   const path = process.env.PATH;
   const saved = { GITHUB_TOKEN: process.env.GITHUB_TOKEN, ACTIONS_ID_TOKEN_REQUEST_URL: process.env.ACTIONS_ID_TOKEN_REQUEST_URL };
-  process.env.PATH = `${dir}:${path}`;
+  process.env.PATH = `${dir}${delimiter}${path}`;
   process.env.GITHUB_TOKEN = TOKEN;
   delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
   try {
@@ -129,7 +130,8 @@ test("a fix that writes a job credential is discarded before it is built, checke
     const run = spawnSync(process.execPath, [join(root, "src/fix.ts")], {
       cwd: repo, encoding: "utf8", timeout: 60_000,
       env: {
-        PATH: `${bin}:${process.env.PATH}`, HOME: process.env.HOME, GITHUB_TOKEN: TOKEN, GITHUB_EVENT_PATH: join(dir, "event.json"),
+        SystemRoot: process.env.SystemRoot, TEMP: process.env.TEMP, TMP: process.env.TMP, USERPROFILE: process.env.USERPROFILE,
+        PATH: `${bin}${delimiter}${process.env.PATH}`, HOME: process.env.HOME, GITHUB_TOKEN: TOKEN, GITHUB_EVENT_PATH: join(dir, "event.json"),
         PROOFED_OUT: join(dir, "out"), PROOFED_BUILD: `touch ${join(dir, "built")}`, PROOFED_SERVE: "true", PROOFED_URL: "http://127.0.0.1:9",
         PROOFED_BASE_SHA: base, PROOFED_HEAD_REF: "feature", PROOFED_MODEL: "claude-opus-5-5", RUNNER_TEMP: dir,
       },

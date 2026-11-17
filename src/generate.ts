@@ -1,3 +1,4 @@
+import { gitPath } from "./paths.ts";
 // The setup PR's check, when mode.ts finds only the stock scenario there: The agent reads the app and
 // writes scenarios for its main flows, Kane runs each of them in Chrome next to the stock one, and the
 // ones Kane saw pass are committed to the setup branch. The rest are deleted, so the PR carries no guess.
@@ -86,8 +87,8 @@ const untrackedBefore = new Set(lines(git("ls-files", "--others", "--exclude-sta
 function keepOnlyNewScenarios() {
   for (const file of lines(git("diff", "--name-only"))) if (!changedBefore.has(file)) git("checkout", "--", file);
   const added = lines(git("ls-files", "--others", "--exclude-standard")).filter((f) => !untrackedBefore.has(f));
-  for (const file of added) if (!file.startsWith(`${dir}/`) || !file.endsWith(".md")) rmSync(file, { force: true });
-  return added.filter((f) => f.startsWith(`${dir}/`) && f.endsWith(".md"));
+  for (const file of added) if (!file.startsWith(`${gitPath(dir).replace(/\/$/, "")}/`) || !file.endsWith(".md")) rmSync(file, { force: true });
+  return added.filter((f) => f.startsWith(`${gitPath(dir).replace(/\/$/, "")}/`) && f.endsWith(".md"));
 }
 
 const why = (r: ScenarioResult) =>

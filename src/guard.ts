@@ -1,3 +1,4 @@
+import { gitPath } from "./paths.ts";
 // What the fixer may not change: the scenarios it has to make pass, and the workflows that run them.
 // Claude is told so in its prompt; this is what holds it to that. A fix that passes because the
 // test was edited proves nothing.
@@ -5,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 
 export const offLimits = (file: string, scenarios: string) =>
-  [".proofed", ".github", scenarios.replace(/\/+$/, "")].some((dir) => file === dir || file.startsWith(`${dir}/`));
+  [".proofed", ".github", gitPath(scenarios).replace(/\/+$/, "")].some((dir) => gitPath(file) === dir || gitPath(file).startsWith(`${dir}/`));
 
 // Puts every off-limits file the working tree changed back as the commit has it, and says which.
 export function putBack(scenarios: string) {

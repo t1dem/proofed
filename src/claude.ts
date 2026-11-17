@@ -1,3 +1,4 @@
+import { executableCommand } from "./process.ts";
 // One headless Claude Code run, for the fixer (fix.ts) and for the setup PR's scenarios (generate.ts).
 import { spawnSync } from "node:child_process";
 import type { Fixer } from "./models.ts";
@@ -18,14 +19,15 @@ type Options = Fixer & {
 export type ClaudeAnswer = { ok: true; text: string } | { ok: false; message: string };
 
 export function askClaude(prompt: string, o: Options): ClaudeAnswer {
-  const run = spawnSync(
-    "claude",
+  const command = executableCommand("claude",
     ["-p", prompt, "--output-format", "json", "--permission-mode", o.permissionMode ?? "acceptEdits", "--max-turns", String(o.maxTurns ?? 40),
       "--model", o.model, "--effort", o.effort,
       ...(o.tools ? ["--tools", o.tools.join(",")] : []),
       "--allowedTools", o.allowedTools.join(",")],
+  );
+  const run = spawnSync(command.file, command.args,
     // Its Bash runs the app's build, which may need the rest of the environment.
-    { env: withoutJobSecrets(process.env, ["CLAUDE_CODE_OAUTH_TOKEN"]), encoding: "utf8", maxBuffer: 50 * 1024 * 1024, timeout: o.timeoutMs, killSignal: "SIGKILL" },
+    { windowsHide: true, env: withoutJobSecrets(process.env, ["CLAUDE_CODE_OAUTH_TOKEN"]), encoding: "utf8", maxBuffer: 50 * 1024 * 1024, timeout: o.timeoutMs, killSignal: "SIGKILL" },
   );
   if (run.error && "code" in run.error && run.error.code === "ETIMEDOUT") {
     return { ok: false, message: `Claude Code didn't finish within ${Math.round((o.timeoutMs ?? 0) / 60_000)} minutes` };

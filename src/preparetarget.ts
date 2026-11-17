@@ -1,3 +1,4 @@
+import { executableCommand, killTree } from "./process.ts";
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,14 +10,15 @@ import { startRecorder } from "./recorder.ts";
 import type { Clip } from "./run.ts";
 import type { Target } from "./target.ts";
 
-function owned(bin: string, args: string[], cwd?: string, env = process.env) {
-  const proc = spawn(bin, args, { cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+function owned(bin: string, args: string[], cwd?: string, env = process.env, shell = false) {
+  const command = shell ? { file: bin, args } : executableCommand(bin, args, env);
+  const proc = spawn(command.file, command.args, { cwd, env, shell, windowsHide: true, detached: true, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   let error = "";
   proc.stdout.on("data", (data) => { output += data; });
   proc.stderr.on("data", (data) => { error += data; });
   const exited = new Promise<void>((resolve) => { proc.once("exit", () => resolve()); proc.once("error", (e) => { error += String(e); resolve(); }); });
-  const kill = (signal: NodeJS.Signals) => { try { if (proc.pid) process.kill(-proc.pid, signal); } catch {} };
+  const kill = (signal: NodeJS.Signals) => killTree(proc.pid, signal);
   const release = adopt({ kill, exited });
   let done = false;
   void exited.then(() => { done = true; });
@@ -85,7 +87,7 @@ async function nativeRecorder(target: Extract<Target, { kind: "ios" | "android" 
         if (target.kind === "ios") await current?.stop();
         await loop;
         const list = join(dir, "segments.txt");
-        writeFileSync(list, segments.map((f) => `file '${f.replaceAll("'", "'\\''")}'`).join("\n"));
+        writeFileSync(list, segments.map((f) => `file '${f.replaceAll("\\", "/").replaceAll("'", "'\\''")}'`).join("\n"));
         const mp4 = join(dir, "clip.mp4"), jpg = join(dir, "clip.jpg"), gif = join(dir, "clip.gif");
         await required("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", list, "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-pix_fmt", "yuv420p", mp4]);
         await required("ffmpeg", ["-y", "-sseof", "-0.1", "-i", mp4, "-frames:v", "1", jpg]);
@@ -150,7 +152,7 @@ export async function prepareTarget(target: Target, options: { dir: string; url?
         const env = { ...process.env };
         // Electron inherits this from some Node hosts and exits as a Node CLI instead of an app.
         delete env.ELECTRON_RUN_AS_NODE;
-        const app = owned("/bin/sh", ["-c", target.launch], target.dir, env);
+        const app = owned(target.launch, [], target.dir, env, true);
         cleanups.push(async () => {
           await app.stop();
           writeFileSync(join(options.dir, "launch.stdout.log"), app.output());

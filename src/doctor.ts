@@ -1,3 +1,4 @@
+import { executableCommand } from "./process.ts";
 import { targetChecks } from "./targetchecks.ts";
 // `proofed doctor`: whether `proofed check` can run here, and the exact fix for what can't. It only
 // calls Kane's free commands (--version, balance); no run, no credits.
@@ -31,13 +32,16 @@ const { supported: nodeSupported, NEED: NODE_NEED } = createRequire(import.meta.
 // Kane prints update notices around its answer; only the answer counts.
 async function kane(bin: string, args: string[], env: NodeJS.ProcessEnv) {
   try {
-    const { stdout, stderr } = await run(bin, args, { env, timeout: 20_000 });
+    const cmd = executableCommand(bin, args, env);
+    const { stdout, stderr } = await run(cmd.file, cmd.args, { env, windowsHide: true, timeout: 20_000 });
     return { ok: true, text: stripAnsi(`${stdout}\n${stderr}`) };
   } catch (e) {
     const err = e as { stdout?: string; stderr?: string };
     return { ok: false, text: stripAnsi(`${err.stdout ?? ""}\n${err.stderr ?? ""}`) };
   }
 }
+
+export const ffmpegInstallHint = (platform = process.platform) => platform === "darwin" ? "brew install ffmpeg" : platform === "win32" ? "winget install Gyan.FFmpeg" : "sudo apt-get install ffmpeg";
 
 export async function doctorChecks(flags: Flags, io: Io): Promise<DoctorCheck[]> {
   const checks: DoctorCheck[] = [];
@@ -91,11 +95,11 @@ export async function doctorChecks(flags: Flags, io: Io): Promise<DoctorCheck[]>
   }
   if (!needsWeb) return checks;
 
-  const chrome = findChrome();
+  const chrome = findChrome(io.env);
   add("Chrome", chrome ? "ok" : "fail", chrome ?? "not found", chrome ? undefined : "Install Google Chrome, or set CHROME_PATH to its binary.");
 
   const ffmpeg = findOnPath("ffmpeg", io.env);
-  add("ffmpeg", ffmpeg ? "ok" : "warn", ffmpeg ?? "not found: no clips, the verdicts still work", ffmpeg ? undefined : process.platform === "darwin" ? "brew install ffmpeg" : "sudo apt-get install ffmpeg");
+  add("ffmpeg", ffmpeg ? "ok" : "warn", ffmpeg ?? "not found: no clips, the verdicts still work", ffmpeg ? undefined : ffmpegInstallHint());
 
   try {
     const target = resolveTarget({ flags: { url: flags.url, serve: flags.serve, build: flags.build, install: flags.install }, env: io.env, cwd: io.cwd });

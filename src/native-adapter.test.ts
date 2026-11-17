@@ -1,3 +1,4 @@
+import { delimiter } from "node:path";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,7 +8,7 @@ import { prepareTarget } from "./preparetarget.ts";
 import { runScenario } from "./run.ts";
 import { resolveScenarioTarget } from "./target.ts";
 
-for (const kind of ["ios", "android"] as const) test(`${kind} records with fake device tools, finalizes video, and cleans only owned files`, async () => {
+for (const kind of ["ios", "android"] as const) test(`${kind} records with fake device tools, finalizes video, and cleans only owned files`, { skip: process.platform === "win32" ? "Device recording fakes require POSIX SIGINT; Windows recording needs a real Android device" : kind === "ios" && process.platform !== "darwin" ? "Local iOS recording requires macOS" : false }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "proofed-native-test-"));
   const oldPath = process.env.PATH, oldKane = process.env.KANE_CLI;
   const log = join(dir, "log");
@@ -17,7 +18,7 @@ for (const kind of ["ios", "android"] as const) test(`${kind} records with fake 
     chmodSync(file, 0o755); return file;
   };
   try {
-    process.env.PATH = `${dir}:${oldPath}`;
+    process.env.PATH = `${dir}${delimiter}${oldPath}`;
     tool("xcodebuild", "console.log('Xcode 26');");
     tool("xcrun", `if(a.includes('recordVideo')) { process.on('SIGINT',()=>{fs.writeFileSync(a.at(-1),'portrait-video');process.exit(0)}); setInterval(()=>{},100); } else console.log(JSON.stringify({devices:{'com.apple.CoreSimulator.SimRuntime.iOS-26-4':[{name:'iPhone 17',udid:'test-'+process.ppid,state:'Booted'}]}}));`);
     const remote = join(dir, "remote.mp4");

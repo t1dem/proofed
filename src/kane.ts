@@ -1,3 +1,4 @@
+import { executableCommand, killTree } from "./process.ts";
 import { appendFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -75,14 +76,9 @@ function runUnmetered(o: KaneOptions): Promise<KaneResult> {
     ...(o.username && o.accessKey ? ["--username", o.username, "--access-key", o.accessKey] : []),
   ];
   // Own process group: Kane spawns runner and Playwright children that outlive a plain kill.
-  const proc = spawn(process.env.KANE_CLI ?? "kane-cli", args, { stdio: ["ignore", "pipe", "pipe"], detached: true });
-  const killGroup = (signal: NodeJS.Signals) => {
-    try {
-      if (proc.pid) process.kill(-proc.pid, signal);
-    } catch {
-      // Already gone.
-    }
-  };
+  const command = executableCommand(process.env.KANE_CLI ?? "kane-cli", args);
+  const proc = spawn(command.file, command.args, { stdio: ["ignore", "pipe", "pipe"], detached: true, windowsHide: true });
+  const killGroup = (signal: NodeJS.Signals) => killTree(proc.pid, signal);
   const abort = () => killGroup("SIGTERM");
   o.signal?.addEventListener("abort", abort, { once: true });
   if (o.signal?.aborted) abort();

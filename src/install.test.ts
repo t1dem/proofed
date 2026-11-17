@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -8,8 +9,8 @@ import { test } from "node:test";
 import { checkContents, checkPackage, type Packed } from "../scripts/check-package.ts";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
-const launcher = new URL("../bin/proofed.cjs", import.meta.url).pathname;
-const launcherVersion = new URL("../bin/node-version.cjs", import.meta.url).pathname;
+const launcher = fileURLToPath(new URL("../bin/proofed.cjs", import.meta.url));
+const launcherVersion = fileURLToPath(new URL("../bin/node-version.cjs", import.meta.url));
 const require = createRequire(import.meta.url);
 
 test("the checkout launcher runs the CLI version and help", () => {
@@ -77,6 +78,6 @@ test("the package file check rejects source, tests, extra files, missing entries
   assert.throws(() => checkContents(packed, [...modules, "install.test.js"]));
 });
 
-test("the packed CLI installs and runs without consumer scripts", { timeout: 120_000 }, () => {
+test("the packed CLI installs and runs without consumer scripts", { timeout: 120_000, skip: process.platform === "win32" ? "scripts/check-package.ts assumes POSIX npm/global-bin paths; source and dist launchers are tested above" : false }, () => {
   checkPackage();
 });

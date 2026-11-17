@@ -1,7 +1,10 @@
 import { mkdirSync, existsSync, readFileSync, readdirSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { kaneLogin } from "./kaneauth.ts";
 
-const LOCK = "/tmp/proofed-kane.lock";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+export const creditLockPath = (temp = tmpdir()) => join(temp, "proofed-kane.lock");
 const STALE_MS = 60_000;
 const alive = (pid: number) => {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
@@ -49,7 +52,7 @@ function reclaim(lock: string) {
   } catch {}
 }
 
-export async function creditMeter(env: NodeJS.ProcessEnv, lock = LOCK) {
+export async function creditMeter(env: NodeJS.ProcessEnv, lock = creditLockPath()) {
   let owned = false;
   for (let attempt = 0; attempt < 2 && !owned; attempt++) {
     try {

@@ -1,3 +1,4 @@
+import { gitPath } from "./paths.ts";
 import { MARKER, OLD_MARKER } from "./github.ts";
 import { BLANK_PAGE, FAILED_CHECK_ACTION, FAILED_CHECK_REASON, runMarker } from "./runfile.ts";
 import type { Step } from "./kane.ts";
@@ -212,13 +213,13 @@ function writtenSection(written: Written, results: ScenarioResult[], clips: Map<
       ? `${provider} wrote ${written.dropped.length === 1 ? "a scenario" : `${written.dropped.length} scenarios`} for this app, but Kane didn't see ${written.dropped.length === 1 ? "it" : "any of them"} pass, so none were added:\n\n${dropped}`
       : `${provider} didn't find a flow it could write a scenario for without guessing, so none were added.`;
   }
-  const folder = kept[0]!.r.scenario.file.split("/").slice(0, -1).join("/");
+  const folder = gitPath(kept[0]!.r.scenario.file).split("/").slice(0, -1).join("/");
   const commit = written.commit ? ` in ${commitRef(written.commit, written.commitUrl)}` : "";
   const intro =
     `**${provider} wrote ${kept.length === 1 ? "a scenario" : `${kept.length} scenarios`} for this app**, and Proofed added ${kept.length === 1 ? "it" : "them"} to this PR${commit}. ` +
     `Kane ran each one in Chrome and saw it pass. They are plain Markdown in \`${folder}/\`: edit or delete them like any other file.`;
   const items = kept.map(
-    ({ r, about }) => `**✓ ${r.scenario.name}** · \`${r.scenario.file.split("/").at(-1)}\`<br>${html(oneLine(about, 200))}${clip(clips.get(r.scenario.id), 560)}`,
+    ({ r, about }) => `**✓ ${r.scenario.name}** · \`${gitPath(r.scenario.file).split("/").at(-1)}\`<br>${html(oneLine(about, 200))}${clip(clips.get(r.scenario.id), 560)}`,
   );
   const droppedNote = dropped ? `\n\nDropped, since Kane didn't see ${written.dropped.length === 1 ? "it" : "them"} pass:\n\n${dropped}` : "";
   return `${intro}\n\n${items.join("\n\n")}${droppedNote}`;

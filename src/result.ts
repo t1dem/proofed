@@ -84,8 +84,9 @@ export type ErrorDoc = {
   scenarios?: ScenarioDoc[];
 };
 
-// Shell-safe as typed.
-export const quote = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
+// Commands shown to Windows developers target PowerShell, the default terminal.
+export const quote = (s: string, platform = process.platform) => /^[\w@%+=:,./-]+$/.test(s) ? s
+  : platform === "win32" ? `'${s.replaceAll("'", "''")}'` : `'${s.replace(/'/g, `'\\''`)}'`;
 
 // `selection`: "--only a,b" or "--all", when the check was asked for one; `flags`: where the app
 // and the scenarios are, so a printed command runs the same way.

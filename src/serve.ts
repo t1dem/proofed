@@ -1,6 +1,7 @@
 // The app under test on this machine: used as it is when its URL already answers, otherwise built
 // and served for the check, then stopped. The commands run in a process group of their own, so
 // stopping the server also stops what it started (pnpm → vite), on Ctrl-C too.
+import { killTree } from "./process.ts";
 import { spawn } from "node:child_process";
 import { closeSync, openSync, readFileSync, writeSync } from "node:fs";
 import { adopt } from "./children.ts";
@@ -30,19 +31,13 @@ export function tail(file: string, lines = 20) {
 function start(command: string, cwd: string, logFile: string) {
   const fd = openSync(logFile, "a");
   writeSync(fd, `$ ${command}\n`);
-  const proc = spawn(command, { cwd, shell: true, detached: true, stdio: ["ignore", fd, fd] });
+  const proc = spawn(command, { cwd, shell: true, detached: true, windowsHide: true, stdio: ["ignore", fd, fd] });
   closeSync(fd);
   const exited = new Promise<number | null>((resolve) => {
     proc.once("exit", (code, signal) => resolve(code ?? (signal ? 128 : null)));
     proc.once("error", () => resolve(127));
   });
-  const kill = (signal: NodeJS.Signals) => {
-    try {
-      if (proc.pid) process.kill(-proc.pid, signal);
-    } catch {
-      // Already gone.
-    }
-  };
+  const kill = (signal: NodeJS.Signals) => killTree(proc.pid, signal);
   const release = adopt({ kill, exited });
   void exited.then(release);
   return { proc, exited, kill, release };

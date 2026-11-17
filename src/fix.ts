@@ -1,7 +1,8 @@
+import { findGitBash, killTree } from "./process.ts";
 // "Fix with Claude": someone ticked the box in the Proofed comment, or commented "/proofed fix [model]".
 // The agent gets the failure, Kane's steps and the PR diff; we rebuild, re-run the broken scenarios
 // in Chrome, and only push a fix that Kane has seen pass. Up to three attempts, each one told why the last one failed.
-import { execFileSync, execSync, spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -44,8 +45,8 @@ const sh = (word: string) => (/^[\w./-]+$/.test(word) ? word : `'${word.replaceA
 // Claude Code allows a compound command only if each part of it is allowed on its own, so it refused
 // `cd site && pnpm build`. Wrapped in a script, any build is one simple command, allowed exactly as is.
 const buildScript = join(process.env.RUNNER_TEMP || tmpdir(), "proofed-build.sh");
-writeFileSync(buildScript, `set -e -o pipefail\ncd ${sh(resolve(appDir))}\n${env("PROOFED_BUILD")}\n`);
-const buildCommand = `bash ${sh(buildScript)}`;
+writeFileSync(buildScript, `set -e -o pipefail\ncd ${sh(resolve(appDir).replaceAll("\\", "/"))}\n${env("PROOFED_BUILD")}\n`);
+const buildCommand = `bash ${sh(buildScript.replaceAll("\\", "/"))}`;
 const fixer = configuredFixer();
 const provider = providerLabel(providerOf(fixer.model));
 const agentName = provider === "Codex" ? "Codex" : "Claude Code";
@@ -120,15 +121,8 @@ async function restoreReport(note: string, ended = false, status = "Fix didn't r
 }
 
 async function serve() {
-  const proc = spawn(env("PROOFED_SERVE"), { shell: true, detached: true, stdio: "ignore", cwd: appDir });
-  // detached + negative pid kills the whole process group, not just the shell.
-  const stop = () => {
-    try {
-      if (proc.pid) process.kill(-proc.pid);
-    } catch {
-      // Already gone.
-    }
-  };
+  const proc = spawn(env("PROOFED_SERVE"), { shell: true, detached: true, windowsHide: true, stdio: "ignore", cwd: appDir });
+  const stop = () => killTree(proc.pid);
   const url = env("PROOFED_URL");
   for (let i = 0; i < 60; i++) {
     try {
@@ -172,7 +166,7 @@ const loop = await fixLoop({
   hasChanges: () => !!git("status", "--porcelain"),
   build: () => {
     try {
-      execSync(buildCommand, { stdio: "pipe" });
+      execFileSync(findGitBash(), [buildScript.replaceAll("\\", "/")], { stdio: "pipe", windowsHide: true });
       return undefined;
     } catch (e) {
       return e instanceof Error && "stdout" in e && "stderr" in e ? `${e.stdout}${e.stderr}` : String(e);

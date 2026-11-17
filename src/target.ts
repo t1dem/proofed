@@ -98,7 +98,7 @@ export function readWorkflow(cwd: string): { file: string; inputs: Record<string
   const dir = join(cwd, ".github/workflows");
   if (!existsSync(dir)) return undefined;
   for (const name of readdirSync(dir).filter((f) => /\.ya?ml$/.test(f)).sort()) {
-    const file = join(".github/workflows", name);
+    const file = `.github/workflows/${name}`;
     const inputs = workflowInputs(readFileSync(join(cwd, file), "utf8"));
     if (inputs) return { file, inputs };
   }

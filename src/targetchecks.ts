@@ -1,3 +1,4 @@
+import { executableCommand } from "./process.ts";
 import { execFile } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { promisify } from "node:util";
@@ -9,7 +10,8 @@ export const kaneTarget = (target: Target) => target.kind === "ios" ? (target.ex
 
 export async function command(bin: string, args: string[], env = process.env) {
   try {
-    const { stdout, stderr } = await exec(bin, args, { env, timeout: 20_000, maxBuffer: 4 * 1024 * 1024 });
+    const cmd = executableCommand(bin, args, env);
+    const { stdout, stderr } = await exec(cmd.file, cmd.args, { env, windowsHide: true, timeout: 20_000, maxBuffer: 4 * 1024 * 1024 });
     return { ok: true, text: `${stdout}\n${stderr}`.trim() };
   } catch (error) {
     const e = error as { stdout?: string; stderr?: string; message?: string };
@@ -51,7 +53,7 @@ export async function localDevice(target: Extract<Target, { kind: "ios" | "andro
   return matches[0]!;
 }
 
-export async function targetChecks(target: Target, options: { env?: NodeJS.ProcessEnv; pendingBuild?: boolean; launchPending?: boolean } = {}): Promise<TargetCheck[]> {
+export async function targetChecks(target: Target, options: { env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; pendingBuild?: boolean; launchPending?: boolean } = {}): Promise<TargetCheck[]> {
   const env = options.env ?? process.env;
   const checks: TargetCheck[] = [];
   const add = (name: string, ok: boolean, detail: string, fix: string) => checks.push({ name, status: ok ? "ok" : "fail", detail, fix });
@@ -74,6 +76,10 @@ export async function targetChecks(target: Target, options: { env?: NodeJS.Proce
   }
   if (target.execution === "cloud") {
     checks.push({ name: "Cloud recording", status: "ok", detail: "screenshots only, no video clip; local execution records MP4", fix: "Use local execution for MP4 recording." });
+    return checks;
+  }
+  if (target.kind === "ios" && (options.platform ?? process.platform) !== "darwin") {
+    add("iOS host", false, "Local iOS simulators require macOS and Xcode", "Use a Mac for local iOS, or select cloud execution with a device .ipa.");
     return checks;
   }
   if (target.kind === "ios") {

@@ -1,8 +1,9 @@
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readKaneVersion } from "./kaneversion.ts";
 
-const bin = new URL("./testing/fake-kane.ts", import.meta.url).pathname;
+const bin = fileURLToPath(new URL("./testing/fake-kane.ts", import.meta.url));
 const warning = "kane-cli: bundled Node runtime not found - running on system node 24.11.1";
 
 test("Kane version ignores runtime warnings and extracts only the version line", () => {

@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 // `proofed` end to end, with the fake Kane (src/testing/fake-kane.ts) in place of kane-cli, a tiny
 // app served by node:http, and a temp git repo for the app's code. Real Chrome, no credits.
 import assert from "node:assert/strict";
@@ -10,8 +11,8 @@ import { describe, test } from "node:test";
 import { findChrome } from "./chrome.ts";
 import type { Doc, ErrorDoc } from "./result.ts";
 
-const CLI = new URL("./proofed.ts", import.meta.url).pathname;
-const FAKE_KANE = new URL("./testing/fake-kane.ts", import.meta.url).pathname;
+const CLI = fileURLToPath(new URL("./proofed.ts", import.meta.url));
+const FAKE_KANE = fileURLToPath(new URL("./testing/fake-kane.ts", import.meta.url));
 const noChrome = findChrome() ? false : "Chrome not found; set CHROME_PATH to run the end-to-end tests";
 
 const APP = `const http = require("node:http");
@@ -75,7 +76,7 @@ const portFree = (port: number) =>
 function env(r: Repo, extra: NodeJS.ProcessEnv = {}) {
   const { NO_COLOR, FORCE_COLOR, PROOFED_URL, PROOFED_SERVE, PROOFED_BUILD, PROOFED_OUT, PROOFED_SCENARIOS, ...rest } = process.env;
   // TMPDIR: each Chrome's profile goes there, so the test can tell its Chromes from any other.
-  return { ...rest, KANE_CLI: FAKE_KANE, FAKE_KANE_LOG: r.log, TMPDIR: join(r.dir, "tmp"), ...extra };
+  return { ...rest, KANE_CLI: FAKE_KANE, FAKE_KANE_LOG: r.log, TMPDIR: join(r.dir, "tmp"), TEMP: join(r.dir, "tmp"), TMP: join(r.dir, "tmp"), ...extra };
 }
 
 type Ran = { code: number | null; stdout: string; stderr: string };
@@ -170,7 +171,7 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     }
   });
 
-  test("exit 0 for a pass, without ffmpeg, in plain output", async () => {
+  test("exit 0 for a pass, without ffmpeg, in plain output", { skip: process.platform === "win32" ? "The restricted PATH fixture uses POSIX executable symlinks; Windows ffmpeg fallback is covered by doctor and media tests" : false }, async () => {
     const r = repo({ pass: { mode: "pass" } });
     const port = await freePort();
     // A PATH with node and git but no ffmpeg: no clip, and the verdict still holds.
@@ -505,7 +506,7 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
   });
 
   // SIGHUP is a closed terminal tab or a dropped SSH session.
-  for (const signal of ["SIGINT", "SIGHUP"] as const) test(`${signal} stops Kane and its children, every Chrome and the app, and exits 130`, async () => {
+  for (const signal of ["SIGINT", "SIGHUP"] as const) test(`${signal} stops Kane and its children, every Chrome and the app, and exits 130`, { skip: process.platform === "win32" ? "Node cannot send POSIX terminal signals on Windows; process tree cleanup has a separate Windows test" : false }, async () => {
     const r = repo({ stuck: { mode: "hang" } });
     const port = await freePort();
     try {

@@ -1,19 +1,20 @@
+import { killTree } from "./process.ts";
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { adopt, stopping } from "./children.ts";
 import { log } from "./log.ts";
 
-const candidates = [
-  process.env.CHROME_PATH,
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  "/usr/bin/google-chrome",
-  "/usr/bin/google-chrome-stable",
-  "/usr/bin/chromium",
-];
+export function chromeCandidates(env = process.env, platform = process.platform) {
+  return [env.CHROME_PATH, ...(platform === "win32"
+    ? [env.ProgramFiles ?? "C:\\Program Files", env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", env.LOCALAPPDATA]
+      .filter((p): p is string => !!p).map((p) => win32.join(p, "Google", "Chrome", "Application", "chrome.exe"))
+    : ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium"])]
+    .filter((p): p is string => !!p);
+}
 
-export const findChrome = () => candidates.find((p): p is string => !!p && existsSync(p));
+export const findChrome = (env = process.env, platform = process.platform) => chromeCandidates(env, platform).find((p) => existsSync(p));
 
 const chromePath = () => {
   const found = findChrome();
@@ -50,10 +51,11 @@ async function startChrome(headless: boolean) {
       ...(process.env.CI ? ["--no-sandbox"] : []),
       "about:blank",
     ],
-    { stdio: "ignore" },
+    { stdio: "ignore", windowsHide: true },
   );
   let exited: number | null | undefined;
-  const release = adopt({ kill: (signal) => proc.kill(signal), exited: new Promise((r) => proc.once("exit", r)) });
+  const kill = (signal: NodeJS.Signals = "SIGTERM") => { if (process.platform === "win32") killTree(proc.pid, signal); else proc.kill(signal); };
+  const release = adopt({ kill, exited: new Promise((r) => proc.once("exit", r)) });
   proc.on("exit", (code) => {
     exited = code;
     release();
@@ -73,10 +75,10 @@ async function startChrome(headless: boolean) {
     if (port) {
       const endpoint = `http://127.0.0.1:${port}`;
       const ok = await fetch(`${endpoint}/json/version`).then((r) => r.ok, () => false);
-      if (ok) return { endpoint, close: () => proc.kill() };
+      if (ok) return { endpoint, close: () => kill() };
     }
     await new Promise((r) => setTimeout(r, 200));
   }
-  proc.kill();
+  kill();
   throw new Error(exited !== undefined ? `Chrome exited with code ${exited} on start` : "Chrome did not open its debugging port");
 }

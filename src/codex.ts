@@ -1,3 +1,5 @@
+import { executableCommand } from "./process.ts";
+import { pathValue } from "./which.ts";
 // One headless Codex run, shared by the fixer and scenario writer.
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -14,14 +16,14 @@ export function askCodex(prompt: string, o: Options): CodexAnswer {
     const output = join(dir, "answer.txt");
     // Keep job tokens and unrelated provider keys out of the agent process.
     const env = Object.fromEntries(
-      ["PATH", "HOME", "USER", "TMPDIR", "TMP", "TEMP", "SystemRoot", "CODEX_HOME", "CODEX_API_KEY"]
-        .flatMap((name) => process.env[name] === undefined ? [] : [[name, process.env[name]!]]),
+      ["PATH", "PATHEXT", "HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "USER", "TMPDIR", "TMP", "TEMP", "SystemRoot", "CODEX_HOME", "CODEX_API_KEY"]
+        .flatMap((name) => pathValue(process.env, name) === undefined ? [] : [[name, pathValue(process.env, name)!]]),
     );
     // Codex has no equivalent of Claude's per-command/per-path tool allowlist. The sandbox
     // limits writes, blocks network and protects .git; the prompt restricts shell use to
     // reading code and the build. fix.ts/generate.ts undo edits outside their allowed files.
     // Ignore personal config/rules instead of inheriting personal MCP servers and permission overrides.
-    const run = spawnSync("codex", [
+    const command = executableCommand("codex", [
       "exec", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--color", "never",
       "--sandbox", "workspace-write", "-c", 'approval_policy="never"',
       "-c", "sandbox_workspace_write.network_access=false",
@@ -31,8 +33,9 @@ export function askCodex(prompt: string, o: Options): CodexAnswer {
       "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
       "-c", `model_reasoning_effort=${JSON.stringify(o.effort)}`,
       "--model", o.model, "--json", "--output-last-message", output, "-",
-    ], {
-      input: prompt, cwd: o.cwd, env, encoding: "utf8", maxBuffer: 50 * 1024 * 1024,
+    ], env);
+    const run = spawnSync(command.file, command.args, {
+      windowsHide: true, input: prompt, cwd: o.cwd, env, encoding: "utf8", maxBuffer: 50 * 1024 * 1024,
       timeout: o.timeoutMs ?? 10 * 60_000, killSignal: "SIGKILL",
     });
     if (run.error) {

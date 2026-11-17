@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 // The fix loop (fixloop.ts) with the fake Kane (src/testing/fake-kane.ts) and real Chrome, against a
 // tiny page. Claude is a function here: what it "changes" is what the fake Kane sees on the next run.
 import assert from "node:assert/strict";
@@ -13,7 +14,7 @@ import { runAll } from "./pipeline.ts";
 import type { FailureData } from "./report.ts";
 import type { Scenario } from "./scenarios.ts";
 
-const FAKE_KANE = new URL("./testing/fake-kane.ts", import.meta.url).pathname;
+const FAKE_KANE = fileURLToPath(new URL("./testing/fake-kane.ts", import.meta.url));
 const noChrome = findChrome() ? false : "Chrome not found; set CHROME_PATH to run the end-to-end tests";
 
 const scenario = (id: string, paths: string[]): Scenario => ({
