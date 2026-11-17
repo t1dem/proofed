@@ -9,9 +9,7 @@
 Kane CLI runs the user flows a pull request touches and posts the recording on the PR.<br>
 When a flow breaks, Claude Code fixes it, and the fix is pushed only after Kane has watched it pass.
 
-[Website](https://proofed.neptunescodm.workers.dev) · [**Break it yourself**](https://proofed.neptunescodm.workers.dev/try) · [Dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo) · [Demo store](https://github.com/t1dem/proofed-demo-store) · [Install on GitHub](https://proofed.neptunescodm.workers.dev/install)
-
-<code>npx proofed-cli check</code>
+[Website](https://proofed.neptunescodm.workers.dev) · [**Break it yourself**](https://proofed.neptunescodm.workers.dev/try) · [Dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo) · [Demo store](https://github.com/t1dem/proofed-demo-store) · [Install on GitHub](https://proofed.neptunescodm.workers.dev/install) · [`npx proofed-cli`](#locally-and-from-an-ai-agent)
 
 <sub>Built for the Kane CLI hackathon, November 2026.</sub>
 
@@ -51,7 +49,15 @@ Four pull requests on the [demo store](https://github.com/t1dem/proofed-demo-sto
 | [#11](https://github.com/t1dem/proofed-demo-store/pull/11) | The + button in the bag leaves the quantity at 1 | Fixed on the first attempt ([`9999a0d`](https://github.com/t1dem/proofed-demo-store/commit/9999a0d)), 8.5 minutes |
 | [#12](https://github.com/t1dem/proofed-demo-store/pull/12) | A €44.50 bag ships free | Fixed on the first attempt ([`f54f1b5`](https://github.com/t1dem/proofed-demo-store/commit/f54f1b5)), 8.5 minutes |
 
-To watch one of them live, open [Break it yourself](https://proofed.neptunescodm.workers.dev/try): no account, 8 to 14 minutes a run. To run Proofed yourself, clone the demo store and run `npx proofed-cli check "the promo code welcome10 takes 10% off"` in it; it needs a signed-in [Kane CLI](https://www.npmjs.com/package/@testmuai/kane-cli), Node 22.18+, Chrome and ffmpeg.
+To watch one run live, open [Break it yourself](https://proofed.neptunescodm.workers.dev/try). It needs no account and takes 8 to 14 minutes.
+
+To run Proofed on your machine, with a signed-in [Kane CLI](https://www.npmjs.com/package/@testmuai/kane-cli), Node 22.18+, Chrome and ffmpeg:
+
+```sh
+git clone https://github.com/t1dem/proofed-demo-store
+cd proofed-demo-store
+npx proofed-cli check "the promo code welcome10 takes 10% off"
+```
 
 The [dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo) needs no sign-in. Proofed also checks its own pull requests, for example [#25](https://github.com/t1dem/proofed/pull/25#issuecomment-6897255024).
 
