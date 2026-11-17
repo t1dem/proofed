@@ -5,7 +5,7 @@ import { NOTHING_CHECKED } from "../../../src/runfile";
 import type { PullDetail, PullView, Run, RunScenario } from "../worker/runs";
 import { ago, movingName, titleName, useLoad, type Ask, type Route, type useAsk } from "./lib";
 import { LiveRun } from "./Live";
-import { Backdrop, bone, focus, iconButton, kindOf, Link, link, Mark, marks, MobileBar, outline, PageTitle, panel, popover, useSheetDrag, plain, Segmented, sha7, soft, solid, useDismiss } from "./ui";
+import { Backdrop, bone, focus, iconButton, kindOf, Link, link, Mark, marks, MobileBar, NEEDS_WRITE, outline, PageTitle, panel, popover, useSheetDrag, plain, Segmented, sha7, soft, solid, useDismiss } from "./ui";
 
 type Seen = { run: Run; scenario: RunScenario };
 
@@ -631,6 +631,7 @@ export function Pull({ repo, pr, scenario, listed, go, asked, ask }: PullProps) 
 
   const canRerun = kind !== "fixing" && kind !== "running" && !pull?.paused;
   const fixable = canFix && !pull?.paused;
+  const locked = { disabled: state === "sending" || !!pull?.readOnly, title: pull?.readOnly ? NEEDS_WRITE : undefined };
 
   return (
     <main className="mx-auto max-w-6xl px-4 pb-8 sm:px-8 md:py-7">
@@ -670,12 +671,12 @@ export function Pull({ repo, pr, scenario, listed, go, asked, ask }: PullProps) 
             <div className="flex flex-wrap items-center gap-2 max-md:hidden">
               {typeof state === "object" && <span className="text-[13px] text-bad">{state.error}</span>}
               {fixable && (
-                <button type="button" className={solid} disabled={state === "sending"} onClick={() => ask(pull, "fix")}>
+                <button type="button" className={solid} {...locked} onClick={() => ask(pull, "fix")}>
                   Fix with Claude
                 </button>
               )}
               {canRerun && (
-                <button type="button" className={outline} disabled={state === "sending"} onClick={() => ask(pull, "rerun")}>
+                <button type="button" className={outline} {...locked} onClick={() => ask(pull, "rerun")}>
                   <RotateCw size={14} /> Run again
                 </button>
               )}
@@ -734,12 +735,12 @@ export function Pull({ repo, pr, scenario, listed, go, asked, ask }: PullProps) 
           {typeof state === "object" && <p className="mb-2 text-[13px] text-bad">{state.error}</p>}
           <div className="flex gap-2">
             {fixable && (
-              <button type="button" className={`${solid} h-11 flex-1 text-[15px]`} disabled={state === "sending"} onClick={() => ask(pull, "fix")}>
+              <button type="button" className={`${solid} h-11 flex-1 text-[15px]`} {...locked} onClick={() => ask(pull, "fix")}>
                 Fix with Claude
               </button>
             )}
             {canRerun && (
-              <button type="button" className={`${outline} h-11 text-[15px] ${fixable ? "px-4" : "flex-1"}`} disabled={state === "sending"} onClick={() => ask(pull, "rerun")}>
+              <button type="button" className={`${outline} h-11 text-[15px] ${fixable ? "px-4" : "flex-1"}`} {...locked} onClick={() => ask(pull, "rerun")}>
                 <RotateCw size={16} /> Run again
               </button>
             )}
