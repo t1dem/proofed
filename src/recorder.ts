@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { VISIBLE_TEXT } from "./textcheck.ts";
 import { connectCdp, type ScreencastMetadata, type TargetInfo } from "./cdp.ts";
 import type { LiveCursor } from "./livefile.ts";
 
@@ -188,6 +189,13 @@ export async function startRecorder(endpoint: string, outDir: string, targetId?:
   await Promise.race([ready, new Promise((r) => setTimeout(r, 5000))]);
 
   const recorder = {
+    async visibleText(): Promise<string | undefined> {
+      if (!lastSession) return;
+      try {
+        const { result } = await cdp.send<{ result: { value?: unknown } }>("Runtime.evaluate", { expression: VISIBLE_TEXT, returnByValue: true }, lastSession);
+        return typeof result.value === "string" ? result.value : undefined;
+      } catch { return undefined; }
+    },
     get unexpectedPage() { return unexpectedPage; },
     set onUnexpectedPage(callback: (() => void) | undefined) { onUnexpectedPage = callback; },
     frames,

@@ -274,3 +274,20 @@ Releasing to npm is manual: [docs/release.md](docs/release.md).
 ## License
 
 [MIT](LICENSE)
+
+### Text checks and uncertain passes
+
+For web runs, Proofed cross-checks a final explicit positive text check such as
+`Check that the page contains "Order complete".` against page text captured when
+Kane announces its assert. Text is compared without case or whitespace differences.
+A missing literal changes a passing verdict to `not_checked`, with the missing text
+in the reason. This costs no additional Kane credits.
+
+This is a narrow check. Unquoted names, negative checks, canvas content, images,
+colours and layout remain Kane's decision. An unreadable frame, closed shadow root
+or other incomplete capture also leaves Kane's verdict unchanged. Open shadow roots
+and readable same-origin frames contribute their text. This does not validate every
+claim Kane makes, or prove that matching text is in the right container.
+
+If a failed assert is retried because Kane doubts the scenario, two failures stay
+failed. A failure followed by a pass is `not_checked`: both runs' reasons are kept.

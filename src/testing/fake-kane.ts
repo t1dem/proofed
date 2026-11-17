@@ -111,6 +111,9 @@ if (mode === "hang") {
   await step("analyze: looking at the page");
   console.error("fake kane-cli: the session ended unexpectedly");
   process.exit(1);
+} else if (mode === "text") {
+  await step(`assert: ${objective.split("\n")[0]}`);
+  end({ status: "passed", reason: "Objective completed" });
 } else if (mode === "noassert") {
   await step("wait: Waiting for the page to settle");
   end({ status: "passed", reason: "Objective completed", final_state: {} });

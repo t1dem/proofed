@@ -417,6 +417,19 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     }
   });
 
+  test("a quoted text pass contradicted by the page is not checked", async () => {
+    const r = repo({ text: { mode: "text" } });
+    const port = await freePort();
+    try {
+      writeFileSync(join(r.dir, ".proofed/scenarios/text.md"), '---\nname: Text presence\npaths: [src/**]\nurl: /\n---\nCheck that the page contains "Missing words".\n');
+      const ran = await cli(r, ["check", "--json", "--no-retry", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`], { FAKE_KANE_MODE: "text" });
+      const doc = json(ran);
+      assert.equal(ran.code, 2, ran.stderr);
+      assert.equal(doc.scenarios[0]!.notChecked, "text_contradicted");
+      assert.match(doc.scenarios[0]!.reason!, /Missing words/);
+    } finally { r.cleanup(); }
+  });
+
   test("a failed assert followed by a passing recheck is not checked", async () => {
     const r = repo({ heading: { mode: "flaky", credits: 15 } });
     const port = await freePort();
