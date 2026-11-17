@@ -1,6 +1,10 @@
+import { providerLabel, providerOf } from "../worker/models";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { PullDetail, PullView } from "../worker/runs";
+
+export const fixerName = (pull?: Pick<PullView, "fixer" | "fix" | "live">) =>
+  providerLabel(providerOf(pull?.live?.fix?.model || pull?.fixer?.model || pull?.fix?.model || ""));
 
 export class SignedOut extends Error {}
 

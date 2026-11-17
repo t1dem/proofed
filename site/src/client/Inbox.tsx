@@ -2,7 +2,7 @@ import { Check, CircleCheck, CircleDashed, CircleX, Inbox as InboxIcon, ListFilt
 import { Component, createRef, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { NOTHING_CHECKED } from "../../../src/runfile";
 import type { PullView } from "../worker/runs";
-import { ago, DEMO, installed, movingName, plural, prefetch, titleName, type Ask, type Load, type Route, type useAsk } from "./lib";
+import { ago, DEMO, fixerName, installed, movingName, plural, prefetch, titleName, type Ask, type Load, type Route, type useAsk } from "./lib";
 import { Backdrop, bone, focus, iconButton, kindOf, Link, Mark, NEEDS_WRITE, outline, PageTitle, Pips, plain, popover, sha7, soft, solid, useDismiss, useSheetDrag } from "./ui";
 
 type AskedOf = ReturnType<typeof useAsk>[0];
@@ -16,7 +16,7 @@ const isPassed = (pull: PullView) => kindOf(pull) === "passed";
 const sections = [
   { title: "Needs you", has: needsYou },
   { title: "Kane is checking", has: isRunning },
-  { title: "Claude is fixing", has: isFixing },
+  { title: "Fixing", has: isFixing },
   { title: "Passed", has: isPassed },
 ];
 
@@ -70,7 +70,7 @@ function Why({ pull }: { pull: PullView }): ReactNode {
       : fix.doing === "pushing"
         ? "Kane saw it pass; pushing the fix."
         : `Attempt ${fix.attempt} of ${fix.of}: ${fix.doing === "writing" ? "writing the change" : fix.doing === "building" ? "building it" : "Kane is checking it"}.`;
-    return <>Claude is fixing {strong(names(failed) || "this pull request")}. {now}</>;
+    return <>{fixerName(pull)} is fixing {strong(names(failed) || "this pull request")}. {now}</>;
   }
   if (kind === "failed") {
     if (failed.length === 1 && failed[0]) {
@@ -100,7 +100,7 @@ function Why({ pull }: { pull: PullView }): ReactNode {
   if (fix?.status === "fixed") {
     return (
       <>
-        Fixed by Claude{fix.commit && <> in <span className="font-mono text-[13px]">{sha7(fix.commit)}</span></>} after {plural(fix.attempts, "attempt")} · {passes}
+        Fixed by {fixerName({fix})}{fix.commit && <> in <span className="font-mono text-[13px]">{sha7(fix.commit)}</span></>} after {plural(fix.attempts, "attempt")} · {passes}
       </>
     );
   }
@@ -122,7 +122,7 @@ function Action({ pull, asked, ask }: { pull: PullView; asked: AskedOf; ask: Ask
       title={pull.readOnly ? NEEDS_WRITE : `Comments /proofed${fix ? " fix" : ""} on the pull request as you`}
       onClick={() => ask(pull, fix ? "fix" : "rerun")}
     >
-      {fix ? "Fix with Claude" : "Run again"}
+      {fix ? `Fix with ${fixerName(pull)}` : "Run again"}
     </button>
   );
 }

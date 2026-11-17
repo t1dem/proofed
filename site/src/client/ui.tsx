@@ -53,7 +53,7 @@ export const marks: Record<Kind, { icon: LucideIcon; text: string; fill: string;
   failed: { icon: CircleX, text: "text-bad", fill: "bg-bad", label: "Broke" },
   unsure: { icon: CircleQuestionMark, text: "text-busy", fill: "bg-busy", label: "Not confirmed" },
   error: { icon: CircleExclamationPoint, text: "text-dim", fill: "bg-faint", label: "Kane couldn't finish" },
-  fixing: { icon: LoaderCircle, text: "text-work", fill: "bg-work", label: "Claude is fixing" },
+  fixing: { icon: LoaderCircle, text: "text-work", fill: "bg-work", label: "Fix in progress" },
   running: { icon: LoaderCircle, text: "text-busy", fill: "bg-busy", label: "Kane is checking" },
   skipped: { icon: CircleMinus, text: "text-faint", fill: "bg-edge", label: "Not run" },
   waiting: { icon: CircleDashed, text: "text-faint", fill: "bg-edge", label: "Waiting" },

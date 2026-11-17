@@ -3,12 +3,12 @@ import { decrypt, encrypt, sealForGitHub } from "./crypto";
 import { gh, GitHubError, installationToken } from "./github";
 import type { Env } from "./index";
 import { forget, memo } from "./memo";
-import { DEFAULT_FIXER, isEffort, isModelId, MODELS, type Fixer } from "./models";
+import { DEFAULT_FIXER, isProvider, resolveFixer, type Fixer } from "./models";
 import { getLive, liveFrame } from "./live";
 import { getPull, listPulls, markAsked } from "./runs";
 import { openSetupPr } from "./setup";
 
-export const SECRET_NAMES = ["LT_USERNAME", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN"] as const;
+export const SECRET_NAMES = ["LT_USERNAME", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "CODEX_API_KEY"] as const;
 
 // `auto`: "Fix automatically", a check that saw a scenario fail goes on to fix it (src/mode.ts).
 export type FixerView = Fixer & { auto: boolean };
@@ -35,6 +35,7 @@ export type MeView = {
   avatar: string | null;
   testmu: string | null; // username when connected
   claude: boolean;
+  codex: boolean;
   installUrl: string;
 };
 
@@ -92,6 +93,24 @@ async function fetchRepos(token: string) {
   return perInstallation.flat();
 }
 
+export const repoFixer = (token: string, repoName: string) => memo(`fixer:${repoName}`, 60_000, () =>
+  gh<{ variables: { name: string; value: string }[] }>(token, "GET", `/repos/${repoName}/actions/variables?per_page=100`).then(
+    ({ variables }) => {
+      const provider = variables.find((v) => v.name === "PROOFED_PROVIDER")?.value;
+      const choice = resolveFixer({
+        ...(provider && isProvider(provider) ? { provider } : {}),
+        model: variables.find((v) => v.name === "PROOFED_MODEL")?.value,
+        effort: variables.find((v) => v.name === "PROOFED_EFFORT")?.value,
+      });
+      return {
+        ...("error" in choice ? DEFAULT_FIXER : choice),
+        auto: variables.find((v) => v.name === "PROOFED_AUTOFIX")?.value === "true",
+      };
+    },
+    () => null,
+  ),
+);
+
 // Uses the installation token: it can read workflow files and secret names the user token can't.
 async function describeRepo(env: Env, repo: InstallationRepo & { installationId: number }): Promise<RepoView> {
   const token = await installationToken(env, repo.installationId);
@@ -115,14 +134,7 @@ async function describeRepo(env: Env, repo: InstallationRepo & { installationId:
       (r) => r.secrets.map((s) => s.name),
       () => [],
     ),
-    gh<{ variables: { name: string; value: string }[] }>(token, "GET", `/repos/${repo.full_name}/actions/variables?per_page=30`).then(
-      ({ variables }) => ({
-        model: variables.find((v) => v.name === "PROOFED_MODEL")?.value || DEFAULT_FIXER.model,
-        effort: variables.find((v) => v.name === "PROOFED_EFFORT")?.value || DEFAULT_FIXER.effort,
-        auto: variables.find((v) => v.name === "PROOFED_AUTOFIX")?.value === "true",
-      }),
-      () => null,
-    ),
+    repoFixer(token, repo.full_name),
     env.DB.prepare("SELECT * FROM reports WHERE repo = ?1 ORDER BY updated_at DESC LIMIT 1")
       .bind(repo.full_name)
       .first<{ state: string; headline: string; url: string; pr: number; updated_at: number }>(),
@@ -164,6 +176,7 @@ export async function pushSecrets(env: Env, user: UserRow, repoName: string, ins
     LT_USERNAME: user.lt_username ?? undefined,
     LT_ACCESS_KEY: await decrypt(env.SECRETS_KEY, user.lt_key),
     CLAUDE_CODE_OAUTH_TOKEN: await decrypt(env.SECRETS_KEY, user.claude_token),
+    CODEX_API_KEY: await decrypt(env.SECRETS_KEY, user.codex_key),
   };
   const token = await installationToken(env, installationId);
   const { key, key_id } = await gh<{ key: string; key_id: string }>(token, "GET", `/repos/${repoName}/actions/secrets/public-key`);
@@ -180,6 +193,7 @@ export async function pushSecrets(env: Env, user: UserRow, repoName: string, ins
 // The workflow reads vars.PROOFED_MODEL / PROOFED_EFFORT / PROOFED_AUTOFIX; a default is stored as no variable at all.
 async function setFixer(token: string, repoName: string, fixer: FixerView) {
   const vars = [
+    ["PROOFED_PROVIDER", fixer.provider || "claude", "claude"],
     ["PROOFED_MODEL", fixer.model, DEFAULT_FIXER.model],
     ["PROOFED_EFFORT", fixer.effort, DEFAULT_FIXER.effort],
     ["PROOFED_AUTOFIX", fixer.auto ? "true" : "", ""],
@@ -219,6 +233,7 @@ export async function handleApi(request: Request, env: Env, path: string) {
       avatar: user.avatar,
       testmu: user.lt_key ? user.lt_username : null,
       claude: !!user.claude_token,
+      codex: !!user.codex_key,
       installUrl: `https://github.com/apps/${env.GITHUB_APP_SLUG}/installations/new`,
     };
     return json(me);
@@ -230,7 +245,7 @@ export async function handleApi(request: Request, env: Env, path: string) {
   }
 
   if (path === "/api/keys" && request.method === "POST") {
-    const body = (await request.json()) as { ltUsername?: string; ltAccessKey?: string; claudeToken?: string };
+    const body = (await request.json()) as { ltUsername?: string; ltAccessKey?: string; claudeToken?: string; codexKey?: string };
     const updates: string[] = [];
     const binds: unknown[] = [];
 
@@ -247,6 +262,12 @@ export async function handleApi(request: Request, env: Env, path: string) {
       if (!claude.startsWith("sk-ant-")) return json({ error: "That doesn't look like a token from `claude setup-token`." }, 400);
       updates.push("claude_token = ?");
       binds.push(await encrypt(env.SECRETS_KEY, claude));
+    }
+    if (body.codexKey !== undefined) {
+      const key = body.codexKey.trim();
+      if (!key.startsWith("sk-") || key.length < 20) return json({ error: "That doesn't look like an OpenAI API key." }, 400);
+      updates.push("codex_key = ?");
+      binds.push(await encrypt(env.SECRETS_KEY, key));
     }
     if (updates.length === 0) return json({ error: "Nothing to save." }, 400);
 
@@ -266,7 +287,9 @@ export async function handleApi(request: Request, env: Env, path: string) {
     const pulls = await listPulls(env, repos.map((r) => r.full_name));
     const paused = await pausedRepos(env, repos.filter((r) => pulls.some((p) => p.repo === r.full_name)));
     const readOnly = new Set(repos.filter((r) => accessOf(r) === "read").map((r) => r.full_name));
-    return json(pulls.map((p) => ({ ...p, paused: paused.has(p.repo), readOnly: readOnly.has(p.repo) })));
+    const fixers = new Map(await Promise.all(repos.filter((r) => pulls.some((p) => p.repo === r.full_name)).map(async (r) =>
+      [r.full_name, await repoFixer(await installationToken(env, r.installationId), r.full_name)] as const)));
+    return json(pulls.map((p) => ({ ...p, fixer: fixers.get(p.repo) ?? undefined, paused: paused.has(p.repo), readOnly: readOnly.has(p.repo) })));
   }
 
   const clip = CLIP_PATH.exec(path.slice("/api".length));
@@ -294,7 +317,8 @@ export async function handleApi(request: Request, env: Env, path: string) {
     if (!action && request.method === "GET") {
       const [detail, paused] = await Promise.all([getPull(env, repoName, Number(number)), pausedRepos(env, [repo])]);
       if (!detail) return json({ error: "Proofed hasn't reported on that pull request." }, 404);
-      return json({ ...detail, pull: { ...detail.pull, paused: paused.has(repoName), readOnly: accessOf(repo) === "read" } });
+      const fixer = await repoFixer(await installationToken(env, repo.installationId), repoName);
+      return json({ ...detail, pull: { ...detail.pull, fixer: fixer ?? undefined, paused: paused.has(repoName), readOnly: accessOf(repo) === "read" } });
     }
     if (action && request.method === "POST") {
       // On a public repo anyone can comment, but the workflow ignores /proofed from people without write access.
@@ -305,7 +329,7 @@ export async function handleApi(request: Request, env: Env, path: string) {
         const { what } = (await request.json().catch(() => ({}))) as { what?: unknown };
         const text = typeof what === "string" ? what.replace(/\s+/g, " ").trim().slice(0, 300) : "";
         if (!text) return json({ error: "Say what Kane should check." }, 400);
-        if (/^fix\b/i.test(text)) return json({ error: "That would start a fix. Use Fix with Claude for that." }, 400);
+        if (/^fix\b/i.test(text)) return json({ error: "That would start a fix. Use the Fix button for that." }, 400);
         command = `/proofed ${text}`;
       }
       // The workflow listens for these comments, and only from people with write access:
@@ -336,10 +360,10 @@ export async function handleApi(request: Request, env: Env, path: string) {
       const body = (await request.json()) as Partial<FixerView>;
       const model = body.model?.trim().toLowerCase() ?? "";
       const effort = body.effort ?? "";
-      if (!(MODELS.some((m) => m.id === model) || isModelId(model)) || !isEffort(effort)) {
-        return json({ error: "Pick a listed model or type a full model ID such as claude-opus-5-1, and a listed effort." }, 400);
-      }
-      const fixer = { model, effort, auto: body.auto === true };
+      if (body.provider !== undefined && !isProvider(body.provider)) return json({ error: "Pick Claude or Codex." }, 400);
+      const choice = resolveFixer({ model, effort, provider: body.provider });
+      if ("error" in choice) return json({ error: choice.error }, 400);
+      const fixer = { ...choice, auto: body.auto === true };
       try {
         await setFixer(await installationToken(env, repo.installationId), repo.full_name, fixer);
       } catch (e) {
@@ -348,6 +372,7 @@ export async function handleApi(request: Request, env: Env, path: string) {
         }
         throw e;
       }
+      forget(`fixer:${repo.full_name}`);
       return json({ fixer });
     }
     // Pause switches the repo's Proofed workflow off on GitHub; nothing in the repo changes.

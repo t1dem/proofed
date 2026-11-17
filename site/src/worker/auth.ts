@@ -18,6 +18,7 @@ export type UserRow = {
   lt_username: string | null;
   lt_key: string | null;
   claude_token: string | null;
+  codex_key: string | null;
 };
 
 const cookie = (name: string, value: string, maxAge: number) =>

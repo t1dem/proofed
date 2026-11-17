@@ -1,6 +1,7 @@
 // What the dashboard knows about a pull request beyond the comment's headline: the run file the
 // action commits next to its clips (see src/runfile.ts at the repo root). The webhook reads it
 // when the comment that names it arrives.
+import type { Fixer } from "./models";
 import { summarize, type Live, type LiveSummary } from "../../../src/livefile";
 import { readRunKey, RUN_FILE, type RunFile, type RunFix, type RunScenario } from "../../../src/runfile";
 import { gh } from "./github";
@@ -23,6 +24,7 @@ export type PullView = {
   updatedAt: number;
   // From the latest run; empty for reports posted before run files existed.
   scenarios: Pick<RunScenario, "name" | "outcome" | "reason">[];
+  fixer?: Fixer;
   fix?: Pick<RunFix, "status" | "model" | "effort" | "commit"> & { attempts: number };
   // The repo's workflow is switched off: nothing would answer "Fix with Claude" or "Run again". Set by the API.
   paused?: boolean;

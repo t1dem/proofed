@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Live, LiveScenario } from "../../../src/livefile";
 import type { LiveView } from "../worker/live";
-import { modelLabel } from "../worker/models";
+import { modelLabel, providerLabel, providerOf } from "../worker/models";
 import { useLoad } from "./lib";
 import { focus, link, Mark, panel, plain, soft, type Kind } from "./ui";
 
@@ -28,11 +28,12 @@ const kindOf = (s: LiveScenario): Kind => s.status;
 function headline(live: Live): [string, string] {
   const fix = live.fix;
   if (live.kind === "fix" && fix) {
+    const provider = providerLabel(providerOf(fix.model));
     const attempt = `Attempt ${fix.attempt} of ${fix.of} · ${modelLabel(fix.model)}${fix.effort ? `, ${fix.effort} effort` : ""}`;
-    if (fix.doing === "writing") return ["Claude is writing a fix", `${attempt}. It has Kane's steps, what went wrong and the diff.`];
-    if (fix.doing === "building") return ["Building the app with Claude's change", attempt];
+    if (fix.doing === "writing") return [`${provider} is writing a fix`, `${attempt}. It has Kane's steps, what went wrong and the diff.`];
+    if (fix.doing === "building") return [`Building the app with ${provider}'s change`, attempt];
     if (fix.doing === "pushing") return ["Kane saw it pass. Pushing the fix", attempt];
-    return ["Kane is checking Claude's fix", `${attempt}. Nothing is pushed until it passes.`];
+    return [`Kane is checking ${provider}'s fix`, `${attempt}. Nothing is pushed until it passes.`];
   }
   const done = live.scenarios.filter((s) => s.status !== "waiting" && s.status !== "running").length;
   const total = live.scenarios.length;

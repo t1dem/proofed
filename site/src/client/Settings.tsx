@@ -1,13 +1,13 @@
 import { Check, ChevronDown, LoaderCircle, LogOut, Moon, Pause, Play, Sun, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { FixerView, MeView, RepoView } from "../worker/api";
-import { EFFORTS, modelLabel, MODELS } from "../worker/models";
-import type { PullView } from "../worker/runs";
+import { defaultModel, effortsFor, modelLabel, MODELS, PROVIDERS, providerLabel, providerOf } from "../worker/models";
+import type { PullDetail, PullView } from "../worker/runs";
 import type { Theme } from "./App";
 import { api, DEMO, message, mutate, useLoad } from "./lib";
 import { Avatar, Backdrop, field, focus, link, NEEDS_WRITE, outline, PageTitle, popover, soft, solid, useDismiss, useSheetDrag } from "./ui";
 
-// The services' own marks: TestMu's "T" in the text colour, Claude's spark in its orange.
+// The services' own marks: TestMu's "T" in the text colour, the fixer's spark in its orange.
 const TestMuMark = () => (
   <svg viewBox="0 0 18.02 20.27" width="16" height="18" fill="currentColor" aria-hidden="true">
     <path d="M18.0137 0H12.6097V13.0595H18.0137V0Z" />
@@ -23,8 +23,17 @@ const ClaudeMark = () => (
   </svg>
 );
 
+const CodexMark = () => (
+  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true">
+    {[0, 60, 120, 180, 240, 300].map((angle) => (
+      <path key={angle} transform={`rotate(${angle} 12 12)`} d="M12 3.2a4.5 4.5 0 0 1 7.3 4.6l-7.3 4.3-3.8-2.2V5.6L12 3.4v8.7" />
+    ))}
+  </svg>
+);
+
 type KeyBlockProps = {
   title: string;
+  className?: string;
   sub?: string;
   mark: ReactNode;
   connected: ReactNode;
@@ -38,7 +47,7 @@ type KeyBlockProps = {
 
 // One tile that is either the saved key or the form to change it. Both are drawn in the same grid cell,
 // so the tile is as tall as the taller of the two and switching never moves anything on the page.
-function KeyBlock({ title, sub, mark, connected, hint, busy, busyLabel, onSave, fields }: KeyBlockProps) {
+function KeyBlock({ title, className = "", sub, mark, connected, hint, busy, busyLabel, onSave, fields }: KeyBlockProps) {
   // A boolean, not `connected` itself: that's a new element on every render, and the page re-renders
   // as it polls, which would close the form under the user's hands.
   const saved = !!connected;
@@ -62,7 +71,7 @@ function KeyBlock({ title, sub, mark, connected, hint, busy, busyLabel, onSave, 
   const layer = (shown: boolean) => `[grid-area:1/1] transition-opacity duration-200 ${shown ? "opacity-100" : "invisible opacity-0"}`;
 
   return (
-    <div className="grid rounded-xl border border-edge bg-panel p-5">
+    <div className={`grid rounded-xl border border-edge bg-panel p-5 ${className}`}>
       <div className={`flex flex-col ${layer(!editing)}`} aria-hidden={editing}>
         <div className="flex items-start justify-between gap-3">
           <span className="grid size-11 shrink-0 place-items-center rounded-lg bg-hover text-fg">{mark}</span>
@@ -132,13 +141,14 @@ function Keys({ me, onSaved }: { me: MeView; onSaved: (message: string) => void 
     <section>
       <h2 className="font-semibold">Your keys</h2>
       <p className="mt-1 max-w-2xl text-dim">
-        Kane's runs use your TestMu credits and Claude's fixes use your Claude plan. Proofed stores both encrypted and puts them into each
+        Kane uses your TestMu credits. Fixes use your Claude plan or OpenAI API key. Proofed stores keys encrypted and puts them into each
         connected repository's Actions secrets.
       </p>
       {error && <p className="mt-3 rounded-md bg-bad-bg px-3 py-2 text-bad">{error}</p>}
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <KeyBlock
           title="TestMu"
+          className="sm:col-span-2"
           sub="Kane CLI"
           mark={<TestMuMark />}
           connected={
@@ -181,6 +191,17 @@ function Keys({ me, onSaved }: { me: MeView; onSaved: (message: string) => void 
           onSave={save({ claudeToken: "token" })}
           fields={<input name="token" aria-label="Token" placeholder="Token" className={keyField} type="password" autoComplete="off" required />}
         />
+        <KeyBlock
+          title="Codex"
+          sub="OpenAI"
+          mark={<CodexMark />}
+          connected={me.codex ? "API key saved" : null}
+          hint={<>An API key from <a href="https://platform.openai.com/api-keys" className={link}>OpenAI</a>. API usage is billed to your OpenAI account.</>}
+          busy={busy}
+          busyLabel="Saving…"
+          onSave={save({ codexKey: "key" })}
+          fields={<input name="key" aria-label="OpenAI API key" placeholder="API key" className={keyField} type="password" autoComplete="off" required />}
+        />
       </div>
     </section>
   );
@@ -189,7 +210,7 @@ function Keys({ me, onSaved }: { me: MeView; onSaved: (message: string) => void 
 // A row in the model menu: the same height and weight picked or not, so nothing moves under the mouse.
 const menuRow = `flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] ${soft} hover:bg-hover active:bg-hover max-md:h-11 max-md:text-[15px] ${focus}`;
 
-// Which Claude model (and effort) "Fix with Claude" uses in this repo, and whether it fixes on its own,
+// The provider, model and effort used in this repo, and whether it fixes on its own,
 // saved as Actions variables. One button in the repo's row; models on the left of the menu, effort on
 // the right, the switch for fixing automatically under both.
 function FixerMenu({ repo }: { repo: RepoView }) {
@@ -211,15 +232,24 @@ function FixerMenu({ repo }: { repo: RepoView }) {
       <a
         href={`https://github.com/settings/installations/${repo.installationId}`}
         className={outline}
-        title="Proofed needs a new permission on GitHub to set the model Claude fixes with"
+        title="Proofed needs a new permission on GitHub to set the fixer model"
       >
         Allow model choice
       </a>
     );
   }
 
+  const provider = providerOf(fixer.model);
+  const providerName = providerLabel(provider);
   const custom = !MODELS.some((m) => m.id === fixer.model);
-  const setFixer = (next: FixerView) => mutate<RepoView[]>("/api/repos", (all) => all.map((r) => (r.name === repo.name ? { ...r, fixer: next } : r)));
+  const setFixer = (next: FixerView) => {
+    mutate<RepoView[]>("/api/repos", (all) => all.map((r) => (r.name === repo.name ? { ...r, fixer: next } : r)));
+    mutate<PullView[]>("/api/pulls", (all) => all.map((p) => {
+      if (p.repo !== repo.name) return p;
+      mutate<PullDetail>(`/api/pulls/${p.repo}/${p.pr}`, (detail) => ({ ...detail, pull: { ...detail.pull, fixer: next } }));
+      return { ...p, fixer: next };
+    }));
+  };
   const save = async (next: FixerView, what: "model" | "effort" | "auto") => {
     setFixer(next);
     setSaving(what);
@@ -237,7 +267,7 @@ function FixerMenu({ repo }: { repo: RepoView }) {
     e.preventDefault();
     const model = String(new FormData(e.currentTarget).get("model") ?? "").trim().toLowerCase();
     setTyping(false);
-    if (model && model !== fixer.model) void save({ ...fixer, model }, "model");
+    if (model && model !== fixer.model) void save({ ...fixer, provider: providerOf(model), model, effort: effortsFor(model).some((e) => e === fixer.effort) ? fixer.effort : "high" }, "model");
   };
   // The tick on the picked row turns into a spinner while GitHub saves it.
   const tick = (on: boolean, what: "model" | "effort") =>
@@ -250,7 +280,7 @@ function FixerMenu({ repo }: { repo: RepoView }) {
         aria-expanded={open}
         disabled={repo.access === "read"}
         onClick={() => setOpen(!open)}
-        title={repo.access === "read" ? NEEDS_WRITE : "The model Claude fixes with in this repository"}
+        title={repo.access === "read" ? NEEDS_WRITE : "The model that fixes this repository"}
         className={`${outline} max-md:w-full`}
       >
         {custom ? <span className="max-w-40 truncate font-mono text-[12px]">{fixer.model}</span> : modelLabel(fixer.model)}
@@ -260,31 +290,53 @@ function FixerMenu({ repo }: { repo: RepoView }) {
       {open && (
         <>
         <Backdrop onClose={close} />
-        <div ref={sheet} className={`${popover} w-[min(400px,calc(100vw-48px))]`}>
-          <div className="grid grid-cols-[minmax(0,1fr)_128px] max-md:px-2">
-            <div className="p-1.5">
+        <div ref={sheet} className={`${popover} w-[min(460px,calc(100vw-48px))]`}>
+          <div className="grid grid-cols-[48px_minmax(0,1fr)_120px] max-md:grid-cols-[48px_minmax(0,1fr)_104px]">
+            <div role="tablist" aria-label="Provider" className="flex flex-col items-center gap-1 border-r border-edge py-2">
+              {PROVIDERS.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  role="tab"
+                  aria-label={providerLabel(p)}
+                  aria-selected={provider === p}
+                  title={providerLabel(p)}
+                  onClick={() => {
+                    setTyping(false);
+                    if (p !== providerOf(fixer.model)) {
+                      const model = defaultModel(p);
+                      void save({ ...fixer, provider: p, model, effort: effortsFor(model).some((e) => e === fixer.effort) ? fixer.effort : "high" }, "model");
+                    }
+                  }}
+                  className={`relative grid size-11 place-items-center rounded-md text-dim hover:bg-hover hover:text-fg ${focus} ${provider === p ? "text-fg before:absolute before:left-0 before:top-2 before:bottom-2 before:w-0.5 before:rounded-full before:bg-work" : ""}`}
+                >
+                  {p === "claude" ? <ClaudeMark /> : <CodexMark />}
+                </button>
+              ))}
+            </div>
+            <div className="min-w-0 p-1.5">
               <p className="px-2 pb-1 pt-1 text-[12px] font-medium text-faint">Model</p>
-              {MODELS.map((m) => (
+              {MODELS.filter((m) => m.provider === provider).map((m) => (
                 <button
                   key={m.id}
                   type="button"
                   className={menuRow}
                   onClick={() => {
                     setTyping(false);
-                    if (m.id !== fixer.model) void save({ ...fixer, model: m.id }, "model");
+                    if (m.id !== fixer.model) void save({ ...fixer, provider: m.provider, model: m.id, effort: m.efforts.some((e) => e === fixer.effort) ? fixer.effort : "high" }, "model");
                   }}
                 >
                   <span className="flex-1 truncate">{modelLabel(m.id)}</span>
                   {tick(fixer.model === m.id, "model")}
                 </button>
               ))}
-              {typing ? (
+              {provider === "claude" && (typing ? (
                 <form onSubmit={saveOther} className="flex h-8 items-center gap-1 rounded-md bg-hover pl-2 pr-1">
                   <input
                     name="model"
                     aria-label="Model ID"
                     defaultValue={custom ? fixer.model : ""}
-                    placeholder="claude-opus-5-1"
+                    placeholder={defaultModel(provider)}
                     className="h-full min-w-0 flex-1 bg-transparent font-mono text-[12px] outline-none placeholder:text-faint"
                     autoComplete="off"
                     spellCheck={false}
@@ -300,15 +352,15 @@ function FixerMenu({ repo }: { repo: RepoView }) {
                   <button className={`h-6 shrink-0 rounded px-2 text-[12px] font-medium text-bg transition-colors bg-fg hover:bg-fg/85 ${focus}`}>Save</button>
                 </form>
               ) : (
-                <button type="button" className={menuRow} onClick={() => setTyping(true)} title="Any Claude model, by its full ID">
+                <button type="button" className={menuRow} onClick={() => setTyping(true)} title="A full model ID">
                   <span className={`flex-1 truncate ${custom ? "font-mono text-[12px]" : "text-dim"}`}>{custom ? fixer.model : "Other model ID…"}</span>
                   {tick(custom, "model")}
                 </button>
-              )}
+              ))}
             </div>
             <div role="radiogroup" aria-label="Effort" className="border-l border-edge p-1.5">
               <p className="px-2 pb-1 pt-1 text-[12px] font-medium text-faint">Effort</p>
-              {EFFORTS.map((effort) => (
+              {effortsFor(fixer.model).map((effort) => (
                 <button
                   key={effort}
                   type="button"
@@ -335,7 +387,7 @@ function FixerMenu({ repo }: { repo: RepoView }) {
               <span className="min-w-0 flex-1">
                 <span className="block text-[13px] max-md:text-[15px]">Fix automatically</span>
                 <span className="mt-0.5 block text-[12px] text-faint max-md:text-[13px]">
-                  When Kane sees a scenario fail, Claude starts a fix right away. Not on drafts, or when the test may be wrong.
+                  When Kane sees a scenario fail, {providerName} starts a fix right away. Not on drafts, or when the test may be wrong.
                 </span>
               </span>
               <span className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors ${fixer.auto ? "bg-work" : "bg-edge"}`}>
@@ -351,13 +403,15 @@ function FixerMenu({ repo }: { repo: RepoView }) {
   );
 }
 
-const SECRETS = ["LT_USERNAME", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN"];
+const SECRETS = ["LT_USERNAME", "LT_ACCESS_KEY"];
 
 function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange: () => void }) {
   const [busy, setBusy] = useState<string>();
   const [note, setNote] = useState<ReactNode>();
-  const keysMissing = SECRETS.some((s) => !repo.secrets.includes(s));
-  const haveKeys = !!me.testmu && me.claude;
+  const provider = providerOf(repo.fixer?.model ?? "");
+  const secret = provider === "codex" ? "CODEX_API_KEY" : "CLAUDE_CODE_OAUTH_TOKEN";
+  const keysMissing = [...SECRETS, secret].some((s) => !repo.secrets.includes(s));
+  const haveKeys = !!me.testmu && (provider === "codex" ? me.codex : me.claude);
   const readOnly = repo.access === "read";
 
   const [paused, setPaused] = useState(repo.paused);

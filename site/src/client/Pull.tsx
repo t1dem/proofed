@@ -1,9 +1,9 @@
 import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeftRight, Maximize, Minimize, Pause, Play, RotateCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
-import { modelLabel } from "../worker/models";
+import { modelLabel, providerLabel, providerOf } from "../worker/models";
 import { NOTHING_CHECKED } from "../../../src/runfile";
 import type { PullDetail, PullView, Run, RunScenario } from "../worker/runs";
-import { ago, movingName, titleName, useLoad, type Ask, type Route, type useAsk } from "./lib";
+import { ago, fixerName, movingName, titleName, useLoad, type Ask, type Route, type useAsk } from "./lib";
 import { LiveRun } from "./Live";
 import { Backdrop, bone, focus, iconButton, kindOf, Link, link, Mark, marks, MobileBar, NEEDS_WRITE, outline, PageTitle, panel, popover, useSheetDrag, plain, Segmented, sha7, soft, solid, useDismiss } from "./ui";
 
@@ -274,7 +274,7 @@ function Steps({ steps, current, onSeek }: { steps: Step[]; current: number; onS
 
 function runLabel(run: Run) {
   const count = (outcome: RunScenario["outcome"]) => run.scenarios.filter((s) => s.outcome === outcome).length;
-  if (run.fix?.status === "fixed") return "fixed by Claude";
+  if (run.fix?.status === "fixed") return `fixed by ${providerLabel(providerOf(run.fix.model))}`;
   if (count("failed") > 0) return `${count("failed")} of ${run.scenarios.length} broke`;
   if (count("error") > 0) return "couldn't finish";
   const unsure = run.scenarios.filter((s) => s.outcome === "unsure");
@@ -479,7 +479,7 @@ function ScenarioView({ now, before, fix, tabs }: { now: Seen; before: Seen | un
               )}
               {fix && (
                 <div>
-                  <Label>What Claude changed</Label>
+                  <Label>What {providerLabel(providerOf(fix.model))} changed</Label>
                   {fix.summary && <p>{fix.summary}</p>}
                   {fix.files && fix.files.length > 0 && (
                     <ul className="mt-3 overflow-hidden rounded-lg border border-edge">
@@ -672,7 +672,7 @@ export function Pull({ repo, pr, scenario, listed, go, asked, ask }: PullProps) 
               {typeof state === "object" && <span className="text-[13px] text-bad">{state.error}</span>}
               {fixable && (
                 <button type="button" className={solid} {...locked} onClick={() => ask(pull, "fix")}>
-                  Fix with Claude
+                  Fix with {fixerName(pull)}
                 </button>
               )}
               {canRerun && (
@@ -736,7 +736,7 @@ export function Pull({ repo, pr, scenario, listed, go, asked, ask }: PullProps) 
           <div className="flex gap-2">
             {fixable && (
               <button type="button" className={`${solid} h-11 flex-1 text-[15px]`} {...locked} onClick={() => ask(pull, "fix")}>
-                Fix with Claude
+                Fix with {fixerName(pull)}
               </button>
             )}
             {canRerun && (

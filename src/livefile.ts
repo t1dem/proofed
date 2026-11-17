@@ -19,7 +19,7 @@ export type LiveFix = {
   doing: LiveDoing;
   model: string;
   effort: string;
-  // Attempts that didn't work: what Claude changed, and why it wasn't enough.
+  // Attempts that didn't work: what the fixer changed, and why it wasn't enough.
   tries: { summary: string; result: string }[];
 };
 
@@ -115,7 +115,7 @@ export type LiveSummary = {
   // The scenario Kane is on, and its latest step.
   scenario?: string;
   step?: string;
-  fix?: Pick<LiveFix, "attempt" | "of" | "doing">;
+  fix?: Pick<LiveFix, "attempt" | "of" | "doing"> & { model?: string };
 };
 
 export function summarize(live: Live): LiveSummary {
@@ -127,6 +127,6 @@ export function summarize(live: Live): LiveSummary {
     done: live.scenarios.filter((s) => s.status !== "waiting" && s.status !== "running").length,
     ...(on && { scenario: on.name }),
     ...(step && { step }),
-    ...(live.fix && { fix: { attempt: live.fix.attempt, of: live.fix.of, doing: live.fix.doing } }),
+    ...(live.fix && { fix: { attempt: live.fix.attempt, of: live.fix.of, doing: live.fix.doing, model: live.fix.model } }),
   };
 }

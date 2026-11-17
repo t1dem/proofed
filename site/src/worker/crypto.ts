@@ -1,4 +1,4 @@
-// Everything sensitive at rest (GitHub tokens, TestMu key, Claude token) is AES-GCM encrypted
+// Everything sensitive at rest (GitHub tokens, TestMu key, Claude token, Codex key) is AES-GCM encrypted
 // with SECRETS_KEY, so a D1 dump alone reveals nothing usable.
 import nacl from "tweetnacl";
 import { blake2b } from "@noble/hashes/blake2.js";

@@ -45,7 +45,7 @@ const dotSays: Partial<Record<Kind, string>> = {
   error: "Kane couldn't finish a run",
   unsure: "a scenario wasn't confirmed",
   running: "Kane is checking",
-  fixing: "Claude is fixing",
+  fixing: "Fix in progress",
   passed: "everything passes",
 };
 
@@ -97,7 +97,7 @@ const KEYS = [
   ["J", "Next"],
   ["K", "Previous"],
   ["↵", "Open"],
-  ["F", "Fix with Claude"],
+  ["F", "Fix"],
   ["R", "Run again"],
   ["/", "Filter"],
   ["⌘K", "Go to…"],

@@ -1,3 +1,2 @@
-// The catalog lives with the action (src/models.ts at the repo root), so the dashboard offers
-// exactly what the fixer understands.
-export { DEFAULT_FIXER, EFFORTS, isEffort, isModelId, modelLabel, MODELS, type Fixer } from "../../../src/models";
+// The action and dashboard share the model catalog and validation.
+export { DEFAULT_FIXER, EFFORTS, effortsFor, defaultModel, isEffort, isModelId, isProvider, modelLabel, MODELS, PROVIDERS, providerLabel, providerOf, resolveFixer, type Fixer, type Provider } from "../../../src/models";
