@@ -1,14 +1,14 @@
 // The PR check. Runs when a PR is opened or updated, and when someone comments /proofed on one.
 // Picks the scenarios the diff touches, adds what the PR description asks to have checked, runs
-// each in Chrome with Kane, publishes the clips and reports on the PR.
+// each on its target with Kane, publishes the clips and reports on the PR.
+import { checkSelection } from "./checkselection.ts";
+import { checkedWhere, targetScenarios } from "./fixtarget.ts";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { acknowledge, findReport, getPullRequest, reply, setStatus, type PullRequest } from "./github.ts";
 import { live } from "./live.ts";
-import { baseRev, changedFiles, ctx, env, pickScenarios, publish, readEvent, runAll } from "./pipeline.ts";
+import { baseRev, ctx, env, publish, readEvent, runAll } from "./pipeline.ts";
 import { readReportData } from "./report.ts";
-import { askedScenario, descriptionRequest, parseCommand, parseFix } from "./requests.ts";
-import type { Scenario } from "./scenarios.ts";
-import { APP_LOGIN, SETUP_BRANCH } from "./setup.ts";
+import { parseCommand, parseFix } from "./requests.ts";
 
 type Event = {
   pull_request: PullRequest;
@@ -42,29 +42,11 @@ const pr = event.pull_request ?? (repo && event.issue?.pull_request ? await getP
 const sha = env("PROOFED_SHA", pr?.head.sha ?? process.env.GITHUB_SHA ?? "local");
 const base = process.env.PROOFED_BASE_SHA || (pr && baseRev(pr.base));
 
-let selected: Scenario[];
-let skipped: string[] = [];
-let asked: Scenario[];
-if (command) {
-  // "/proofed <what to check>": just that.
-  asked = [askedScenario("comment", command)];
-  selected = asked;
-} else {
-  // A PR Proofed opened itself (the setup PR, the site's "Break it yourself") is described by Proofed:
-  // that text says what Proofed does, not what to check in the app.
-  const ownPr = pr?.head.ref === SETUP_BRANCH || pr?.user?.login === APP_LOGIN;
-  const request = ownPr ? undefined : descriptionRequest(pr?.body);
-  asked = request ? [askedScenario("description", request)] : [];
-  const only = process.env.PROOFED_ONLY?.split(",").map((s) => s.trim()).filter(Boolean);
-  const changed = base ? changedFiles(base, sha === "local" ? "HEAD" : sha) : undefined;
-  const picked = pickScenarios({ changed, only, rev: base });
-  selected = [...picked.selected, ...asked];
-  skipped = picked.skipped;
-  console.log(`Changed files: ${changed?.length ?? "n/a"}.`);
-}
+let { selected, skipped, asked } = checkSelection(pr, command, sha, base);
 
+selected = targetScenarios(selected);
 console.log(`Running ${selected.length} scenario(s)${asked.length ? `, including what the ${command ? "comment" : "PR description"} asks` : ""}.`);
-if (repo && pr) await setStatus(repo, sha, "pending", `Kane is checking ${selected.length} scenario(s) in Chrome`, runUrl);
+if (repo && pr) await setStatus(repo, sha, "pending", `Kane is checking ${selected.length} scenario(s) ${checkedWhere(selected)}`, runUrl);
 
 let results, broken;
 live.start({ kind: "check", pr: pr?.number, sha, runUrl });

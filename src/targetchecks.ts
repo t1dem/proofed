@@ -53,7 +53,7 @@ export async function localDevice(target: Extract<Target, { kind: "ios" | "andro
   return matches[0]!;
 }
 
-export async function targetChecks(target: Target, options: { env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; pendingBuild?: boolean; launchPending?: boolean } = {}): Promise<TargetCheck[]> {
+export async function targetChecks(target: Target, options: { env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; arch?: string; pendingBuild?: boolean; launchPending?: boolean } = {}): Promise<TargetCheck[]> {
   const env = options.env ?? process.env;
   const checks: TargetCheck[] = [];
   const add = (name: string, ok: boolean, detail: string, fix: string) => checks.push({ name, status: ok ? "ok" : "fail", detail, fix });
@@ -62,9 +62,12 @@ export async function targetChecks(target: Target, options: { env?: NodeJS.Proce
     if (!target.cdp_endpoint) add("Desktop CDP", false, "No cdp_endpoint", "Set --cdp-endpoint http://127.0.0.1:<port> and --launch, or --reuse for an existing app.");
     else {
       try { const page = await renderer(target.cdp_endpoint); add("Desktop CDP", true, `Experimental Electron renderer: ${page.url}`, "Keep exactly one page renderer."); }
-      catch (e) { checks.push({ name: "Desktop CDP", status: target.launch && options.launchPending ? "ok" : "fail", detail: target.launch && options.launchPending ? `not running, as expected: proofed check launches it (${String(e)})` : String(e), fix: target.launch ? "proofed check will launch the app; doctor never launches it." : "Start the app with remote debugging and exactly one page renderer." }); }
+      catch (e) { checks.push({ name: "Desktop CDP", status: (target.launch || target.app) && options.launchPending ? "ok" : "fail", detail: (target.launch || target.app) && options.launchPending ? `not running, as expected: proofed check launches it (${String(e)})` : String(e), fix: target.launch || target.app ? "proofed check will launch the app; doctor never launches it." : "Start the app with remote debugging and exactly one page renderer." }); }
     }
-    if (!target.launch && !target.reuse) add("Desktop ownership", false, "Existing endpoints require --reuse", "Pass --reuse; Proofed will not close the existing app.");
+    if (!target.launch && !target.app && !target.reuse) add("Desktop ownership", false, "Existing endpoints require --reuse", "Pass --reuse; Proofed will not close the existing app.");
+    if (target.app && !target.launch) {
+      add("Desktop app", existsSync(target.app) || !!options.pendingBuild, target.app, "Build the desktop app, or set launch to its launch command.");
+    }
     return checks;
   }
   const app = target.app;
@@ -78,8 +81,8 @@ export async function targetChecks(target: Target, options: { env?: NodeJS.Proce
     checks.push({ name: "Cloud recording", status: "ok", detail: "screenshots only, no video clip; local execution records MP4", fix: "Use local execution for MP4 recording." });
     return checks;
   }
-  if (target.kind === "ios" && (options.platform ?? process.platform) !== "darwin") {
-    add("iOS host", false, "Local iOS simulators require macOS and Xcode", "Use a Mac for local iOS, or select cloud execution with a device .ipa.");
+  if ((options.platform ?? process.platform) !== "darwin" || (options.arch ?? process.arch) !== "arm64") {
+    add(`${target.kind === "ios" ? "iOS" : "Android"} host`, false, "Kane local Android emulators and iOS simulators require macOS on Apple Silicon (arm64)", "Use an Apple Silicon Mac for local mobile, or select cloud execution with an .apk/.aab (Android) or .ipa (iOS).");
     return checks;
   }
   if (target.kind === "ios") {

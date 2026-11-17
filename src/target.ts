@@ -143,7 +143,7 @@ export function resolveTarget({ flags, env, cwd }: Sources): WebService {
     serve: serve?.setting,
     build: build?.setting,
     install: install?.setting,
-    dir: resolve(cwd, serve?.layer.dir ?? workflow?.inputs["working-directory"] ?? "."),
+    dir: resolve(cwd, env.PROOFED_DIR || serve?.layer.dir || workflow?.inputs["working-directory"] || "."),
   };
 }
 

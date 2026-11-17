@@ -62,7 +62,7 @@ export function cacheKey(s: Scenario, startUrl: string, changed: string[], read:
     const { sources, ...target } = s.resolvedTarget;
     add(JSON.stringify(target));
     add(kaneVersion);
-    if ("app" in target && target.app && !target.app.startsWith("APP")) {
+    if ("app" in target && target.app && !/^APP[\w-]+$/.test(target.app)) {
       const digest = (file: string) => {
         try {
           if (lstatSync(file).isSymbolicLink()) add(readlinkSync(file));
@@ -84,3 +84,7 @@ export function cacheKey(s: Scenario, startUrl: string, changed: string[], read:
 export function historyKey(s: Scenario, version: string) {
   return cacheKey({ ...s, file: "", paths: [], objective: s.id }, "", [], () => undefined, "", version);
 }
+
+// A configured native build must run before we know its artifact. Looking up the old artifact's
+// pass first can skip the rebuild altogether, even when the fixer changed a file outside paths.
+export const canReusePass = (s: Scenario, build?: string) => (s.resolvedTarget?.kind ?? s.target ?? "web") === "web" || !build?.trim();

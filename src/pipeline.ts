@@ -1,4 +1,4 @@
-import { resolveScenarioTarget } from "./target.ts";
+import { checkedWhere, fixRefusal, targetScenarios } from "./fixtarget.ts";
 import { configuredFixer } from "./agent.ts";
 import { fixSetup } from "./fixsetup.ts";
 import { providerOf } from "./models.ts";
@@ -65,13 +65,10 @@ type RunAllOptions = {
   grouped?: boolean;
 };
 
-// Every scenario gets its own Chrome, so they can run side by side; Kane is mostly waiting on its backend.
+// Web scenarios get their own Chrome and run side by side; native and desktop checks run serially.
 // A start page that crashes while loading fails its scenarios without Kane (see precheck.ts).
 export async function runAll(scenarios: Scenario[], outDir: string, concurrency = Number(process.env.PROOFED_CONCURRENCY) || 3, o: RunAllOptions = {}) {
-  const targetFilter = process.env.PROOFED_TARGET;
-  if (targetFilter) scenarios = scenarios.filter((s) => s.resolvedTarget ? s.resolvedTarget.kind === targetFilter : !s.file || (s.target ?? "web") === targetFilter);
-  scenarios = scenarios.map((s) => ({ ...s, resolvedTarget: s.resolvedTarget ?? resolveScenarioTarget(s, {}, process.env, process.cwd()) }));
-  if (process.env.PROOFED_FIX === "true" && scenarios.some((s) => s.resolvedTarget!.kind !== "web")) throw new Error("fix is only supported for web: the fixer restarts an HTTP server. Set fix: false.");
+  scenarios = targetScenarios(scenarios);
   const baseUrl = o.baseUrl ?? process.env.PROOFED_URL ?? "";
   const web = scenarios.filter((s) => s.resolvedTarget!.kind === "web");
   if (web.length && !baseUrl) throw new Error("Missing PROOFED_URL for web scenarios");
@@ -220,9 +217,10 @@ export async function publish(input: PublishInput) {
 
   const repoUrl = repo && `https://github.com/${repo.owner}/${repo.name}`;
   const fixer = configuredFixer();
+  const refusal = process.env.PROOFED_FIX === "false" ? undefined : fixRefusal(results.map((r) => r.scenario), process.env.PROOFED_BUILD);
   const body = buildReport({
     sha, results, skipped, clips, runUrl, fixEnabled: process.env.PROOFED_FIX !== "false", fixer, fix, asked, previous, repoUrl, runKey, written,
-    fixSetup: fixSetup(providerOf(fixer.model)),
+    fixSetup: refusal ? { note: refusal, comment: false } : fixSetup(providerOf(fixer.model)),
   });
   writeFileSync(join(outDir, "report.md"), body);
   writeFileSync(join(outDir, "results.json"), JSON.stringify(results, null, 2));
@@ -244,8 +242,8 @@ export async function publish(input: PublishInput) {
           ? (["error", `Kane couldn't finish: ${names(broken)}`] as const)
           : passed.length < counted.length
             ? (["success", `${passed.length} passed, ${counted.length - passed.length} not checked`] as const)
-            : (["success", `${counted.length} scenario(s) pass in Chrome`] as const);
-    await setStatus(repo, sha, state, description, comment.html_url);
+            : (["success", `${counted.length} scenario(s) pass ${checkedWhere(results.map((r) => r.scenario))}`] as const);
+    await setStatus(repo, sha, state, failed.length && refusal ? refusal : description, comment.html_url);
   }
   return broken;
 }

@@ -3,7 +3,7 @@ import { readKaneVersion } from "./kaneversion.ts";
 // cached. Reads files and git only; spends nothing.
 import { join } from "node:path";
 import type { Flags } from "./args.ts";
-import { CACHE_FILE, cacheKey, estimate, readCache } from "./cache.ts";
+import { CACHE_FILE, canReusePass, cacheKey, estimate, readCache } from "./cache.ts";
 import { findBase, localChanges, mergeBaseOf } from "./changes.ts";
 import { outDirOf, scenariosDirOf, scenariosMissing, type Io } from "./check.ts";
 import { colorOn, palette, since, textWidth, truncate } from "./render.ts";
@@ -31,14 +31,15 @@ export function list(flags: Flags, io: Io): number {
     const base = findBase(io.cwd, flags.base);
     const changed = base.rev ? localChanges(io.cwd, base.rev) : undefined;
     const baseId = base.rev ? mergeBaseOf(io.cwd, base.rev) : "";
-    const url = resolveTarget({ flags: { url: flags.url }, env: io.env, cwd: io.cwd }).url?.value;
+    const target = resolveTarget({ flags: { url: flags.url, build: flags.build }, env: io.env, cwd: io.cwd });
+    const url = target.url?.value;
     const version = readKaneVersion(findKane(io.env).path ?? "kane-cli", io.env);
     const cache = readCache(join(outDirOf(flags, io), CACHE_FILE));
     const filter = flags.target ?? io.env.PROOFED_TARGET;
     const scenarios = loaded.scenarios.filter((s) => !filter || (s.target ?? "web") === filter).map((s) => {
       s = { ...s, resolvedTarget: resolveScenarioTarget(s, flags, io.env, io.cwd) };
       const hit = cache.passes[s.id];
-      const cached = !!(hit && (s.resolvedTarget!.kind !== "web" || (url && isHttpUrl(url))) && changed && version !== "unknown" && hit.key === cacheKey(s, s.resolvedTarget!.kind === "web" ? new URL(s.url, url!).href : "", changed, undefined, baseId, version));
+      const cached = !!(hit && canReusePass(s, target.build?.value) && (s.resolvedTarget!.kind !== "web" || (url && isHttpUrl(url))) && changed && version !== "unknown" && hit.key === cacheKey(s, s.resolvedTarget!.kind === "web" ? new URL(s.url, url!).href : "", changed, undefined, baseId, version));
       const touched = changed ? affectedBy([s], changed).length > 0 : null;
       const selected = touched !== false && changed?.length !== 0;
       return {

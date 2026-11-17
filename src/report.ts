@@ -1,3 +1,4 @@
+import { checkedAt, checkedWhere } from "./fixtarget.ts";
 import { gitPath } from "./paths.ts";
 import { MARKER, OLD_MARKER } from "./github.ts";
 import { BLANK_PAGE, FAILED_CHECK_ACTION, FAILED_CHECK_REASON, runMarker } from "./runfile.ts";
@@ -20,6 +21,7 @@ export type FailureData = {
   objective: string;
   reason: string;
   diagnosis: string;
+  checkedAt?: string;
   failedCheck?: "scenario_doubted";
   steps: string[];
   clip?: ClipLinks;
@@ -314,6 +316,7 @@ function compose(
   const isRepaired = (r: ScenarioResult) => repaired.some((x) => x.after === r);
   const isWritten = (r: ScenarioResult) => written?.status === "written" && written.kept.some((k) => k.id === r.scenario.id);
 
+  const where = checkedWhere(results.map((r) => r.scenario));
   const headline =
     results.length === 0
       ? "This PR doesn't touch the files of any scenario, so there was nothing to run."
@@ -323,13 +326,13 @@ function compose(
           ? `Kane couldn't finish ${errored.length} of ${results.length} scenarios. Nothing points at the code yet.`
           : unsure.length > 0
             ? passed.length > 0
-              ? `**${passed.length} of ${results.length}** scenarios pass in a real browser; ${unsure.length} ${unsure.length === 1 ? "wasn't" : "weren't"} checked.`
+              ? `**${passed.length} of ${results.length}** scenarios pass ${where}; ${unsure.length} ${unsure.length === 1 ? "wasn't" : "weren't"} checked.`
               : results.length === 1
                 ? "The affected scenario wasn't checked."
                 : `None of the ${results.length} affected scenarios were checked.`
             : results.length === 1
-              ? "The affected scenario passes in a real browser."
-              : `All ${results.length} affected scenarios pass in a real browser.`;
+              ? `The affected scenario passes ${where}.`
+              : `All ${results.length} affected scenarios pass ${where}.`;
 
   const sections: string[] = [`${MARKER}\n### Proofed\n\n${headline}`];
 
@@ -390,7 +393,7 @@ function compose(
     sections.push(
       fixSetup
         ? `> ${fixSetup.note}`
-        : `- [ ] **Fix with ${provider}**: ${provider} gets the failure, the steps and the diff, pushes a fix to this branch, and Proofed checks again.`,
+        : `- [ ] **Fix with ${provider}**: ${provider} gets the failure, the steps and the diff, Kane checks the rebuild, and only a verified fix is pushed to this branch.`,
     );
   }
 
@@ -434,6 +437,7 @@ function compose(
       name: r.scenario.name,
       file: r.scenario.file,
       objective: r.scenario.objective,
+      checkedAt: checkedAt(r.scenario),
       reason: r.end?.reason ?? "",
       diagnosis: r.end?.verdict?.root_cause ?? r.end?.summary ?? "",
       ...(scenarioDoubted(r) && { failedCheck: "scenario_doubted" as const }),

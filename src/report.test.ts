@@ -51,7 +51,7 @@ test("after a fix, the failing report and the passing run make a before/after", 
   });
   assert.match(
     body,
-    /All 2 affected scenarios pass in a real browser\.\n\n\*\*Fixed in \[`9f8e7d6`\]\(https:\/\/github\.com\/o\/r\/commit\/9f8e7d6c5b\)\*\* by Claude Haiku 5\.5, high effort, after 1 attempt\.\n\n\*\*What changed:\*\* `src\/pricing\.ts` \(\+3 −1\)\. Prices are in cents\.\n\n#### ✓ Promo\n\n\| Before · `1111111` \| After · `9f8e7d6` \|/,
+    /All 2 affected scenarios pass in Chrome\.\n\n\*\*Fixed in \[`9f8e7d6`\]\(https:\/\/github\.com\/o\/r\/commit\/9f8e7d6c5b\)\*\* by Claude Haiku 5\.5, high effort, after 1 attempt\.\n\n\*\*What changed:\*\* `src\/pricing\.ts` \(\+3 −1\)\. Prices are in cents\.\n\n#### ✓ Promo\n\n\| Before · `1111111` \| After · `9f8e7d6` \|/,
   );
   assert.match(body, /\n\n#### ✓ Cart\n\n\| Before/);
   // Said once for the whole fix, not under every repaired scenario.
@@ -92,7 +92,7 @@ test("a pass where nothing was checked isn't counted as one", () => {
     end: { type: "run_end", status: "passed", reason: NOTHING_CHECKED },
   };
   const body = buildReport({ sha: "abc1234def", results: [passed, nothing], skipped: [], clips: new Map(), fixEnabled: true });
-  assert.match(body, /\*\*1 of 2\*\* scenarios pass in a real browser; 1 wasn't checked\./);
+  assert.match(body, /\*\*1 of 2\*\* scenarios pass in Chrome; 1 wasn't checked\./);
   assert.match(body, /#### ⚠ Menu opens: not checked\n\n> Kane finished without checking anything on the page\./);
   assert.doesNotMatch(body, /may be wrong|All 2/);
 });
@@ -149,7 +149,7 @@ test("a PR description that asks for nothing is one quiet line, not a scenario",
 test("next to a real pass, a description that asks for nothing isn't counted", () => {
   const four = ["a", "b", "c", "d"].map((id) => ({ ...passed, scenario: { ...passed.scenario, id, name: id.toUpperCase() } }));
   const body = buildReport({ sha: "abc1234def", results: [...four, askedNothing], skipped: [], clips: new Map(), fixEnabled: true, asked: [description] });
-  assert.match(body, /All 4 affected scenarios pass in a real browser\./);
+  assert.match(body, /All 4 affected scenarios pass in Chrome\./);
   assert.match(body, /- ✓ A\n- ✓ B\n- ✓ C\n- ✓ D\n\n/);
   assert.doesNotMatch(body, /What the PR description asks|⚠|of 5/);
   assert.match(body, /didn't name anything Kane could check/);
@@ -223,7 +223,7 @@ test("on the setup PR, the scenarios Claude wrote are listed with their clips, a
       credits: 7,
     },
   });
-  assert.match(body, /^<!-- proofed -->\n### Proofed\n\nAll 2 affected scenarios pass in a real browser\.\n\n\*\*Claude wrote a scenario for this app\*\*, and Proofed added it to this PR in \[`9f8e7d6`\]/);
+  assert.match(body, /^<!-- proofed -->\n### Proofed\n\nAll 2 affected scenarios pass in Chrome\.\n\n\*\*Claude wrote a scenario for this app\*\*, and Proofed added it to this PR in \[`9f8e7d6`\]/);
   assert.match(body, /They are plain Markdown in `\.proofed\/scenarios\/`/);
   assert.match(body, /\*\*✓ Pricing lists three plans\*\* · `pricing-plans\.md`<br>The pricing page lists the three plans\.\n\n<img src="[^"]+\/pricing-plans\.gif"/);
   assert.match(body, /Dropped, since Kane didn't see it pass:\n\n- \*\*Sign up\*\*: The page says &lt;Error>: sign-in needed\./);
@@ -237,7 +237,7 @@ test("on the setup PR, the scenarios Claude wrote are listed with their clips, a
 
 test("on the setup PR, Claude not getting to write scenarios is one line", () => {
   const body = buildReport({ sha: "9f8e7d6c5b", results: [passed], skipped: [], clips: new Map(), fixEnabled: true, written: { status: "failed" } });
-  assert.match(body, /The affected scenario passes in a real browser\.\n\n[^\n]*scenarios couldn't be written this time\.\n\n/);
+  assert.match(body, /The affected scenario passes in Chrome\.\n\n[^\n]*scenarios couldn't be written this time\.\n\n/);
   const none = buildReport({ sha: "9f8e7d6c5b", results: [passed], skipped: [], clips: new Map(), fixEnabled: true, written: { status: "written", kept: [], dropped: [] } });
   assert.match(none, /Claude didn't find a flow it could write a scenario for without guessing, so none were added\./);
 });

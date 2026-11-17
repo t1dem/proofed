@@ -144,15 +144,26 @@ export async function prepareTarget(target: Target, options: { dir: string; url?
       return { kaneArgs: ["--target", "desktop", "--url", options.url!, "--cdp-endpoint", chrome.endpoint], recorder, clipEndpoint: chrome.endpoint, cleanup, metadata: { target } };
     }
     if (target.kind === "desktop") {
-      if (!target.cdp_endpoint || (!target.launch && !target.reuse)) throw new Error("Desktop requires cdp_endpoint and launch, or explicit --reuse");
-      if (target.launch) {
+      if (!target.cdp_endpoint || (!target.launch && !target.app && !target.reuse)) throw new Error("Desktop requires cdp_endpoint and launch or app, or explicit --reuse");
+      if (target.launch || target.app) {
         // Refuse to launch over an endpoint belonging to another process.
         const occupied = await fetch(new URL("/json/version", target.cdp_endpoint), { signal: AbortSignal.timeout(1000) }).then(() => true, () => false);
         if (occupied) throw new Error("CDP endpoint already answers; omit launch and pass --reuse");
         const env = { ...process.env };
         // Electron inherits this from some Node hosts and exits as a Node CLI instead of an app.
         delete env.ELECTRON_RUN_AS_NODE;
-        const app = owned(target.launch, [], target.dir, env, true);
+        let bin = target.launch ?? target.app!;
+        const args: string[] = [];
+        if (!target.launch) {
+          if (bin.endsWith(".app")) {
+            const executable = (await required("/usr/bin/plutil", ["-extract", "CFBundleExecutable", "raw", "-o", "-", join(bin, "Contents/Info.plist")])).trim();
+            if (!executable || basename(executable) !== executable) throw new Error("Desktop .app has no valid CFBundleExecutable");
+            bin = join(bin, "Contents/MacOS", executable);
+          }
+          const endpoint = new URL(target.cdp_endpoint);
+          args.push(`--remote-debugging-port=${endpoint.port || (endpoint.protocol === "https:" ? "443" : "80")}`);
+        }
+        const app = owned(bin, args, target.dir, env, !!target.launch);
         cleanups.push(async () => {
           await app.stop();
           writeFileSync(join(options.dir, "launch.stdout.log"), app.output());
@@ -184,6 +195,8 @@ export async function prepareTarget(target: Target, options: { dir: string; url?
       app = zip;
     }
     const kaneArgs = ["--target", kaneTarget(target), "--app", app, ...(target.device ? ["--device-name", target.device] : []), ...(target.os_version ? ["--os-version", target.os_version] : [])];
+    // Pass the file on every run, never replace it with an APP ID. Kane hashes its bytes before
+    // looking up an upload, so a rebuild at the same path cannot select the old artifact.
     if (target.execution === "cloud") return { kaneArgs, cleanup, metadata: { target, recordingNote: "Cloud run, screenshot-only: no local MP4. Kane's report with the device screenshots is at kaneReport." } };
     const id = await localDevice(target);
     cleanups.push(lockDevice(id));

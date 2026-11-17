@@ -1,9 +1,10 @@
+import { checkFix, checkedWhere, fixRefusal, needsWeb, targetScenarios } from "./fixtarget.ts";
 import { findGitBash, killTree } from "./process.ts";
 // "Fix with Claude": someone ticked the box in the Proofed comment, or commented "/proofed fix [model]".
 // The agent gets the failure, Kane's steps and the PR diff; we rebuild, re-run the broken scenarios
-// in Chrome, and only push a fix that Kane has seen pass. Up to three attempts, each one told why the last one failed.
+// on their targets, and only push a fix that Kane has seen pass. Up to three attempts, each one told why the last one failed.
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { askAgent, configuredFixer } from "./agent.ts";
@@ -18,6 +19,7 @@ import { fixLoop, settled } from "./fixloop.ts";
 import { fixRequested, readReportData, WORKING, type FailureData } from "./report.ts";
 import type { ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
+import { targetChecks } from "./targetchecks.ts";
 import { fileWithSecret } from "./secrets.ts";
 
 type CommentEvent = { action: string; comment: { id: number; body: string }; issue: { number: number; pull_request?: object } };
@@ -45,28 +47,49 @@ const sh = (word: string) => (/^[\w./-]+$/.test(word) ? word : `'${word.replaceA
 // Claude Code allows a compound command only if each part of it is allowed on its own, so it refused
 // `cd site && pnpm build`. Wrapped in a script, any build is one simple command, allowed exactly as is.
 const buildScript = join(process.env.RUNNER_TEMP || tmpdir(), "proofed-build.sh");
-writeFileSync(buildScript, `set -e -o pipefail\ncd ${sh(resolve(appDir).replaceAll("\\", "/"))}\n${env("PROOFED_BUILD")}\n`);
 const buildCommand = `bash ${sh(buildScript.replaceAll("\\", "/"))}`;
 const fixer = configuredFixer();
 const provider = providerLabel(providerOf(fixer.model));
 const agentName = provider === "Codex" ? "Codex" : "Claude Code";
 
 mkdirSync(outDir, { recursive: true });
+if (!existsSync(join(outDir, ".gitignore"))) writeFileSync(join(outDir, ".gitignore"), "*\n");
 const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
 const base = env("PROOFED_BASE_SHA");
 const branch = env("PROOFED_HEAD_REF");
 // Where scenarios come from when the PR's branch has none (opened before Proofed was added).
 const rev = process.env.PROOFED_BASE_REF ? `origin/${process.env.PROOFED_BASE_REF}` : base;
 const asked = data.asked ?? [];
-const scenariosFor = (ids: string[]) => [
+const scenariosFor = (ids: string[]) => targetScenarios([
   ...pickScenarios({ only: ids, rev }).selected,
   ...asked.filter((s) => ids.includes(s.id)),
-];
+]);
 
 const BOX = /- \[[ x]\] \*\*Fix with (?:Claude|Codex)\*\*.*/;
 // Puts a line where the checkbox is, or under the headline when there's none (the fixer gave up last time).
 const withLine = (text: string, line: string) =>
   BOX.test(text) ? text.replace(BOX, line) : text.replace(/(### Proofed\n\n[^\n]*\n)/, `$1\n${line}\n`);
+
+const initial = [...new Map(targetScenarios([...pickScenarios({ changed: changedFiles(base), rev }).selected, ...scenariosFor(data.failures.map((f) => f.id)), ...asked]).map((s) => [s.id, s])).values()];
+const refusal = fixRefusal(initial, process.env.PROOFED_BUILD)
+  ?? (!process.env.PROOFED_BUILD?.trim() ? "Fix didn't run: set PROOFED_BUILD (the action's build input) so Kane can check the rebuild." : undefined)
+  ?? (needsWeb(initial) && (!process.env.PROOFED_URL?.trim() || !process.env.PROOFED_SERVE?.trim()) ? "Fix didn't run: web scenarios need url and serve to check the rebuild." : undefined);
+if (refusal) {
+  console.log(refusal);
+  await restoreReport(refusal, false, refusal);
+  process.exit(1);
+}
+for (const scenario of initial) {
+  const checks = await targetChecks(scenario.resolvedTarget!, { pendingBuild: true, launchPending: true });
+  const failed = checks.filter((c) => c.status === "fail");
+  if (failed.length) {
+    const note = `Fix didn't run: "${scenario.name}" cannot be checked. ${failed.map((c) => `${c.detail}. ${c.fix}`).join(" ")}`;
+    console.log(note);
+    await restoreReport(note, false, note);
+    process.exit(1);
+  }
+}
+writeFileSync(buildScript, `set -e -o pipefail\ncd ${sh(resolve(appDir).replaceAll("\\", "/"))}\n${env("PROOFED_BUILD")}\n`);
 
 if (repo && report) {
   await editComment(repo, report.id, withLine(body, `${WORKING.replace("Claude", provider)} with ${describeFixer(fixer)}. [Follow along](${runUrl})`));
@@ -78,9 +101,10 @@ live.track(scenariosFor(data.failures.map((f) => f.id)));
 
 function prompt(failures: FailureData[], feedback: string) {
   const diff = git("diff", `${base}...HEAD`).slice(0, 40_000);
-  const described = failures.map(describeFailure).join("\n\n");
+  const scenarios = scenariosFor(failures.map((f) => f.id));
+  const described = failures.map((f) => describeFailure(f, scenarios.find((s) => s.id === f.id))).join("\n\n");
 
-  return `${failures.some((f) => f.failedCheck) ? "A scenario's check did not hold on the page. Kane believes the scenario is out of date; that opinion does not establish whether the app change was intended." : "This pull request broke a user flow."} Proofed checked the scenarios below in a real Chrome (with Kane CLI, an AI browser agent) against this branch, and they failed.
+  return `${failures.some((f) => f.failedCheck) ? "A scenario's check did not hold on the page. Kane believes the scenario is out of date; that opinion does not establish whether the app change was intended." : "This pull request broke a user flow."} Proofed checked the scenarios below ${checkedWhere(scenarios)} with Kane CLI against this branch, and they failed.
 
 ${described}
 
@@ -122,7 +146,12 @@ async function restoreReport(note: string, ended = false, status = "Fix didn't r
 
 async function serve() {
   const proc = spawn(env("PROOFED_SERVE"), { shell: true, detached: true, windowsHide: true, stdio: "ignore", cwd: appDir });
-  const stop = () => killTree(proc.pid);
+  const exited = new Promise<void>((resolve) => { proc.once("exit", () => resolve()); proc.once("error", () => resolve()); });
+  const stop = async () => {
+    killTree(proc.pid);
+    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 3000))]);
+    killTree(proc.pid, "SIGKILL");
+  };
   const url = env("PROOFED_URL");
   for (let i = 0; i < 60; i++) {
     try {
@@ -132,7 +161,7 @@ async function serve() {
     }
     await new Promise((r) => setTimeout(r, 500));
   }
-  stop();
+  await stop();
   throw new Error(`App didn't come up at ${url}`);
 }
 
@@ -152,6 +181,15 @@ function discardLeak() {
   return `${agentName}'s change put a credential of this job into ${leaked}. Proofed discarded the change`;
 }
 
+function build() {
+  try {
+    execFileSync(findGitBash(), [buildScript.replaceAll("\\", "/")], { stdio: "pipe", windowsHide: true });
+    return undefined;
+  } catch (e) {
+    return e instanceof Error && "stdout" in e && "stderr" in e ? `${e.stdout}${e.stderr}` : String(e);
+  }
+}
+
 const loop = await fixLoop({
   fixer,
   failures: data.failures,
@@ -164,24 +202,14 @@ const loop = await fixLoop({
   },
   putBack: () => putBack(env("PROOFED_SCENARIOS", ".proofed/scenarios")),
   hasChanges: () => !!git("status", "--porcelain"),
-  build: () => {
-    try {
-      execFileSync(findGitBash(), [buildScript.replaceAll("\\", "/")], { stdio: "pipe", windowsHide: true });
-      return undefined;
-    } catch (e) {
-      return e instanceof Error && "stdout" in e && "stderr" in e ? `${e.stdout}${e.stderr}` : String(e);
-    }
-  },
+  build,
   changedFiles: fixChanges,
-  allScenarios: () => pickScenarios({ rev }).selected,
+  allScenarios: () => targetScenarios(pickScenarios({ rev }).selected),
   scenariosFor,
-  check: async (scenarios, attempt) => {
-    const stop = await serve();
-    try {
-      return await runAll(scenarios, `${outDir}/attempt-${attempt}`);
-    } finally {
-      stop();
-    }
+  check: (scenarios, attempt) => {
+    const refusal = fixRefusal(scenarios, process.env.PROOFED_BUILD);
+    if (refusal) throw new Error(refusal);
+    return checkFix(scenarios, serve, (selected) => runAll(selected, `${outDir}/attempt-${attempt}`));
   },
 });
 const { attempt, summary, tries, feedback } = loop;
@@ -220,44 +248,63 @@ if (loop.status === "gave-up") {
   process.exit(1);
 }
 
-// What `commit -a` is about to commit, for "What changed" in the report.
-const changes = git("diff", "--numstat", "HEAD").split("\n").filter(Boolean).map((line) => {
-  const [added = "", removed = "", file = ""] = line.split("\t");
-  return { file, added: Number(added) || 0, removed: Number(removed) || 0 };
-});
-const names = data.failures.map((f) => f.name).join(", ");
+// Rebuild and check the complete final selection before committing or pushing. Native targets
+// go through prepareTarget again, even when the last attempt passed; no cached pass counts here.
+const picked = pickScenarios({ changed: [...new Set([...changedFiles(base), ...fixChanges()])], rev });
+const final: Scenario[] = targetScenarios([...new Map([...picked.selected, ...scenariosFor(data.failures.map((f) => f.id)), ...asked].map((s) => [s.id, s])).values()]);
+const finalRefusal = fixRefusal(final, process.env.PROOFED_BUILD);
+const buildError = finalRefusal ?? build();
+// Record the files before Kane starts. A check or a commit hook must not add unverified code.
+const treeBeforeCheck = () => fixChanges().map((file) => `${file}\0${existsSync(file) ? git("hash-object", "--", file) : "deleted"}`).join("\0");
+const verifiedFiles = treeBeforeCheck();
+let results: ScenarioResult[] = [];
+try {
+  if (buildError) throw new Error(buildError);
+  live.fix({ doing: "checking" });
+  results = await checkFix(final, serve, (selected) => runAll(selected, `${outDir}/final`));
+} catch (e) {
+  git("checkout", "--", ".");
+  await restoreReport(`The final check couldn't run: ${String(e)}. Nothing was pushed.`, true, "The final check couldn't run; nothing was pushed");
+  process.exit(1);
+}
+const fixedIds = new Set(data.failures.map((f) => f.id));
+const finalFixed = results.filter((r) => fixedIds.has(r.scenario.id));
+const regressed = results.filter((r) => !fixedIds.has(r.scenario.id) && r.outcome === "failed" && !(data.open ?? []).includes(r.scenario.id));
+if (finalFixed.length !== fixedIds.size || !finalFixed.every(settled) || regressed.length) {
+  git("checkout", "--", ".");
+  await restoreReport("Kane couldn't confirm the fix in the final check. Nothing was pushed.", true, "The final check didn't pass; nothing was pushed");
+  process.exit(1);
+}
+if (treeBeforeCheck() !== verifiedFiles) {
+  git("checkout", "--", ".");
+  await restoreReport("The files changed during Kane's final check. Nothing was pushed.", true, "The changed files weren't checked; nothing was pushed");
+  process.exit(1);
+}
 const leak = discardLeak();
 if (leak) {
   console.log(leak);
   await restoreReport(`${leak}; nothing was pushed.`, true, "The fix contained a credential; nothing was pushed");
   process.exit(1);
 }
+// Include new application files Kane checked, as well as tracked edits.
+const files = fixChanges();
+if (files.length) git("add", "--", ...files);
+const changes = git("diff", "--cached", "--numstat").split("\n").filter(Boolean).map((line) => {
+  const [added = "", removed = "", file = ""] = line.split("\t");
+  return { file, added: Number(added) || 0, removed: Number(removed) || 0 };
+});
+const names = data.failures.map((f) => f.name).join(", ");
 live.fix({ doing: "pushing", tries: [...tries] });
-git("-c", `user.name=${provider}`, "-c", `user.email=${provider === "Codex" ? "codex@openai.com" : "noreply@anthropic.com"}`, "commit", "-am",
-  `Fix ${names}\n\n${summary}\n\nWritten by ${agentName} from a Proofed report; Kane re-ran the scenario in Chrome and it passes.\n\nFixed-by: ${fixer.model} (${fixer.effort} effort)`);
+const checkedTree = git("write-tree");
+git("-c", `user.name=${provider}`, "-c", `user.email=${provider === "Codex" ? "codex@openai.com" : "noreply@anthropic.com"}`, "commit", "-m",
+  `Fix ${names}\n\n${summary}\n\nWritten by ${agentName} from a Proofed report; Kane re-ran the scenarios ${checkedWhere(final)} and the fix passes.\n\nFixed-by: ${fixer.model} (${fixer.effort} effort)`);
+if (git("rev-parse", "HEAD^{tree}") !== checkedTree || git("status", "--porcelain")) {
+  await restoreReport("The commit changed after Kane checked it. Nothing was pushed.", true, "The committed tree wasn't checked; nothing was pushed");
+  process.exit(1);
+}
 const asApp = await pushHead(branch);
 const sha = git("rev-parse", "HEAD");
 console.log(`Pushed ${sha} to ${branch}${asApp ? " as the Proofed app" : ""}`);
-
-// The fix passed the scenarios that broke; now everything this PR touches has to pass on the new commit.
-// What the last attempt ran is already known for this tree, unless the commit left something out
-// (a new file git doesn't track yet); only the rest goes to Kane.
-const picked = pickScenarios({ changed: changedFiles(base, sha), rev });
-const final: Scenario[] = [...picked.selected, ...asked];
-const known = new Map(git("status", "--porcelain") ? [] : lastResults.map((r) => [r.scenario.id, r]));
-const missing = final.filter((s) => !known.has(s.id));
-console.log(`Final check: ${final.length - missing.length} result(s) from the last attempt, ${missing.length} to run.`);
-let ran: ScenarioResult[] = [];
-if (missing.length > 0) {
-  live.fix({ doing: "checking" });
-  const stop = await serve();
-  try {
-    ran = await runAll(missing, `${outDir}/final`);
-  } finally {
-    stop();
-  }
-}
-const results = final.map((s) => known.get(s.id) ?? ran.find((r) => r.scenario.id === s.id)!);
 const skipped = picked.skipped;
 const repoUrl = repo && `https://github.com/${repo.owner}/${repo.name}`;
 // The app's push has started a check of this commit, which skips Kane when the report is already

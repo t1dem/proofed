@@ -148,3 +148,24 @@ test("a scenario an earlier attempt fixed is checked again, and breaking it agai
   assert.equal(end.attempt, 3);
   assert.deepEqual(asks.map((x) => x.failures), [["a", "b"], ["b"], ["a"]]);
 });
+
+test("a mixed web and Android fix builds once and sends both targets through runAll", { skip: noChrome }, async (t) => {
+  const { input, set } = await setup(t);
+  set({ shipping: "pass", android: "pass" });
+  const app = join(tmpdir(), `proofed-mixed-${process.pid}.apk`);
+  writeFileSync(app, "old artifact");
+  t.after(() => rmSync(app, { force: true }));
+  process.env.PROOFED_FIX = "true";
+  const mobile = { ...scenario("android", ["src/pricing.js"]), target: "android", execution: "cloud", app };
+  let builds = 0;
+  const end = await fixLoop(input({
+    failures: [failure(shipping), failure(mobile)], open: [shipping.id, mobile.id],
+    ask: () => ({ ok: true, summary: "Fix shared pricing" }),
+    allScenarios: () => [shipping, mobile], scenariosFor: () => [shipping, mobile],
+    build: () => { builds++; writeFileSync(app, "rebuilt artifact"); return undefined; },
+  }));
+  assert.equal(end.status, "fixed");
+  assert.equal(builds, 1);
+  assert.deepEqual(ids(end.results), ["android", "shipping"]);
+  assert.ok(end.results.every((r) => r.outcome === "passed"));
+});

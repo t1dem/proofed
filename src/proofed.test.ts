@@ -611,3 +611,28 @@ describe("proofed list and doctor", () => {
     }
   });
 });
+
+test("a native build bypasses an old cached pass and ignores a web serve setting", async () => {
+  const r = repo({ counter: { mode: "pass" } });
+  try {
+    writeFileSync(join(r.dir, ".proofed/scenarios/counter.md"), "---\nname: Counter\ntarget: android\nexecution: cloud\napp: tmp/app.apk\npaths: [src/**]\n---\nAssert counter is 1. [fake:pass] [delay:1]\n");
+    writeFileSync(join(r.dir, "build.cjs"), "require('node:fs').writeFileSync('tmp/app.apk',require('node:fs').readFileSync('src/app.js'));\n");
+    writeFileSync(join(r.dir, "tmp/app.apk"), "old artifact");
+    // First cache a pass on a supplied artifact, then configure a build at the same path.
+    const first = json(await cli(r, ["check", "--json"]));
+    assert.equal(first.exitCode, 0);
+    assert.equal(runs(r).length, 1);
+    const cached = json(await cli(r, ["check", "--dry-run", "--json"]));
+    assert.equal(cached.scenarios[0]!.cached, true);
+    const flags = ["--build", "node build.cjs", "--serve", "must-not-run-the-web-server"];
+    const planned = json(await cli(r, ["check", "--dry-run", "--json", ...flags]));
+    assert.equal(planned.scenarios[0]!.cached, false);
+    const listed = json<{ scenarios: { cached: boolean }[] }>(await cli(r, ["list", "--json"], { PROOFED_BUILD: "node build.cjs", PROOFED_SERVE: "must-not-run-the-web-server" }));
+    assert.equal(listed.scenarios[0]!.cached, false);
+    const second = json(await cli(r, ["check", "--json", ...flags]));
+    assert.equal(second.exitCode, 0);
+    assert.equal(second.scenarios[0]!.cached, false);
+    assert.equal(runs(r).length, 2);
+    assert.equal(readFileSync(join(r.dir, "tmp/app.apk"), "utf8"), "export const price = 2;\n");
+  } finally { r.cleanup(); }
+});

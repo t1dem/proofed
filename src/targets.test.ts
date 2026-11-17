@@ -73,7 +73,7 @@ test("fake device tools select one booted device; doctor only discovers and reje
     const ios = resolveScenarioTarget({ target: "ios", app: "bad.ipa", device: "iPhone 17", os_version: "26.4" }, {}, {}, dir);
     assert.ok(ios.kind === "ios");
     assert.equal(await localDevice(ios, env), "OWNED");
-    const checks = await targetChecks(ios, { env, platform: "darwin" });
+    const checks = await targetChecks(ios, { env, platform: "darwin", arch: "arm64" });
     assert.ok(checks.some((c) => c.name === "App artifact type" && c.status === "fail"));
     assert.ok(checks.every((c) => c.fix));
     const android = resolveScenarioTarget({ target: "android", device: "Pixel", os_version: "15" }, {}, {}, dir);
@@ -164,4 +164,42 @@ test("quoted executable arguments remain a shell command rather than an outer qu
   const s = parseScenario("desktop.md", `---\ntarget: desktop\nlaunch: ${launch}\n---\nAssert editor text.`);
   assert.equal(s.launch, launch);
   assert.equal(s.url, "");
+});
+
+test("desktop app paths and launch commands relaunch the rebuilt renderer for each check", async (t) => {
+  const { findChrome } = await import("./chrome.ts");
+  const chrome = findChrome();
+  if (!chrome) return t.skip("Chrome not found");
+  const { prepareTarget } = await import("./preparetarget.ts");
+  const dir = temp();
+  // A Node app standing in for Electron. Its one Chromium renderer is real; no Kane run is needed.
+  const app = join(dir, "desktop.cjs");
+  const built = join(dir, "built.txt");
+  const launches = join(dir, "launches.txt");
+  writeFileSync(app, `const fs=require('node:fs'); const {spawn}=require('node:child_process');
+fs.appendFileSync(${JSON.stringify(launches)}, fs.readFileSync(${JSON.stringify(built)},'utf8')+'\\n');
+const child=spawn(${JSON.stringify(chrome)}, ['--headless=new','--no-sandbox','--no-first-run','--no-default-browser-check',${JSON.stringify(`--user-data-dir=${join(dir, "profile")}`)},...process.argv.slice(2),'data:text/html,<h1>Counter</h1>'], {stdio:'ignore'});
+child.on('exit',code=>process.exit(code??0));`);
+  try {
+    const server = createServer();
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const addr = server.address(); assert.ok(addr && typeof addr !== "string");
+    const endpoint = `http://127.0.0.1:${addr.port}`;
+    await new Promise<void>((r) => server.close(() => r()));
+    for (const mode of ["app", "launch"] as const) {
+      for (const phase of ["attempt", "final"]) {
+        writeFileSync(built, `${mode}:${phase}`);
+        const target = resolveScenarioTarget({ target: "desktop", cdp_endpoint: endpoint,
+          ...(mode === "app" ? { app } : { launch: `"${process.execPath}" "${app}" --remote-debugging-port=${addr.port}` }),
+        }, {}, {}, dir);
+        const prepared = await prepareTarget(target, { dir: join(dir, `${mode}-${phase}`) });
+        try {
+          assert.ok((await renderer(endpoint)).url.startsWith("data:text/html"));
+          assert.deepEqual(prepared.kaneArgs, ["--target", "desktop", "--cdp-endpoint", endpoint, "--allow-missing-url"]);
+        } finally { await prepared.cleanup(); }
+        await assert.rejects(renderer(endpoint), /fetch failed/);
+      }
+    }
+    assert.equal(readFileSync(launches, "utf8"), "app:attempt\napp:final\nlaunch:attempt\nlaunch:final\n");
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 3 }); }
 });

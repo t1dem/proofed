@@ -5,7 +5,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Flags } from "./args.ts";
-import { CACHE_FILE, DEFAULT_CREDITS, cacheKey, historyKey, estimate, readCache, writeCache, type CachedPass } from "./cache.ts";
+import { CACHE_FILE, canReusePass, DEFAULT_CREDITS, cacheKey, historyKey, estimate, readCache, writeCache, type CachedPass } from "./cache.ts";
 import { findBase, localChanges, mergeBaseOf, repoRoot } from "./changes.ts";
 import { killChildren, stopChildren } from "./children.ts";
 import { findChrome } from "./chrome.ts";
@@ -239,7 +239,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     }
     const needsWeb = selected.some((s) => s.resolvedTarget!.kind === "web");
     const target = resolveTarget({ flags: { url: flags.url, serve: flags.serve, build: flags.build, install: flags.install }, env: io.env, cwd: io.cwd });
-    const needsHttp = needsWeb || !!target.serve;
+    const needsHttp = needsWeb;
     const url = target.url?.value;
     if (needsHttp && url !== undefined && !isHttpUrl(url)) {
       throw new SetupError("url_invalid", `"${url}" (${target.url!.from}) is not an http(s) URL.`, "Pass a full URL, e.g. --url http://localhost:5173");
@@ -258,7 +258,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
         const key = cacheKey(s, s.resolvedTarget!.kind === "web" ? new URL(s.url, url!).href : "", changed, undefined, baseId, kaneVersion);
         keys.set(s.id, key);
         const hit = cache.passes[s.id];
-        if (hit?.key === key) items.set(s.id, { scenario: s, cached: hit });
+        if (canReusePass(s, target.build?.value) && hit?.key === key) items.set(s.id, { scenario: s, cached: hit });
       }
       if (!items.has(s.id)) items.set(s.id, { scenario: s, estimate: estimate(cache, s, kaneVersion) });
     }
@@ -352,9 +352,9 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
 
     if (!needsHttp && (target.build || target.install)) {
       await buildApp({ build: target.build?.value, install: target.install, cwd: target.dir, logFile: join(out, "build.log"), onPhase: (line) => view.phase(line) });
-      for (const s of toRun) if (keys.has(s.id)) keys.set(s.id, cacheKey(s, "", changed ?? [], undefined, baseId, kaneVersion));
     }
     for (const s of toRun) {
+      if (s.resolvedTarget!.kind !== "web" && keys.has(s.id)) keys.set(s.id, cacheKey(s, "", changed ?? [], undefined, baseId, kaneVersion));
       const checks = await targetChecks(s.resolvedTarget!, { env: io.env, launchPending: true });
       const failed = checks.filter((c) => c.status === "fail");
       if (failed.length) throw new SetupError("target_not_ready", failed.map((c) => `${c.name}: ${c.detail}`).join("\n"), failed.map((c) => c.fix).join("\n"));

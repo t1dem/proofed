@@ -3,6 +3,7 @@
 // attempt's changes touch. One of those others that fails, and wasn't already failing in the report
 // the fix started from, was broken by the fix: the attempt doesn't count, and the next one is told
 // which scenario it broke. A neighbour Kane only couldn't confirm holds nothing back.
+import { checkedWhere } from "./fixtarget.ts";
 import { live } from "./live.ts";
 import { providerLabel, providerOf, type Fixer } from "./models.ts";
 import type { FailureData, FixAttempt } from "./report.ts";
@@ -106,10 +107,19 @@ export async function fixLoop(o: FixLoopInput): Promise<FixLoopEnd> {
     // Every attempt re-runs all the scenarios the report had broken: a later attempt can break one an earlier one fixed.
     const files = o.changedFiles();
     const neighbours = affectedBy(o.allScenarios(), files).filter((s) => !ids.includes(s.id));
-    results = await o.check([...o.scenariosFor(ids), ...neighbours], attempt);
+    try {
+      results = await o.check([...o.scenariosFor(ids), ...neighbours], attempt);
+    } catch (e) {
+      results = [];
+      fixing = [];
+      broke = [];
+      feedback = `The rebuild couldn't be checked: ${String(e)}`;
+      tries.push({ summary, result: feedback });
+      continue;
+    }
     fixing = results.filter((r) => ids.includes(r.scenario.id));
     broke = results.filter((r) => !ids.includes(r.scenario.id) && r.outcome === "failed" && !o.open.includes(r.scenario.id));
-    const fixed = fixing.some((r) => r.outcome === "passed") && fixing.every(settled) && broke.length === 0;
+    const fixed = fixing.length === ids.length && fixing.some((r) => r.outcome === "passed") && fixing.every(settled) && broke.length === 0;
     tries.push({
       summary,
       result: fixed ? "Kane saw it pass." : [...notPassing(fixing), ...broke.map((r) => `It broke "${r.scenario.name}", which passed before.`)].join("; "),
@@ -128,8 +138,8 @@ export async function fixLoop(o: FixLoopInput): Promise<FixLoopEnd> {
     feedback = [
       `Your change was: ${summary}`,
       still.length > 0
-        ? `The scenarios were checked again in Chrome:\n${list(notPassing(fixing))}`
-        : "The scenarios you were fixing pass now in Chrome. Keep that.",
+        ? `The scenarios were checked again ${checkedWhere(fixing.map((r) => r.scenario))}:\n${list(notPassing(fixing))}`
+        : `The scenarios you were fixing pass now ${checkedWhere(fixing.map((r) => r.scenario))}. Keep that.`,
       ...(broke.length > 0 ? [`But your change broke ${broke.length === 1 ? "a scenario" : "scenarios"} that didn't fail before it:\n${list(brokeLines)}\nFind what in your change did that, and fix it without breaking the others again.`] : []),
     ].join("\n");
   }
