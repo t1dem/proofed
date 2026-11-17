@@ -158,11 +158,12 @@ For an agent, add this to the app's `AGENTS.md` or `CLAUDE.md`:
 ```md
 ## Checking UI changes
 
-Use `proofed doctor --json` for setup and fixes. Use `proofed list --json` for affected
-scenarios (`selected`), cache and `estimatedCredits`; neither command spends credits.
-Use `proofed check --dry-run --json` to plan a specific `--only <id>` or text check.
-Run `proofed check --json` to check affected flows, or `proofed check "<what>" --json`.
-Allow at least 10 minutes. stdout is one JSON document; progress is on stderr.
+Run the one command the task needs; `proofed check` checks its own setup first.
+- Check the change: `proofed check --json`. One behavior: `proofed check "<what>" --json`.
+- To plan without spending credits, add `--dry-run`: it shows what would run and `estimatedCredits`.
+- Only to ask which scenarios a change touches and their cost: `proofed list --json`.
+- Only for setup questions: `proofed doctor --json`.
+Allow at least 10 minutes for a check. stdout is one JSON document; progress is on stderr.
 Exit 0: passed or nothing ran. On `failed`, read `reason` and `diagnosis`, fix and run `rerun`.
 `failedCheck: "scenario_doubted"` is Kane's opinion: review the scenario's expectations.
 `not_checked` is not a pass. On `error`, retry `rerun` once. Exit 3: follow `error.fix`.
