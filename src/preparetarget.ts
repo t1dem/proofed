@@ -182,7 +182,7 @@ export async function prepareTarget(target: Target, options: { dir: string; url?
       app = zip;
     }
     const kaneArgs = ["--target", kaneTarget(target), "--app", app, ...(target.device ? ["--device-name", target.device] : []), ...(target.os_version ? ["--os-version", target.os_version] : [])];
-    if (target.execution === "cloud") return { kaneArgs, cleanup, metadata: { target, recordingNote: "Cloud screenshot-only: Kane evidence is in session_dir; no local MP4 is available." } };
+    if (target.execution === "cloud") return { kaneArgs, cleanup, metadata: { target, recordingNote: "Cloud run, screenshot-only: no local MP4. Kane's report with the device screenshots is at kaneReport." } };
     const id = await localDevice(target);
     cleanups.push(lockDevice(id));
     const native = await nativeRecorder(target, options.dir, id);

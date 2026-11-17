@@ -23,6 +23,8 @@ export type StepDoc = { remark: string; failed?: true };
 export type ScenarioDoc = {
   target?: import("./target.ts").Target;
   recordingNote?: string;
+  // Kane's own report of the run on TestMu, when it gave one.
+  kaneReport?: string;
   id: string;
   name: string;
   file?: string;
@@ -129,6 +131,7 @@ export function scenarioDoc(item: Item, ctx: RerunContext): ScenarioDoc {
   return {
     ...head,
     ...(r.recordingNote && { recordingNote: r.recordingNote }),
+    ...(r.end?.test_url && { kaneReport: r.end.test_url }),
     outcome,
     cached: false,
     objective: s.objective,
@@ -190,7 +193,7 @@ export function buildDoc(input: DocInput): Doc {
     ({ summary, next } = input.idle);
   } else if (input.dryRun) {
     const would = of("would_run").length;
-    summary = `Would run ${would} scenario(s) for ${estimatedCredits === null ? "unknown" : `about ${estimatedCredits}`} credits${cached ? `; ${cached} cached pass(es) cost nothing` : ""}`;
+    summary = `Would run ${would} scenario(s) ${estimatedCredits === null ? "at a cost Kane reports only after a first run" : `for about ${estimatedCredits} credits`}${cached ? `; ${cached} cached pass(es) cost nothing` : ""}`;
     next = would ? `Run it for real: ${sameCommand(input.rerun)}` : "Nothing would run.";
   } else if (counts.failed > 0) {
     summary = `${counts.failed} of ${scenarios.length} broke: ${names(of("failed"))}`;

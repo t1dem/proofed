@@ -205,7 +205,7 @@ function planLines(p: Plan, c: Palette) {
   const lines = [
     `${c.bold("Proofed")}${p.dryRun ? " (dry run)" : ""}: ${p.dryRun ? "would check" : "checking"} ${p.run.length} of ${p.total} scenario(s), ${p.selection}${p.url ? `, at ${p.url}` : ""}.`,
   ];
-  if (p.run.length) lines.push(`Estimate: about ${(p.estimate === null ? "unknown" : num(p.estimate))} Kane credits.`);
+  if (p.run.length) lines.push(p.estimate === null ? "Estimate: unknown; Kane reports the cost of this target after its first run." : `Estimate: about ${num(p.estimate)} Kane credits.`);
   if (p.cached.length) lines.push(`Cached passes, 0 credits: ${p.cached.map((s) => s.name).join(", ")}.`);
   return lines;
 }

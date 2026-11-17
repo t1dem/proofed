@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stopping } from "./children.ts";
 import { prepareTarget } from "./preparetarget.ts";
-import { resolveScenarioTarget } from "./target.ts";
+import { resolveScenarioTarget, type Target } from "./target.ts";
 import { makeClip } from "./clip.ts";
 import { live } from "./live.ts";
 import { NOT_SIGNED_IN } from "./kaneauth.ts";
@@ -48,10 +48,24 @@ const INFRA = /Screenshot failed|TimeoutError|TargetClosedError|has been closed|
 
 // What Kane said when it left without a verdict. Kane puts the cause on an "error:" line and its
 // hints after it, so the last lines alone can start in the middle of a hint.
+const NOTICE = /^\s*(?:Skill update available|Update available)\b/i;
+
 export function kaneError(stderr: string) {
-  const lines = stderr.trim().split("\n");
+  const lines = stderr.trim().split("\n").filter((l) => l.trim() && !NOTICE.test(l));
   const cause = lines.findLast((l) => /^\s*(?:error|fatal)\b/i.test(l));
   return cause ? cause.trim().replace(/^(?:error|fatal):\s*/i, "") : lines.slice(-5).join("\n");
+}
+
+// A run cut off by the wall-clock limit. A cloud mobile run that never started a step was still
+// waiting for TestMu to hand over a device, which it does with no error while that model is busy.
+export function cutOffReason(stderr: string, target: Target, stepsStarted: boolean, seconds = 360) {
+  const minutes = Math.round(seconds / 60);
+  if ((target.kind === "ios" || target.kind === "android") && target.execution === "cloud" && !stepsStarted) {
+    const device = [target.device, target.os_version && `${target.kind === "ios" ? "iOS" : "Android"} ${target.os_version}`].filter(Boolean).join(", ") || target.kind;
+    return `TestMu gave Kane no real device (${device}) within ${minutes} minutes; that model may be busy. Pick another from kane-cli devices list --target ${target.kind} --remote.`;
+  }
+  const last = stderr.trim().split("\n").filter((l) => l.trim() && !NOTICE.test(l)).at(-1)?.trim();
+  return `Kane stopped responding and the run was cut off after ${minutes} minutes${last ? `; Kane's last line: ${last}` : ""}`;
 }
 
 // Words of what the run checked last: the quoted expectation of a failed check, or the values
@@ -178,7 +192,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
       const clip = await stopNative()?.catch((e: unknown) => { recordingNote = `Native recording failed: ${String(e)}`; return undefined; });
       const outcome = outcomeOf(kane.end, kane.steps);
       writeFileSync(join(dir, "metadata.json"), JSON.stringify({ ...prepared.metadata, recordingNote }));
-      return { scenario, outcome, steps: kane.steps.map((s) => ({ ...s, ...(prepared.native && { at: Math.max(0, Date.parse(s.ts) / 1000 - prepared.native.started) }) })), end: kane.end, clip, recordingNote, ...(!kane.end && { error: kaneError(kane.stderr) || "Kane exited without run_end", notSignedIn: NOT_SIGNED_IN.test(kane.stderr) }) };
+      return { scenario, outcome, steps: kane.steps.map((s) => ({ ...s, ...(prepared.native && { at: Math.max(0, Date.parse(s.ts) / 1000 - prepared.native.started) }) })), end: kane.end, clip, recordingNote, ...(!kane.end && { error: kane.timedOut ? cutOffReason(kane.stderr, target, kane.steps.length > 0) : kaneError(kane.stderr) || "Kane exited without run_end", notSignedIn: NOT_SIGNED_IN.test(kane.stderr) }) };
     }
     live.scenario(scenario.id, { status: "running", steps: [], startedAt: Date.now() });
     // A still for each click or typing with the cursor on it: the frame from just before it, or a
@@ -222,7 +236,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     const end = kane.end && outcome === "unsure" && kane.end.status === "passed" ? { ...kane.end, reason: NOTHING_CHECKED } : kane.end;
     log(`→ ${outcome}${end?.reason ? `: ${end.reason}` : ""} (${frames.length} frames)`);
     const error = recorder.unexpectedPage ? "Experimental desktop attach failed: Kane opened another page instead of using the chosen renderer" : kane.timedOut
-      ? "Kane stopped responding and the run was cut off"
+      ? cutOffReason(kane.stderr, target, kane.steps.length > 0)
       : (kane.end?.reason ?? (kaneError(kane.stderr) || "Kane exited without run_end"));
     const film = { frames, actions: recorded.actions, focus: focusRect };
     writeFileSync(join(dir, "film.json"), JSON.stringify(film));

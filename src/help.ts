@@ -72,7 +72,7 @@ JSON (also written to <out>/result.json)
   skipped [{id, name, why}], scenarios [{id, name, file, outcome, cached, cachedAt, objective,
   reason, notChecked ("nothing_asserted" | "scenario_doubted"), failedCheck ("scenario_doubted"),
   diagnosis (Kane's opinion), suggestion,
-  failedStep, steps [{remark, failed}], pageError, clip {mp4, jpg}, credits, seconds, rerun}]
+  failedStep, steps [{remark, failed}], pageError, clip {mp4, jpg}, kaneReport, credits, seconds, rerun}]
   failedCheck is only set on failed checks Kane blames on the scenario. suggestion gives the
   conditional next step: if the app change was intended, update the scenario; otherwise fix the app.
   credits is the sum Kane reported, not the balance change; the balance can drop slightly more.

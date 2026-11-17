@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Step } from "./kane.ts";
-import { focusWords, kaneError, kaneObjective, outcomeOf, runScenario } from "./run.ts";
+import { cutOffReason, focusWords, kaneError, kaneObjective, outcomeOf, runScenario } from "./run.ts";
 
 test("a failed check is located by the words of its quoted expectation", () => {
   const words = focusWords({ type: "run_end", status: "failed", reason: "The bag shows “That code doesn’t work,” leaving no discount." });
@@ -35,6 +35,17 @@ test("Kane's error line is the reason, not the hints printed after it", () => {
   ].join("\n");
   assert.equal(kaneError(stderr), 'profile "hackathon" (prod) has no project/folder configured AND no TMS credentials were available to auto-configure one.');
   assert.equal(kaneError("one\ntwo\nthree\nfour\nfive\nsix"), "two\nthree\nfour\nfive\nsix");
+});
+
+test("update notices are not the reason, and a cloud run that never started names the device", () => {
+  assert.equal(kaneError("Update available: 0.10.3 → 0.10.4\n\nKane crashed\n"), "Kane crashed");
+  const ios = { kind: "ios", execution: "cloud", device: "iPhone 15", os_version: "18", sources: {}, dir: "." } as const;
+  assert.equal(
+    cutOffReason("Skill update available: not installed → 0.1.4\nuploading app.ipa…\n", ios, false),
+    "TestMu gave Kane no real device (iPhone 15, iOS 18) within 6 minutes; that model may be busy. Pick another from kane-cli devices list --target ios --remote.",
+  );
+  assert.equal(cutOffReason("Update available: 0.10.4\nstill thinking\n", ios, true), "Kane stopped responding and the run was cut off after 6 minutes; Kane's last line: still thinking");
+  assert.equal(cutOffReason("", { kind: "web", execution: "local", sources: {}, dir: "." }, false), "Kane stopped responding and the run was cut off after 6 minutes");
 });
 
 // Steps and verdicts as Kane reported them on PR #3, after the fix.
