@@ -66,6 +66,7 @@ If you'd rather read than wait, all four changes have already run:
 - A start page that crashes on load fails at once, with the browser's error and a screenshot, at no Kane credits.
 - Kane doesn't record video, so Proofed records Chrome itself. The clip cuts the waiting, shows where Kane clicked and zooms in on what it checks.
 - When Kane blames the test rather than the code, the scenario shows as "not checked", never as a pass.
+- A fix starts when someone ticks **Fix with Claude**, or on its own with [Fix automatically](#fix-automatically) on.
 - Nothing is pushed until Kane has seen a fix pass. The commit's `Fixed-by:` line names the model.
 
 ## Scenarios
@@ -95,6 +96,28 @@ Comment on a PR. Only people with write access can run them.
 | `/proofed fix opus high` | This one fix with another model and effort |
 
 The repo's model is set in the [dashboard](https://proofed.neptunescodm.workers.dev/app). Without it, fixes use Haiku 5.5 at xhigh effort.
+
+## Fix automatically
+
+By default a fix starts only when someone asks for it: ticks **Fix with Claude** or comments `/proofed fix`. With **Fix automatically** on, Claude starts the fix as soon as Kane sees a scenario fail, in the same job as the check.
+
+Either way, one fix gives Claude up to three attempts. After each one Proofed rebuilds the app and Kane re-runs the scenarios that broke; a failed attempt goes back to Claude with what Kane saw, and nothing is pushed until an attempt passes. After the push, Kane runs every scenario the pull request touches on the fix commit. If the fix broke one of those, the report says so and offers **Fix with Claude** again; that second round waits for a person, so one fix never sets off another. When all three attempts fail, nothing is pushed and the report lists what each one tried.
+
+It's off by default and set per repo. Even when it's on, no fix starts:
+
+- on a draft pull request, where someone is still at work;
+- on a push by a bot, Claude's own fix commit included. Pull requests opened by Proofed's own app, as on [Break it yourself](https://proofed.neptunescodm.workers.dev/try), are the exception;
+- when no scenario failed outright: a run Kane marked "not checked" because it blames the test, or one it couldn't finish;
+- without `CLAUDE_CODE_OAUTH_TOKEN` in the repo's secrets, or with `fix: "false"` in the workflow.
+
+In the dashboard, open Settings and click the model button in the repo's row: the switch is at the bottom of its menu. It's stored as the repo's Actions variable `PROOFED_AUTOFIX`, so you can flip it without the site, from a terminal with the [GitHub CLI](https://cli.github.com):
+
+```sh
+gh variable set PROOFED_AUTOFIX --body true --repo owner/repo   # on
+gh variable delete PROOFED_AUTOFIX --repo owner/repo            # off
+```
+
+Or on GitHub: the repo's Settings → Secrets and variables → Actions → Variables. The next check picks it up, with no change to the workflow. The model and effort work the same way, as `PROOFED_MODEL` and `PROOFED_EFFORT`, for example `gh variable set PROOFED_MODEL --body claude-opus-5-5 --repo owner/repo`.
 
 ## Locally and from an AI agent
 
