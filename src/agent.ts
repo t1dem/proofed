@@ -1,14 +1,13 @@
 import { askClaude } from "./claude.ts";
 import { askCodex } from "./codex.ts";
-import { DEFAULT_FIXER, isProvider, providerOf, resolveFixer } from "./models.ts";
+import { DEFAULT_FIXER, providerOf, resolveFixer } from "./models.ts";
 import { maskSecrets } from "./secrets.ts";
 
 export function configuredFixer() {
-  const provider = process.env.PROOFED_PROVIDER;
   const fixer = resolveFixer({
+    provider: process.env.PROOFED_PROVIDER,
     model: process.env.PROOFED_MODEL || process.env.PROOFED_CLAUDE_MODEL,
     effort: process.env.PROOFED_EFFORT || process.env.PROOFED_CLAUDE_EFFORT,
-    ...(provider && isProvider(provider) ? { provider } : {}),
   }, DEFAULT_FIXER);
   if ("error" in fixer) throw new Error(fixer.error);
   return fixer;

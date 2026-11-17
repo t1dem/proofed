@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { SETUP_BRANCH } from "./setup.ts";
 
 const pr = { number: 7, head: { sha: "head", ref: "fork" }, base: { sha: "base", ref: "main" } };
 const report = {
@@ -118,4 +119,68 @@ test("an invalid fixer setting keeps the check and refuses only the fix", () => 
   const tick = run(comment("edited"), "write", false, bad);
   assert.match(tick, /^mode=none$/m);
   assert.match(tick, /"method":"POST".*opus/);
+});
+
+test("an unknown provider keeps checks but disables autofix and scenario writing", () => {
+  const bad = {
+    PROOFED_VARS: JSON.stringify({ PROOFED_PROVIDER: "codx", PROOFED_AUTOFIX: "true" }),
+    PROOFED_CLAUDE: "true", PROOFED_CODEX: "true",
+  };
+  for (const ref of ["fork", SETUP_BRANCH]) {
+    const check = run({ action: "opened", pull_request: { ...pr, head: { ...pr.head, ref } } }, "write", false, bad);
+    assert.match(check, /^mode=check$/m);
+    assert.match(check, /^provider=claude$/m);
+    assert.match(check, /^model=claude-haiku-5-5$/m);
+    assert.match(check, /^effort=xhigh$/m);
+    assert.match(check, /^autofix=false$/m);
+    assert.match(check, /^generate=false$/m);
+    assert.match(check, /^::warning::.*provider.*`codx`.*claude, codex/m);
+    assert.doesNotMatch(check, /Couldn't read/);
+    const dir = mkdtempSync(join(tmpdir(), "proofed-report-"));
+    try {
+      // action.yml passes mode's resolved outputs to cli.ts -> publish -> configuredFixer.
+      const resolved = Object.fromEntries(["provider", "model", "effort"].map((name) =>
+        [`PROOFED_${name.toUpperCase()}`, new RegExp(`^${name}=(.+)$`, "m").exec(check)![1]!]));
+      const script = `
+        import { publish } from ${JSON.stringify(new URL("./pipeline.ts", import.meta.url).href)};
+        await publish({ sha: "head", results: [], skipped: [], outDir: ${JSON.stringify(dir)} });
+      `;
+      const published = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+        encoding: "utf8", env: { ...process.env, ...resolved, GITHUB_STEP_SUMMARY: "" },
+      });
+      assert.equal(published.status, 0, published.stderr);
+      assert.match(readFileSync(join(dir, "report.md"), "utf8"), /### Proofed/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("an unknown provider gets a reply and skips checkbox and command fix requests", () => {
+  const bad = { PROOFED_VARS: JSON.stringify({ PROOFED_PROVIDER: "codx" }) };
+  for (const event of [comment("edited"), comment("created", "/proofed fix")]) {
+    const fix = run(event, "write", false, bad);
+    assert.match(fix, /^mode=none$/m);
+    assert.match(fix, /"method":"POST".*repository's variables is invalid:.*provider.*`codx`.*claude, codex/);
+    assert.doesNotMatch(fix, /^provider=/m);
+  }
+});
+
+test("provider variables accept case and whitespace and infer from the model when empty", () => {
+  for (const provider of [undefined, "", "   ", "Codex", " codex ", " CODEX "]) {
+    for (const model of [undefined, "gpt-6.1-sol"]) {
+      const check = run({ action: "opened", pull_request: pr }, "write", false, {
+        PROOFED_VARS: JSON.stringify({ PROOFED_PROVIDER: provider, PROOFED_MODEL: model }),
+      });
+      assert.match(check, /^mode=check$/m);
+      if (provider?.trim() || model) {
+        assert.match(check, /^provider=codex$/m);
+        assert.match(check, /^model=gpt-6.1-sol$/m);
+      } else {
+        assert.match(check, /^provider=claude$/m);
+        assert.match(check, /^model=claude-haiku-5-5$/m);
+      }
+      assert.doesNotMatch(check, /::warning::/);
+    }
+  }
 });

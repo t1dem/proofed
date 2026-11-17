@@ -4,7 +4,7 @@
 // setup PR's check starts by writing scenarios.
 import { appendFileSync } from "node:fs";
 import { acknowledge, findReport, getPermission, getPullRequest, hasStatus, listFolder, readFile, reply, setStatus, type PullRequest } from "./github.ts";
-import { DEFAULT_FIXER, isProvider, resolveFixer } from "./models.ts";
+import { DEFAULT_FIXER, resolveFixer } from "./models.ts";
 import { ctx, readEvent } from "./pipeline.ts";
 import { alreadyReported, fixRequested, readReportData } from "./report.ts";
 import { parseCommand, parseFix, type FixCommand } from "./requests.ts";
@@ -109,11 +109,10 @@ if (mode === "check" && event.pull_request) {
 
 // Settings saved from the Proofed dashboard arrive as the repo's Actions variables.
 const vars = JSON.parse(process.env.PROOFED_VARS || "{}") as Record<string, string | undefined>;
-const provider = vars.PROOFED_PROVIDER;
 const configured = resolveFixer({
+  provider: vars.PROOFED_PROVIDER,
   model: vars.PROOFED_MODEL,
   effort: vars.PROOFED_EFFORT,
-  ...(provider && isProvider(provider) ? { provider } : {}),
 });
 // A bad fixer setting must not cost the PR its check: only the fixer waits until the setting is corrected.
 const badSetting = "error" in configured ? `The fixer setting in this repository's variables is invalid: ${configured.error}` : undefined;

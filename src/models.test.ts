@@ -42,3 +42,33 @@ test("existing action env still configures Claude, generic model env configures 
     names.forEach((name,i) => { if (before[i] === undefined) delete process.env[name]; else process.env[name] = before[i]; });
   }
 });
+
+test("configuredFixer validates and normalizes the provider environment setting", () => {
+  const names = ["PROOFED_PROVIDER", "PROOFED_MODEL", "PROOFED_EFFORT", "PROOFED_CLAUDE_MODEL", "PROOFED_CLAUDE_EFFORT"];
+  const before = names.map((name) => process.env[name]);
+  try {
+    names.forEach((name) => delete process.env[name]);
+    for (const provider of ["codx", " CODEXX "]) {
+      process.env.PROOFED_PROVIDER = provider;
+      assert.throws(configuredFixer, { message: `The provider \`${provider}\` is invalid. Use claude, codex.` });
+    }
+    for (const provider of ["Claude", " claude ", " CLAUDE "]) {
+      process.env.PROOFED_PROVIDER = provider;
+      assert.deepEqual(configuredFixer(), { provider: "claude", ...DEFAULT_FIXER });
+    }
+    for (const provider of ["Codex", " codex ", " CODEX "]) {
+      process.env.PROOFED_PROVIDER = provider;
+      assert.deepEqual(configuredFixer(), { provider: "codex", model: "gpt-6.1-sol", effort: "xhigh" });
+    }
+    for (const provider of [undefined, "", "   "]) {
+      if (provider === undefined) delete process.env.PROOFED_PROVIDER;
+      else process.env.PROOFED_PROVIDER = provider;
+      delete process.env.PROOFED_MODEL;
+      assert.deepEqual(configuredFixer(), { provider: "claude", ...DEFAULT_FIXER });
+      process.env.PROOFED_MODEL = "gpt-6.1-sol";
+      assert.deepEqual(configuredFixer(), { provider: "codex", model: "gpt-6.1-sol", effort: "xhigh" });
+    }
+  } finally {
+    names.forEach((name, i) => { if (before[i] === undefined) delete process.env[name]; else process.env[name] = before[i]; });
+  }
+});

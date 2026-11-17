@@ -57,10 +57,12 @@ export function parseModel(words: string[]): ModelChoice {
 }
 
 // Resolve once, before installing a CLI. A provider change picks its default model.
-export function resolveFixer(choice: Partial<Fixer> = {}, fallback: Fixer = DEFAULT_FIXER): Fixer | { error: string } {
-  const model = choice.model || (choice.provider && choice.provider !== providerOf(fallback.model) ? defaultModel(choice.provider) : fallback.model);
+export function resolveFixer(choice: Partial<Omit<Fixer, "provider">> & { provider?: string } = {}, fallback: Fixer = DEFAULT_FIXER): Fixer | { error: string } {
+  const selectedProvider = choice.provider?.trim().toLowerCase() || undefined;
+  if (selectedProvider !== undefined && !isProvider(selectedProvider)) return { error: `The provider \`${choice.provider}\` is invalid. Use ${PROVIDERS.join(", ")}.` };
+  const model = choice.model || (selectedProvider && selectedProvider !== providerOf(fallback.model) ? defaultModel(selectedProvider) : fallback.model);
   const provider = providerOf(model);
-  if (!isModelId(model) || (choice.provider && choice.provider !== provider)) return { error: `The model \`${model}\` doesn't belong to the selected provider.` };
+  if (!isModelId(model) || (selectedProvider && selectedProvider !== provider)) return { error: `The model \`${model}\` doesn't belong to the selected provider.` };
   const effort = choice.effort || (effortsFor(model).some((e) => e === fallback.effort) ? fallback.effort : "high");
   if (!effortsFor(model).some((e) => e === effort)) return { error: `The model \`${model}\` doesn't support \`${effort}\` effort. Use ${effortsFor(model).join(", ")}.` };
   return { provider, model, effort };

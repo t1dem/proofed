@@ -70,8 +70,9 @@ runs:
         PROOFED_PROVIDER: ${{ inputs.provider }}
         PROOFED_MODEL: ${{ inputs.model }}
       run: |
+        provider=$(node --input-type=module -e 'const { configuredFixer } = await import(`${process.env.GITHUB_ACTION_PATH}/../src/agent.ts`); console.log(configuredFixer().provider);')
         npm install -g "@testmuai/kane-cli@${{ inputs.kane-version }}" >/dev/null
-        if [ "$PROOFED_PROVIDER" = codex ] || [[ "$PROOFED_MODEL" == gpt-* ]]; then npm install -g @openai/codex@0.169.0 >/dev/null; else npm install -g @anthropic-ai/claude-code >/dev/null; fi
+        if [ "$provider" = codex ]; then npm install -g @openai/codex@0.169.0 >/dev/null; else npm install -g @anthropic-ai/claude-code >/dev/null; fi
         command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null)
         ${{ inputs.install }}
 
