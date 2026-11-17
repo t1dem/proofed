@@ -3,7 +3,7 @@
 // so a "/proofed fix" that can't run gets an answer before anything is installed, and whether the
 // setup PR's check starts by writing scenarios.
 import { appendFileSync } from "node:fs";
-import { acknowledge, findReport, getPullRequest, hasStatus, listFolder, readFile, reply, setStatus, type PullRequest } from "./github.ts";
+import { acknowledge, findReport, getPermission, getPullRequest, hasStatus, listFolder, readFile, reply, setStatus, type PullRequest } from "./github.ts";
 import { DEFAULT_FIXER } from "./models.ts";
 import { ctx, readEvent } from "./pipeline.ts";
 import { alreadyReported, fixRequested, readReportData } from "./report.ts";
@@ -35,6 +35,24 @@ const { repo } = ctx();
 const number = event.pull_request?.number ?? (event.issue?.pull_request ? event.issue.number : undefined);
 if (!repo || !number) skip("Not a pull request, or no GitHub token.");
 
+const requireWriteAccess = async (notify: boolean) => {
+  const login = event.sender?.login;
+  let permission: string | undefined;
+  if (login) {
+    try {
+      permission = await getPermission(repo, login);
+    } catch (e) {
+      console.log(`Couldn't check ${login}'s repository permission: ${e instanceof Error ? e.message : e}`);
+    }
+  } else {
+    console.log("Couldn't check repository permission: the event has no sender login.");
+  }
+  if (permission === "admin" || permission === "write") return;
+  const message = "Only people with write access to this repository can run /proofed.";
+  if (notify) await reply(repo, number, message).catch((e: unknown) => console.log(`Couldn't reply: ${e instanceof Error ? e.message : e}`));
+  skip(`${message} Sender: ${login ?? "unknown"}; permission: ${permission ?? "unknown"}.`);
+};
+
 let mode: "check" | "fix" = "check";
 let asked: Exclude<FixCommand, { error: string }> = {};
 
@@ -42,12 +60,14 @@ if (event.action === "edited" && event.comment) {
   // Someone ticked "Fix with Claude" in Proofed's report.
   const { body, user } = event.comment;
   if (user.type !== "Bot" || !fixRequested(body) || !readReportData(body)) skip("No fix requested.");
+  await requireWriteAccess(false);
   // A tick that raced a newer report: the box was on a report that's no longer the one.
   if ((await findReport(repo, number))?.id !== event.comment.id) skip("A newer report has replaced the one the box was ticked in.");
   mode = "fix";
 } else if (event.comment) {
   const command = parseCommand(event.comment.body);
   if (command === undefined) skip("The comment doesn't ask for /proofed.");
+  await requireWriteAccess(true);
   const fix = parseFix(command);
   if (fix) {
     await acknowledge(repo, event.comment.id).catch(() => {});

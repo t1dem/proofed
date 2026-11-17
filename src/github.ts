@@ -31,6 +31,9 @@ export type PullRequest = {
   user?: { login: string };
 };
 
+export const getPermission = async (repo: Repo, username: string) =>
+  (await api<{ permission: string }>(repo, "GET", `/collaborators/${encodeURIComponent(username)}/permission`)).permission;
+
 export const getPullRequest = (repo: Repo, number: number) => api<PullRequest>(repo, "GET", `/pulls/${number}`);
 
 type Entry = { name: string; type: string; content?: string };
