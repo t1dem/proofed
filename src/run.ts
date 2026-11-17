@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expectedText, textContradiction } from "./textcheck.ts";
+import { assertSnapshots, expectedText, textContradiction } from "./textcheck.ts";
 import { stopping } from "./children.ts";
 import { prepareTarget } from "./preparetarget.ts";
 import { resolveScenarioTarget, type Target } from "./target.ts";
@@ -216,8 +216,8 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     const controller = new AbortController();
     recorder.onUnexpectedPage = () => controller.abort();
     if (recorder.unexpectedPage) controller.abort();
-    let assertedText: Promise<string | undefined> = Promise.resolve(undefined);
-    const literals = target.kind === "web" ? expectedText(scenario.objective) : [];
+    const expected = target.kind === "web" ? expectedText(scenario.objective) : { check: "", literals: [], quoted: false };
+    const asserted = assertSnapshots(expected, () => recorder.visibleText());
     const kane = await runKane({
       signal: controller.signal,
       objective: kaneObjective(scenario.objective),
@@ -226,10 +226,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
       username: o.username,
       accessKey: o.accessKey,
       onStep: (s) => {
-        if (s.status === "running") {
-          assertedText = /^assert:/i.test(s.remark) && literals.length && literals.every((text) => s.remark.toLowerCase().includes(text.toLowerCase()))
-            ? recorder.visibleText() : Promise.resolve(undefined);
-        }
+        asserted.step(s);
         live.step(scenario.id, s);
         o.onEvent?.({ type: "step", id: scenario.id, step: s });
         if (s.status !== "running" && s.remark) log(`${s.status === "failed" ? "✗" : "·"} ${s.remark}`);
@@ -242,7 +239,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     const start = Date.parse(kane.steps[0]?.ts ?? "") / 1000 || 0;
     const recorded = recorder.stop();
     const frames = target.kind === "web" ? recorded.frames.filter((f) => f.time >= start) : recorded.frames;
-    const contradiction = kane.end?.status === "passed" ? textContradiction(literals, await assertedText) : undefined;
+    const contradiction = kane.end?.status === "passed" ? textContradiction(expected, await asserted.text()) : undefined;
     const outcome = recorder.unexpectedPage ? "error" : contradiction ? "unsure" : outcomeOf(kane.end, kane.steps);
     // Kane left without a verdict: all it said goes to the log, where the cause can be read later.
     if (!kane.end) log(`Kane exited with code ${kane.exitCode} and no verdict${kane.timedOut ? " (cut off by Proofed's time limit)" : ""}. Its stderr:\n${kane.stderr.trim() || "(empty)"}`);

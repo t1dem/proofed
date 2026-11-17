@@ -441,6 +441,23 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     } finally { r.cleanup(); }
   });
 
+  test("an unquoted check of on-screen names is not checked when the page lacks them", async () => {
+    const r = repo({});
+    const port = await freePort();
+    try {
+      const scenario = (id: string, check: string) => writeFileSync(join(r.dir, `.proofed/scenarios/${id}.md`), `---\nname: ${id}\npaths: [src/**]\nurl: /\n---\n${check}\n`);
+      scenario("present", "Check that Shop shows Add to bag.");
+      scenario("missing", "Check that Shop shows Ethiopia Guji.");
+      const ran = await cli(r, ["check", "--json", "--no-retry", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`], { FAKE_KANE_MODE: "text" });
+      const doc = json(ran);
+      const by = (id: string) => doc.scenarios.find((s) => s.id === id)!;
+      assert.equal(by("present").outcome, "passed", ran.stderr);
+      assert.equal(by("missing").outcome, "not_checked");
+      assert.equal(by("missing").notChecked, "text_contradicted");
+      assert.match(by("missing").reason!, /no "Ethiopia Guji" when Kane made its final check\. .*unquoted check "Check that Shop shows Ethiopia Guji\."/);
+    } finally { r.cleanup(); }
+  });
+
   test("a failed assert followed by a passing recheck is not checked", async () => {
     const r = repo({ heading: { mode: "flaky", credits: 15 } });
     const port = await freePort();

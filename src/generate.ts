@@ -61,7 +61,7 @@ Write a scenario only if Kane can run it on that server as is, every time:
 - Nothing it does stays behind for the next run: no data created, changed or deleted on a server.
 - Every step names what the user sees: the exact labels of buttons and links, headings, and the texts and numbers a check expects, copied from the code. Copy only text the page shows as is, not variable names, translation keys, or values made at runtime (dates, counts, random ids).
 - A text a check expects goes in double quotes, so Kane knows where it ends: Check that the row says "Paused" again. Without them, Kane reads the words after it as part of the text.
-- It ends with checks of what is on the page. "Check that it works" checks nothing; "Check that the heading reads Pricing and three plans are listed" does.
+- It ends with checks of what is on the page. "Check that it works" checks nothing; 'Check that the heading reads "Pricing" and three plans are listed' does. Proofed compares the quoted text of the last check with the page, so end on one that quotes what the page shows.
 
 A scenario that fails because it was guessed is deleted anyway. If you can't find a flow that meets all of the above, write fewer, or none.
 

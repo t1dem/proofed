@@ -103,6 +103,8 @@ Open the bag, type the promo code welcome10 in lowercase and apply it.
 Check that the discount is −€9.10, shipping is Free and the total is €81.90.
 ```
 
+Put the exact text the page should show in quotes in the last check (`Check that the total is "€81.90".`): Proofed then compares it with the page itself ([Text checks](#text-checks-and-uncertain-passes)).
+
 ## Commands
 
 Comment on a PR. Only people with write access can run them.
@@ -258,20 +260,15 @@ What went wrong in real runs, and what Proofed does about it.
 
 ### Text checks and uncertain passes
 
-For web runs, Proofed cross-checks a final explicit positive text check such as
-`Check that the page contains "Order complete".` against page text captured when
-Kane announces its assert. Text is compared without case or whitespace differences.
-A missing literal changes a passing verdict to `not_checked`, with the missing text
-in the reason. This costs no additional Kane credits.
+For web runs, Proofed compares Kane's pass on the scenario's last check with the page text. It costs no Kane credits.
 
-This is a narrow check. Unquoted names, negative checks, canvas content, images,
-colours and layout remain Kane's decision. An unreadable frame, closed shadow root
-form control, CSS-generated content or other incomplete capture also leaves Kane's verdict unchanged. Open shadow roots
-and readable same-origin frames contribute their text. This does not validate every
-claim Kane makes, or prove that matching text is in the right container.
+- **What is compared.** Text in quotes anywhere in the last check, such as `Check that the total is "€81.90".` Without quotes, only the shape `Check that A contains B.` (or `shows`, `lists`, `includes`), and only for a side that reads like on-screen text: `Check that Vos outils favoris contains Générateur de token.` compares both names, `Check that the favorites section contains Token generator.` compares only `Token generator`.
+- **When.** Proofed reads the page as Kane starts the assert for that check and again as it finishes it. A text counts as missing only when both reads lack it.
+- **What is read.** All visible text in the document, not just the part in view: open shadow roots, same-origin frames, input values and placeholders, the chosen option of a select, image `alt`, `aria-label` and `title`, SVG text and CSS `content`. Case, spaces and quote or dash styles don't matter.
+- **What a contradiction does.** A missing text turns Kane's pass into "not checked", and the reason names the text. Nothing is ever turned into a failure.
+- **What is left to Kane.** Negative checks ("no longer", "not"), other wordings, colours, layout, and whether the text is in the right place. A page with a visible canvas, video, embedded object, cross-origin frame, registered custom element without an open shadow root, or CSS counter can't contradict Kane, since its text may not be readable. Images and icons don't stop the comparison, so a check whose text exists only as pixels in an image can end up "not checked".
 
-If a failed assert is retried because Kane doubts the scenario, two failures stay
-failed. A failure followed by a pass is `not_checked`: both runs' reasons are kept.
+If a failed assert is retried because Kane doubts the scenario, two failures stay failed. A failure followed by a pass is "not checked", and both runs' reasons are kept.
 
 ### Credit figures
 
