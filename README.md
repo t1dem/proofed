@@ -127,14 +127,7 @@ gh variable delete PROOFED_AUTOFIX --repo owner/repo            # off
 
 It needs Node 22.18 or later, Chrome, [Kane CLI](https://www.npmjs.com/package/@testmuai/kane-cli) signed in (`kane-cli login`) and ffmpeg for the clips.
 
-Install it with any of the three:
-
-| | npm | pnpm | bun |
-|---|---|---|---|
-| Install | `npm install -g proofed-cli` | `pnpm add -g proofed-cli` | `bun add -g proofed-cli` |
-| Run without installing | `npx proofed-cli` | `pnpm dlx proofed-cli` | `bunx proofed-cli` |
-| Update | `npm install -g proofed-cli@latest` | `pnpm add -g proofed-cli@latest` | `bun add -g proofed-cli@latest` |
-| Uninstall | `npm uninstall -g proofed-cli` | `pnpm remove -g proofed-cli` | `bun remove -g proofed-cli` |
+Install it with `npm install -g proofed-cli` (or `pnpm add -g`, `bun add -g`), or run it once with `npx proofed-cli`.
 
 The command is `proofed`; `proofed doctor` says what else is missing. On a Node older than 22.18 it stops with an error that says so. The package is built JavaScript with no dependencies and no install scripts. From a clone, `npm link` runs the TypeScript source instead.
 
