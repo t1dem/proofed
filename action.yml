@@ -142,7 +142,7 @@ runs:
 
     # apt-get install ffmpeg took 35-65 s of every run. A static build (ffmpeg 7.0.2 with libx264, from
     # eugeneware/ffmpeg-static) is one 25-30 MB download, checked against its SHA-256 and kept in the cache.
-    # Other runners, or a failed download, get apt-get as before.
+    # Other runners use their system package manager; failed Linux downloads fall back to apt-get.
     - name: Pick an ffmpeg build
       id: ffmpeg
       if: steps.mode.outputs.mode != 'none'
@@ -192,7 +192,11 @@ runs:
           "$FFMPEG_DIR/ffmpeg" -version | sed -n 1p
         else
           if ! command -v ffmpeg >/dev/null; then
-            if [ "$RUNNER_OS" = macOS ]; then brew install ffmpeg; else sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null; fi
+            case "$RUNNER_OS" in
+              macOS) brew install ffmpeg ;;
+              Windows) choco install ffmpeg -y --no-progress ;;
+              *) sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null ;;
+            esac
           fi
         fi
         kane-cli --version
@@ -350,7 +354,12 @@ runs:
         PROOFED_SERVER: ${{ inputs.proofed-url }}
       run: |
         port=$(node -e 'const u = new URL(process.argv[1]); console.log(u.port || (u.protocol === "https:" ? 443 : 80))' "$PROOFED_URL")
-        (fuser -k "$port/tcp" || lsof -ti "tcp:$port" | xargs -r kill) >/dev/null 2>&1 || true
+        if [ "$RUNNER_OS" = Windows ]; then
+          PROOFED_PORT="$port" powershell.exe -NoProfile -NonInteractive -Command \
+            'Get-NetTCPConnection -LocalPort ([int]$env:PROOFED_PORT) -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { & taskkill.exe /PID $_ /T /F }' >/dev/null 2>&1 || true
+        else
+          (fuser -k "$port/tcp" || lsof -ti "tcp:$port" | xargs -r kill) >/dev/null 2>&1 || true
+        fi
         for i in $(seq 1 20); do curl -s -o /dev/null "$PROOFED_URL" || break; sleep 0.5; done
         if [ "$PROOFED_PROVIDER" = codex ]; then npm install -g @openai/codex@0.169.0 >/dev/null; else npm install -g @anthropic-ai/claude-code >/dev/null; fi
         node "$GITHUB_ACTION_PATH/src/fix.ts"
