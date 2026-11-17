@@ -1,0 +1,58 @@
+name: Test CLI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # The repository uses pnpm-lock.yaml; don't create a second lockfile.
+      - run: npm install --ignore-scripts --no-package-lock
+      - name: Install ffmpeg for recording tests
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            case "$RUNNER_OS" in
+              Linux) sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg ;;
+              macOS) brew install ffmpeg ;;
+              Windows) choco install ffmpeg -y --no-progress ;;
+            esac
+          fi
+          ffmpeg -version
+      - name: Require browser test prerequisites
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { findChrome } from './src/chrome.ts';
+          import { findOnPath } from './src/which.ts';
+          assert.ok(findChrome(), 'Chrome must be available; do not skip the browser tests');
+          assert.ok(findOnPath('ffmpeg'), 'ffmpeg must be available for recordings');
+          NODE
+      - run: npm run typecheck
+      # All Kane invocations in the suite use src/testing/fake-kane.ts or a fixture.
+      # No Kane installation, login or paid scenarios are needed.
+      - run: npm test
+      - name: Compile and smoke-test the installed entry
+        run: |
+          npx --no-install tsc -p tsconfig.build.json
+          node dist/proofed.js --version
+          node bin/proofed.cjs --help
