@@ -37,9 +37,10 @@ export async function launchChrome({ headless = true } = {}) {
 }
 
 async function startChrome(headless: boolean) {
+  const bin = chromePath();
   const profile = mkdtempSync(join(tmpdir(), "proofed-chrome-"));
   const proc = spawn(
-    chromePath(),
+    bin,
     [
       "--remote-debugging-port=0",
       `--user-data-dir=${profile}`,
@@ -51,24 +52,30 @@ async function startChrome(headless: boolean) {
       ...(process.env.CI ? ["--no-sandbox"] : []),
       "about:blank",
     ],
-    { stdio: "ignore", windowsHide: true },
+    { stdio: "ignore", detached: process.platform !== "win32", windowsHide: true },
   );
-  let exited: number | null | undefined;
-  const kill = (signal: NodeJS.Signals = "SIGTERM") => { if (process.platform === "win32") killTree(proc.pid, signal); else proc.kill(signal); };
-  const release = adopt({ kill, exited: new Promise((r) => proc.once("exit", r)) });
-  proc.on("exit", (code) => {
-    exited = code;
+  let failure: Error | undefined;
+  const kill = (signal: NodeJS.Signals = "SIGTERM") => killTree(proc.pid, signal);
+  const { promise: exited, resolve: done } = Promise.withResolvers<void>();
+  const release = adopt({ kill, exited });
+  const finished = (error: Error) => {
+    failure = error;
+    // The browser can exit before its renderer and GPU helpers.
+    if (process.platform !== "win32") kill("SIGKILL");
     release();
+    done();
     // A profile is a few megabytes, one per Chrome; a laptop keeps its temp folder.
     try {
       rmSync(profile, { recursive: true, force: true, maxRetries: 2 });
     } catch {
       // A helper still writing into it; the OS cleans the temp folder eventually.
     }
-  });
+  };
+  proc.once("error", finished);
+  proc.once("exit", (code) => finished(new Error(`Chrome exited with code ${code} on start`)));
 
   const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline && exited === undefined) {
+  while (Date.now() < deadline && !failure) {
     const port = existsSync(join(profile, "DevToolsActivePort"))
       ? readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0]?.trim()
       : undefined;
@@ -80,5 +87,5 @@ async function startChrome(headless: boolean) {
     await new Promise((r) => setTimeout(r, 200));
   }
   kill();
-  throw new Error(exited !== undefined ? `Chrome exited with code ${exited} on start` : "Chrome did not open its debugging port");
+  throw failure ?? new Error("Chrome did not open its debugging port");
 }

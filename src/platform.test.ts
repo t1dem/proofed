@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, win32 } from "node:path";
 import { test } from "node:test";
@@ -138,4 +138,54 @@ test("the fixer chooses Git Bash rather than WSL on Windows", () => {
     assert.equal(findGitBash({ ProgramFiles: dir, PATH: "" }, "win32"), bash);
     assert.equal(findGitBash({}, "darwin"), "bash");
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a Chrome spawn error rejects and removes the temporary profiles", () => {
+  const dir = temp();
+  try {
+    const bad = join(dir, "not-a-browser");
+    mkdirSync(bad);
+    const module = new URL("./chrome.ts", import.meta.url).href;
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
+      import { launchChrome } from ${JSON.stringify(module)};
+      await launchChrome().then(
+        () => process.exitCode = 1,
+        (e) => console.log("Chrome start failed:", e.message)
+      );
+    `], { env: { ...process.env, CHROME_PATH: bad, TMPDIR: dir, TEMP: dir, TMP: dir }, encoding: "utf8", timeout: 5000 });
+    assert.equal(child.status, 0, child.stderr);
+    assert.match(child.stdout, /Chrome start failed/);
+    assert.deepEqual(readdirSync(dir), ["not-a-browser"]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("Chrome startup cleans up helpers that outlive the browser", { skip: process.platform === "win32" }, () => {
+  const dir = temp();
+  const pids = join(dir, "helpers");
+  const bin = join(dir, "chrome");
+  const children = () => {
+    try { return readFileSync(pids, "utf8").trim().split("\n").map(Number); } catch { return []; }
+  };
+  try {
+    writeFileSync(bin, `#!/usr/bin/env node
+const { spawn } = require("node:child_process");
+const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+require("node:fs").appendFileSync(${JSON.stringify(pids)}, child.pid + "\\n");
+child.unref();
+`, { mode: 0o755 });
+    const module = new URL("./chrome.ts", import.meta.url).href;
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+      import { launchChrome } from ${JSON.stringify(module)};
+      await launchChrome().catch(() => {});
+    `], { env: { ...process.env, CHROME_PATH: bin, TMPDIR: dir }, encoding: "utf8", timeout: 5000 });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(children().length, 2);
+    for (const pid of children()) {
+      const state = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
+      assert.match(state, /^(?:Z|$)/, `Chrome helper ${pid} is still running`);
+    }
+  } finally {
+    for (const pid of children()) try { process.kill(pid, "SIGKILL"); } catch {}
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

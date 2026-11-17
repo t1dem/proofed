@@ -82,3 +82,13 @@ test("a supplied scenario id is checked before recording deletes any output", as
     }), /unsafe scenario id/);
   }
 });
+
+test("a passing end cannot hide a failed assertion from another step", () => {
+  const assertion = (step: number, status: "done" | "failed") => ({ step, status, remark: "assert: total is correct", ts: "" });
+  assert.equal(outcomeOf(pass, [assertion(1, "done"), assertion(2, "failed")]), "failed");
+  assert.equal(outcomeOf(pass, [assertion(1, "failed"), assertion(1, "done")]), "passed");
+});
+
+test("an interrupted Kane verdict is an error even without an infrastructure message", () => {
+  assert.equal(outcomeOf({ type: "run_end", status: "cancelled" }, []), "error");
+});

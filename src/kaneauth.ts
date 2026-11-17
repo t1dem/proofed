@@ -1,4 +1,5 @@
 import { executableCommand } from "./process.ts";
+import { maskSecrets, secretValues } from "./secrets.ts";
 // Whether Kane can start a run: signed in with `kane-cli login`, or given LT_USERNAME and
 // LT_ACCESS_KEY, which Proofed passes to every run. `proofed check` asks before it builds anything:
 // without a working login every run ends at once, and a retry ends the same way.
@@ -52,8 +53,9 @@ export function kaneLogin(bin: string, env: NodeJS.ProcessEnv, timeout = 20_000)
         return resolve(creds.length ? { state: "keys", detail: "LT_USERNAME and LT_ACCESS_KEY work; Kane uses them", balance: output } : { state: "signed_in", detail: "signed in", balance: output });
       }
       const e = error as NodeJS.ErrnoException & { killed?: boolean };
-      if (e.killed || typeof e.code !== "number") return resolve({ state: "unknown", detail: `kane-cli balance didn't answer${e.killed ? ` within ${timeout / 1000} s` : `: ${e.message}`}` });
-      const said = reasonIn(output);
+      const secrets = secretValues(env);
+      if (e.killed || typeof e.code !== "number") return resolve({ state: "unknown", detail: `kane-cli balance didn't answer${e.killed ? ` within ${timeout / 1000} s` : `: ${maskSecrets(e.message, secrets)}`}` });
+      const said = maskSecrets(reasonIn(output), secrets);
       if (REJECTED.test(output) || NOT_SIGNED_IN.test(output)) {
         return resolve(
           creds.length

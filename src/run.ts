@@ -99,10 +99,20 @@ const checked = (steps: Step[]) => steps.some((s) => s.status === "done" && /^as
 // scenario is what the app was meant to do, so that is a failure. runScenario runs it a second time.
 const refuted = (steps: Step[]) => steps.some((s) => s.status === "failed" && /^assert:/i.test(s.remark));
 
+// A later successful result for the same step supersedes a failed attempt at that step.
+const failedAssert = (steps: Step[]) => steps.findLast((s, i) =>
+  s.status === "failed" && /^assert:/i.test(s.remark) && !steps.slice(i + 1).some((later) => later.step === s.step && later.status === "done"));
+
+function reconciledEnd(end: RunEnd | undefined, steps: Step[]): RunEnd | undefined {
+  const failed = end?.status === "passed" && failedAssert(steps);
+  return failed && end ? { ...end, status: "failed", reason: failed.remark } : end;
+}
+
 export function outcomeOf(end: RunEnd | undefined, steps: Step[]): Outcome {
   if (!end || INFRA.test(end.reason ?? "")) return "error";
   // A vague objective lets Kane open the page, wait, and call that a pass.
-  if (end.status === "passed") return checked(steps) ? "passed" : "unsure";
+  if (end.status === "passed") return failedAssert(steps) ? "failed" : checked(steps) ? "passed" : "unsure";
+  if (end.status !== "failed") return "error";
   return end.verdict?.family === "automation_bug" && !refuted(steps) ? "unsure" : "failed";
 }
 
@@ -197,9 +207,19 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
       const kane = await runKane({ onEnd: () => { void stopNative()?.catch(() => {}); }, objective: kaneObjective(scenario.objective), kaneArgs: prepared.kaneArgs, rawFile: join(dir, "kane.ndjson"), username: o.username, accessKey: o.accessKey, onStep: (step) => o.onEvent?.({ type: "step", id: scenario.id, step }) });
       let recordingNote = prepared.metadata.recordingNote;
       const clip = await stopNative()?.catch((e: unknown) => { recordingNote = `Native recording failed: ${String(e)}`; return undefined; });
-      const outcome = outcomeOf(kane.end, kane.steps);
+      const end = reconciledEnd(kane.end, kane.steps);
+      const outcome = outcomeOf(end, kane.steps);
       writeFileSync(join(dir, "metadata.json"), JSON.stringify({ ...prepared.metadata, recordingNote }));
-      return { scenario, outcome, accountBalance: kane.accountBalance, steps: kane.steps.map((s) => ({ ...s, ...(prepared.native && { at: Math.max(0, Date.parse(s.ts) / 1000 - prepared.native.started) }) })), end: kane.end, clip, recordingNote, ...(!kane.end && { error: kane.timedOut ? cutOffReason(kane.stderr, target, kane.steps.length > 0) : kaneError(kane.stderr) || "Kane exited without run_end", notSignedIn: NOT_SIGNED_IN.test(kane.stderr) }) };
+      const error = kane.timedOut
+        ? cutOffReason(kane.stderr, target, kane.steps.length > 0)
+        : end?.reason || (end ? `Kane ended with status ${end.status}` : kaneError(kane.stderr) || "Kane exited without run_end");
+      return {
+        scenario, outcome, accountBalance: kane.accountBalance,
+        steps: kane.steps.map((s) => ({ ...s, ...(prepared.native && { at: Math.max(0, Date.parse(s.ts) / 1000 - prepared.native.started) }) })),
+        end, clip, recordingNote,
+        ...(outcome === "error" && { error }),
+        ...(!end && { notSignedIn: NOT_SIGNED_IN.test(kane.stderr) }),
+      };
     }
     live.scenario(scenario.id, { status: "running", steps: [], startedAt: Date.now() });
     // A still for each click or typing with the cursor on it: the frame from just before it, or a
@@ -241,16 +261,17 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     const assertedText = await asserted.text();
     const recorded = recorder.stop();
     const frames = target.kind === "web" ? recorded.frames.filter((f) => f.time >= start) : recorded.frames;
-    const contradiction = kane.end?.status === "passed" ? textContradiction(expected, assertedText) : undefined;
-    const outcome = recorder.unexpectedPage ? "error" : contradiction ? "unsure" : outcomeOf(kane.end, kane.steps);
+    const verdict = reconciledEnd(kane.end, kane.steps);
+    const contradiction = verdict?.status === "passed" ? textContradiction(expected, assertedText) : undefined;
+    const outcome = recorder.unexpectedPage ? "error" : contradiction ? "unsure" : outcomeOf(verdict, kane.steps);
     // Kane left without a verdict: all it said goes to the log, where the cause can be read later.
     if (!kane.end) log(`Kane exited with code ${kane.exitCode} and no verdict${kane.timedOut ? " (cut off by Proofed's time limit)" : ""}. Its stderr:\n${kane.stderr.trim() || "(empty)"}`);
     // Kane's reason for such a pass is "Objective completed"; the report, the run file and the fixer show ours.
-    const end = kane.end && outcome === "unsure" && kane.end.status === "passed" ? { ...kane.end, reason: contradiction ?? NOTHING_CHECKED } : kane.end;
+    const end = verdict && outcome === "unsure" && verdict.status === "passed" ? { ...verdict, reason: contradiction ?? NOTHING_CHECKED } : verdict;
     log(`→ ${outcome}${end?.reason ? `: ${end.reason}` : ""} (${frames.length} frames)`);
     const error = recorder.unexpectedPage ? "Experimental desktop attach failed: Kane opened another page instead of using the chosen renderer" : kane.timedOut
       ? cutOffReason(kane.stderr, target, kane.steps.length > 0)
-      : (kane.end?.reason ?? (kaneError(kane.stderr) || "Kane exited without run_end"));
+      : (end?.reason || (end ? `Kane ended with status ${end.status}` : kaneError(kane.stderr) || "Kane exited without run_end"));
     const film = { frames, actions: recorded.actions, focus: focusRect };
     writeFileSync(join(dir, "film.json"), JSON.stringify(film));
     // A step starts when Kane announces it (the "running" event), not when it reports it done.

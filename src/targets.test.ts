@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { cacheKey } from "./cache.ts";
+import { kaneLogin } from "./kaneauth.ts";
 import { runKane } from "./kane.ts";
 import { outcomeOf } from "./run.ts";
 import { parseScenario } from "./scenarios.ts";
@@ -202,4 +203,51 @@ child.on('exit',code=>process.exit(code??0));`);
     }
     assert.equal(readFileSync(launches, "utf8"), "app:attempt\napp:final\nlaunch:attempt\nlaunch:final\n");
   } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 3 }); }
+});
+
+test("Kane credentials are removed from output, hooks, and saved diagnostics", async () => {
+  const dir = temp();
+  const old = process.env.KANE_CLI;
+  const accessKey = "fixture-access-key";
+  const rawFile = join(dir, "raw");
+  try {
+    process.env.KANE_CLI = executable(dir, "echo-kane", `
+      const args = process.argv.slice(2);
+      const key = args[args.indexOf("--access-key") + 1];
+      if (args[0] === "balance") process.exit(1);
+      const step = JSON.stringify({ step: 1, status: "done", remark: "assert: used " + key, ts: "" });
+      process.stdout.write(step.slice(0, step.indexOf(key) + 4));
+      process.stderr.write(key.slice(0, 4));
+      setTimeout(() => {
+        process.stdout.write(step.slice(step.indexOf(key) + 4) + "\\n");
+        console.log(JSON.stringify({ type: "run_end", status: "passed", reason: key }));
+        process.stderr.write(key.slice(4) + "\\n");
+      }, 30);
+    `);
+    const events: unknown[] = [];
+    const result = await runKane({ objective: "assert", kaneArgs: [], rawFile, username: "fixture-user", accessKey, onStep: (step) => events.push(step), onEnd: (end) => events.push(end) });
+    assert.match(result.steps[0]!.remark, /assert: used \*\*\*/);
+    assert.equal(result.end?.reason, "***");
+    assert.equal(result.stderr.trim(), "***");
+    for (const output of [JSON.stringify(events), readFileSync(rawFile, "utf8"), readFileSync(rawFile + ".stderr", "utf8")]) {
+      assert.ok(!output.includes(accessKey));
+    }
+  } finally {
+    if (old === undefined) delete process.env.KANE_CLI;
+    else process.env.KANE_CLI = old;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a rejected Kane balance check masks the key in its diagnostic", async () => {
+  const dir = temp();
+  try {
+    const bin = executable(dir, "kane", `
+      console.error("401 key " + process.argv.at(-1) + " was rejected");
+      process.exitCode = 1;
+    `);
+    const login = await kaneLogin(bin, { ...process.env, LT_USERNAME: "fixture-user", LT_ACCESS_KEY: "fixture-access-key" });
+    assert.equal(login.state, "keys_rejected");
+    assert.match(login.detail, /401 key \*\*\* was rejected/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

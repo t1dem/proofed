@@ -2,8 +2,10 @@ import { executableCommand, killTree } from "./process.ts";
 import { appendFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { setTimeout as delay } from "node:timers/promises";
 import { creditMeter } from "./creditmeter.ts";
 import { adopt } from "./children.ts";
+import { maskSecrets, secretValues } from "./secrets.ts";
 
 export type Step = { step: number; status: "running" | "done" | "failed"; remark: string; ts: string };
 
@@ -58,14 +60,15 @@ const isStep = (e: object): e is Step => "step" in e && "status" in e;
 const isRunEnd = (e: object): e is RunEnd => "type" in e && e.type === "run_end";
 
 export async function runKane(o: KaneOptions): Promise<KaneResult> {
-  const finish = await creditMeter({ ...process.env, ...(o.username && o.accessKey && { LT_USERNAME: o.username, LT_ACCESS_KEY: o.accessKey }) });
+  const env = { ...process.env, ...(o.username && o.accessKey && { LT_USERNAME: o.username, LT_ACCESS_KEY: o.accessKey }) };
+  const finish = await creditMeter(env);
   try {
-    const result = await runUnmetered(o);
+    const result = await runUnmetered(o, secretValues(env));
     return { ...result, accountBalance: await finish() };
   } catch (e) { await finish(); throw e; }
 }
 
-function runUnmetered(o: KaneOptions): Promise<KaneResult> {
+function runUnmetered(o: KaneOptions, secrets: string[]): Promise<KaneResult> {
   const args = [
     "run",
     o.objective,
@@ -87,15 +90,18 @@ function runUnmetered(o: KaneOptions): Promise<KaneResult> {
   const steps: Step[] = [];
   let end: RunEnd | undefined;
   let stderr = "";
-  proc.stderr.on("data", (d) => (stderr += d));
-
-  if (o.rawFile) {
-    proc.stdout.on("data", (data) => appendFileSync(o.rawFile!, data));
-    proc.stderr.on("data", (data) => appendFileSync(`${o.rawFile!}.stderr`, data));
-  }
+  // Read complete lines so a credential split between process chunks is still masked.
+  const errors = createInterface({ input: proc.stderr });
   const lines = createInterface({ input: proc.stdout });
-  const drained = new Promise((r) => lines.once("close", r));
-  lines.on("line", (line) => {
+  const drained = Promise.all([lines, errors].map((stream) => new Promise((r) => stream.once("close", r))));
+  errors.on("line", (line) => {
+    const safe = maskSecrets(line, secrets) + "\n";
+    stderr += safe;
+    if (o.rawFile) appendFileSync(`${o.rawFile}.stderr`, safe);
+  });
+  lines.on("line", (raw) => {
+    const line = maskSecrets(raw, secrets);
+    if (o.rawFile) appendFileSync(o.rawFile, line + "\n");
     let event: unknown;
     try {
       event = JSON.parse(line);
@@ -124,13 +130,13 @@ function runUnmetered(o: KaneOptions): Promise<KaneResult> {
 
   // "exit", not "close": an orphaned grandchild can hold stdout open long after Kane is gone.
   return new Promise((resolve) => {
-    proc.once("error", (error) => { clearTimeout(watchdog); release(); resolve({ steps, end, exitCode: null, stderr: String(error), timedOut }); });
+    proc.once("error", (error) => { clearTimeout(watchdog); release(); resolve({ steps, end, exitCode: null, stderr: maskSecrets(String(error), secrets), timedOut }); });
     proc.on("exit", async (exitCode) => {
       o.signal?.removeEventListener("abort", abort);
       clearTimeout(watchdog);
       clearTimeout(hardKill);
       // Let the last lines (run_end) through, but don't wait on a stream an orphan keeps open.
-      await Promise.race([drained, new Promise((r) => setTimeout(r, 2000))]);
+      await Promise.race([drained, delay(2000, undefined, { ref: false })]);
       killGroup("SIGKILL");
       release();
       resolve({ steps, end, exitCode, stderr, timedOut });

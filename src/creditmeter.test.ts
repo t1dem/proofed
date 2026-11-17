@@ -91,3 +91,17 @@ test("takeover preserves a live contender's credit attribution warning", async (
     assert.equal(existsSync(lock), false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("a replaced credit lock invalidates the old meter and survives its cleanup", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "proofed-meter-"));
+  const lock = join(dir, "lock");
+  const env = { ...process.env, KANE_CLI: fileURLToPath(new URL("./testing/fake-kane.ts", import.meta.url)) };
+  try {
+    const finish = await creditMeter(env, lock);
+    rmSync(lock, { recursive: true });
+    const replacement = await creditMeter(env, lock);
+    assert.equal(await finish(), undefined);
+    assert.equal(existsSync(lock), true);
+    assert.deepEqual(await replacement(), { before: 1234.5, after: 1234.5, debit: 0 });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync, existsSync, readFileSync, readdirSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { kaneLogin } from "./kaneauth.ts";
 
@@ -10,16 +11,17 @@ const alive = (pid: number) => {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; }
 };
-const ownerOf = (lock: string) => {
-  try { return Number(readFileSync(`${lock}/meter`, "utf8").trim()); } catch { return 0; }
+const ownerRecord = (lock: string) => {
+  try { return readFileSync(`${lock}/meter`, "utf8").trim(); } catch { return ""; }
 };
+const ownerOf = (lock: string) => Number(ownerRecord(lock).split(/\s+/, 1)[0]);
 
 // A lock gone mid-run (a /tmp cleaner, a manual delete) makes the snapshot unattributable, not an error.
 const contended = (lock: string) => {
   try { return existsSync(`${lock}/contended`) || readdirSync(lock).some((file) => /^contended-\d+$/.test(file)); } catch { return true; }
 };
 
-function reclaim(lock: string) {
+function reclaim(lock: string, record: string) {
   try {
     const original = statSync(lock);
     const owner = ownerOf(lock);
@@ -44,7 +46,7 @@ function reclaim(lock: string) {
         if (pid && !alive(Number(pid))) rmSync(`${lock}/${file}`, { force: true });
       }
       rmSync(`${lock}/contended`, { force: true });
-      writeFileSync(`${lock}/meter`, String(process.pid));
+      writeFileSync(`${lock}/meter`, record);
       return true;
     } finally {
       try { rmSync(`${guard}/${process.pid}`, { force: true }); rmdirSync(guard); } catch {}
@@ -53,15 +55,16 @@ function reclaim(lock: string) {
 }
 
 export async function creditMeter(env: NodeJS.ProcessEnv, lock = creditLockPath()) {
+  const record = `${process.pid} ${randomUUID()}`;
   let owned = false;
   for (let attempt = 0; attempt < 2 && !owned; attempt++) {
     try {
       mkdirSync(lock);
-      try { writeFileSync(`${lock}/meter`, String(process.pid)); owned = true; }
+      try { writeFileSync(`${lock}/meter`, record); owned = true; }
       catch { rmSync(lock, { recursive: true, force: true }); break; }
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "EEXIST") break;
-      if (attempt === 0) owned = reclaim(lock) === true;
+      if (attempt === 0) owned = reclaim(lock, record) === true;
     }
   }
   if (!owned) {
@@ -75,13 +78,14 @@ export async function creditMeter(env: NodeJS.ProcessEnv, lock = creditLockPath(
   };
   // The CLI has no transaction ledger. A balance delta can include remote account
   // activity, which no local process scan or filesystem lock can rule out.
+  const stillOwned = () => owned && ownerRecord(lock) === record;
   const before = owned ? await balance() : undefined;
   return async () => {
     try {
-      const after = before === undefined ? undefined : await balance();
-      return before !== undefined && after !== undefined && after <= before && !contended(lock)
+      const after = before === undefined || !stillOwned() ? undefined : await balance();
+      return before !== undefined && after !== undefined && after <= before && stillOwned() && !contended(lock)
         ? { before, after, debit: Math.round((before - after) * 10_000) / 10_000 }
         : undefined;
-    } finally { if (owned) rmSync(lock, { recursive: true, force: true }); }
+    } finally { if (stillOwned()) rmSync(lock, { recursive: true, force: true }); }
   };
 }
