@@ -11,6 +11,11 @@ const ownerOf = (lock: string) => {
   try { return Number(readFileSync(`${lock}/meter`, "utf8").trim()); } catch { return 0; }
 };
 
+// A lock gone mid-run (a /tmp cleaner, a manual delete) makes the snapshot unattributable, not an error.
+const contended = (lock: string) => {
+  try { return existsSync(`${lock}/contended`) || readdirSync(lock).some((file) => /^contended-\d+$/.test(file)); } catch { return true; }
+};
+
 function reclaim(lock: string) {
   try {
     const original = statSync(lock);
@@ -71,7 +76,7 @@ export async function creditMeter(env: NodeJS.ProcessEnv, lock = LOCK) {
   return async () => {
     try {
       const after = before === undefined ? undefined : await balance();
-      return before !== undefined && after !== undefined && after <= before && !existsSync(`${lock}/contended`) && !readdirSync(lock).some((file) => /^contended-\d+$/.test(file))
+      return before !== undefined && after !== undefined && after <= before && !contended(lock)
         ? { before, after, debit: Math.round((before - after) * 10_000) / 10_000 }
         : undefined;
     } finally { if (owned) rmSync(lock, { recursive: true, force: true }); }

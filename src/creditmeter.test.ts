@@ -67,6 +67,17 @@ test("live owners and fresh missing pids stay contended; old unreadable pids are
 });
 
 
+test("a lock removed mid-run loses the snapshot instead of failing the run", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "proofed-meter-"));
+  const lock = join(dir, "lock");
+  const env = { ...process.env, KANE_CLI: new URL("./testing/fake-kane.ts", import.meta.url).pathname };
+  try {
+    const finish = await creditMeter(env, lock);
+    rmSync(lock, { recursive: true, force: true });
+    assert.equal(await finish(), undefined);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("takeover preserves a live contender's credit attribution warning", async () => {
   const dir = mkdtempSync(join(tmpdir(), "proofed-meter-"));
   const lock = join(dir, "lock");
