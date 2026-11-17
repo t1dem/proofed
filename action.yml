@@ -300,6 +300,9 @@ runs:
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         PROOFED_SERVER: ${{ inputs.proofed-url }}
+        # Whether each key was passed, so the report offers only a fix this workflow can start.
+        PROOFED_CLAUDE: ${{ inputs.claude-code-oauth-token != '' }}
+        PROOFED_CODEX: ${{ inputs.codex-api-key != '' }}
         # Same cold-Chrome defaults TestMu's own action uses on runners.
         KANE_CLI_CDP_TIMEOUT_MS: "60000"
         KANE_CLI_CDP_RETRIES: "2"

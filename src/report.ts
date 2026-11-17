@@ -5,6 +5,7 @@ import { DEFAULT_FIXER, describeFixer, providerLabel, providerOf, type Fixer, ty
 import { nothingAsked } from "./requests.ts";
 import { creditsOf, scenarioDoubted, unchecked, type ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
+import type { FixSetup } from "./fixsetup.ts";
 
 export type ClipLinks = { gif?: string; mp4?: string; jpg?: string };
 
@@ -268,6 +269,8 @@ type ReportInput = {
   // The folder on proofed-clips that holds this report's clips and run file, for the dashboard.
   runKey?: string;
   written?: Written;
+  // Set when the workflow can't act on the fix box: a note goes where the box would be.
+  fixSetup?: FixSetup;
 };
 
 type Fit = { stepList: boolean; storedSteps: number };
@@ -290,7 +293,7 @@ export function buildReport(input: ReportInput) {
 }
 
 function compose(
-  { sha, results: all, skipped, clips, runUrl, fixEnabled, fixer = DEFAULT_FIXER, fix, asked, previous, repoUrl, runKey, written }: ReportInput,
+  { sha, results: all, skipped, clips, runUrl, fixEnabled, fixer = DEFAULT_FIXER, fix, asked, previous, repoUrl, runKey, written, fixSetup }: ReportInput,
   { stepList: withSteps, storedSteps }: Fit,
 ) {
   const unasked = all.filter(nothingAsked);
@@ -384,7 +387,9 @@ function compose(
   const provider = providerLabel(providerOf(fixer.model));
   if (failed.length > 0 && fixEnabled && fix?.status !== "gave-up") {
     sections.push(
-      `- [ ] **Fix with ${provider}**: ${provider} gets the failure, the steps and the diff, pushes a fix to this branch, and Proofed checks again.`,
+      fixSetup
+        ? `> ${fixSetup.note}`
+        : `- [ ] **Fix with ${provider}**: ${provider} gets the failure, the steps and the diff, pushes a fix to this branch, and Proofed checks again.`,
     );
   }
 
@@ -441,7 +446,7 @@ function compose(
   const footer = [`Run by Kane CLI on ${short(sha)}`, credits > 0 && `${Math.round(credits)} credits`, runUrl && `[logs](${runUrl})`]
     .filter(Boolean)
     .join(" · ");
-  const canFix = failed.length > 0 && fixEnabled;
+  const canFix = failed.length > 0 && fixEnabled && (!fixSetup || fixSetup.comment);
   const hint = canFix
     ? `Comment <code>/proofed</code> to check again or <code>/proofed fix</code> to have ${provider} fix it.`
     : "Comment <code>/proofed</code> to check again.";
