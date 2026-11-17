@@ -34,7 +34,7 @@ export const ctx = () => {
 };
 
 export const changedFiles = (base: string, head = "HEAD") =>
-  execFileSync("git", ["diff", "--name-only", `${base}...${head}`], { encoding: "utf8" }).split("\n").filter(Boolean);
+  execFileSync("git", ["diff", "--name-only", "--no-renames", "-z", `${base}...${head}`], { encoding: "utf8" }).split("\0").filter(Boolean);
 
 // The base branch as the runner sees it (origin/main), so the diff and any scenarios read from it
 // are current even for a PR whose recorded base commit is weeks old. Falls back to that commit.

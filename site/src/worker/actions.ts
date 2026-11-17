@@ -11,9 +11,10 @@
 // - A pull request from a fork runs `pull_request` workflows in the base repository, but GitHub turns
 //   every write permission of such a run into read, `id-token` included, so it can't ask for a token
 //   (unless an admin turned on "Send write tokens to workflows from pull requests").
-// - Anything that already runs inside a job of the repository with `id-token: write` (the app's own
-//   install and build, Claude) can get this token. It's worth what that code can already get from the
-//   job's GITHUB_TOKEN with `contents: write`: push to branches, which branch protection still guards.
+// - Only jobs in this repository's `.github/workflows/proofed.yml` can get this token. Other workflows
+//   with `id-token: write` are refused. Code running inside a Proofed job (install, build, Claude) can
+//   get it. It grants the same branch pushes as the job's GITHUB_TOKEN with `contents: write`,
+//   which branch protection still guards.
 //   What it adds: the push starts workflows, it lasts an hour instead of until the job ends, and it is
 //   attributed to the app. It has no `workflows` permission, so it can't change workflow files, and no
 //   other permission at all (no secrets, issues, pull requests or settings).
@@ -27,13 +28,15 @@ export const AUDIENCE = "proofed";
 // Every refusal looks the same: a caller learns nothing about which check it failed.
 const refuse = () => Response.json({ error: "unauthorized" }, { status: 401 });
 
-// The repository whose Actions job sent this request, from the job's OIDC token; undefined for anyone else.
+// The repository whose Proofed workflow sent this request, from its OIDC token; undefined for anyone else.
 export async function jobRepo(request: Request) {
   const jwt = /^Bearer\s+(\S+)$/i.exec(request.headers.get("authorization") ?? "")?.[1];
   const claims = jwt ? await verifyActionsToken(jwt, { audience: AUDIENCE, key: actionsKey }) : undefined;
   const repo = claims?.repository;
   const repoId = Number(claims?.repository_id);
   if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isSafeInteger(repoId) || repoId <= 0) return undefined;
+  const workflow = `${repo}/.github/workflows/proofed.yml@`;
+  if (typeof claims?.workflow_ref !== "string" || !claims.workflow_ref.startsWith(workflow) || claims.workflow_ref.length === workflow.length) return undefined;
   return { repo, repoId };
 }
 

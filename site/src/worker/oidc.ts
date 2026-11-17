@@ -9,6 +9,7 @@ export type ActionsClaims = {
   nbf?: number;
   repository?: string;
   repository_id?: string;
+  workflow_ref?: string;
   [claim: string]: unknown;
 };
 

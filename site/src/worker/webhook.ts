@@ -14,7 +14,7 @@ type Payload = {
   repositories_added?: Repo[];
   issue?: { number: number; title?: string; state?: string; pull_request?: object };
   pull_request?: { number: number; title?: string; html_url?: string; head?: { sha: string } };
-  comment?: { body: string; html_url: string };
+  comment?: { body: string; html_url: string; user?: { type: string; login: string } };
   repository?: { full_name: string };
 };
 
@@ -71,7 +71,9 @@ export async function handleWebhook(request: Request, env: Env, ctx: ExecutionCo
     );
   }
 
-  if (event === "issue_comment" && payload.issue?.pull_request && payload.comment?.body.includes(MARKER) && payload.repository) {
+  const author = payload.comment?.user;
+  const byProofed = author?.type === "Bot" && (author.login === "github-actions[bot]" || author.login === `${env.GITHUB_APP_SLUG}[bot]`);
+  if (event === "issue_comment" && byProofed && payload.issue?.pull_request && payload.comment?.body.includes(MARKER) && payload.repository) {
     const { state, headline } = readReport(payload.comment.body);
     const repo = payload.repository.full_name;
     // A report can land after the pull request was merged or closed (the run was still going), and
