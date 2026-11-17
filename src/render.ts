@@ -5,6 +5,7 @@
 import { FAILED_CHECK_REASON } from "./runfile.ts";
 import { creditsOf, type RunEvent } from "./run.ts";
 import { outcomeOf, type Doc, type ErrorDoc, type Outcome, type ScenarioDoc } from "./result.ts";
+import type { Scenario } from "./scenarios.ts";
 
 export type Stream = { write(s: string): unknown; columns?: number; rows?: number; isTTY?: boolean };
 
@@ -129,7 +130,7 @@ export function ending(doc: Doc, c: Palette) {
 }
 
 export type Plan = {
-  run: { id: string; name: string }[];
+  run: Pick<Scenario, "id" | "name" | "target" | "resolvedTarget">[];
   cached: { id: string; name: string; cachedAt: string }[];
   total: number;
   // Why these: "changes against origin/main", "--only", "your text", "every scenario (not a git repository)".
@@ -141,9 +142,12 @@ export type Plan = {
 };
 
 // "about 1 to 4 minutes per scenario, 3 at a time, so 2 to 8 minutes in all"
-export function timing(count: number, concurrency: number) {
-  const rounds = Math.ceil(count / Math.max(1, concurrency));
-  return `about 1 to 4 minutes per scenario, ${concurrency} at a time, so ${rounds} to ${rounds * 4} minutes in all`;
+export function timing(run: Plan["run"], concurrency: number) {
+  const web = run.filter((s) => (s.resolvedTarget?.kind ?? s.target ?? "web") === "web").length;
+  const native = run.length - web;
+  const rounds = Math.ceil(web / Math.max(1, concurrency)) + native;
+  const parallel = native ? (web ? `${concurrency} web at a time, other targets 1 at a time` : "1 at a time") : `${concurrency} at a time`;
+  return `about 1 to 4 minutes per scenario, ${parallel}, so ${rounds} to ${rounds * 4} minutes in all`;
 }
 
 type Row = {
@@ -247,7 +251,7 @@ export class PlainView implements View {
   plan(p: Plan) {
     this.board = new Board(p);
     for (const l of planLines(p, this.c)) this.line(l);
-    if (p.run.length && !p.dryRun) this.line(`Time: ${timing(p.run.length, p.concurrency)}. Do not interrupt: let it finish.`);
+    if (p.run.length && !p.dryRun) this.line(`Time: ${timing(p.run, p.concurrency)}. Do not interrupt: let it finish.`);
   }
   info(s: string) {
     this.line(s);
@@ -336,7 +340,7 @@ export class LiveView implements View {
       ...(p.url ? [p.url] : []),
     ];
     this.print(`${c.bold("proofed")}  ${truncate(parts.join(" · "), this.width() - 10)}`);
-    if (p.run.length && !p.dryRun) this.print(c.dim(truncate(timing(p.run.length, p.concurrency), this.width() - 1)));
+    if (p.run.length && !p.dryRun) this.print(c.dim(truncate(timing(p.run, p.concurrency), this.width() - 1)));
   }
   // Also ends a phase: what it printed is its outcome.
   info(s: string) {

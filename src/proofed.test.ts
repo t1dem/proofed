@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
+import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -538,6 +539,19 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
 });
 
 describe("proofed list and doctor", () => {
+  test("doctor checks Chrome for a desktop-only selection without requiring web tools", async () => {
+    const r = repo({ web: { mode: "pass" }, desktop: { mode: "pass" } });
+    try {
+      writeFileSync(join(r.dir, ".proofed/scenarios/desktop.md"), "---\ntarget: desktop\n---\nAssert editor text.\n");
+      const doc = json<{ checks: { name: string; status: string; detail: string }[] }>(await cli(r, ["doctor", "--json", "--target", "desktop"], { CHROME_PATH: FAKE_KANE }));
+      assert.deepEqual(doc.checks.find((c) => c.name === "Chrome"), { name: "Chrome", status: "ok", detail: FAKE_KANE });
+      assert.ok(!doc.checks.some((c) => ["ffmpeg", "App", "App URL"].includes(c.name)));
+      const mobile = json<typeof doc>(await cli(r, ["doctor", "--json", "--target", "android", "--execution", "cloud", "--app", "APP123"]));
+      assert.ok(!mobile.checks.some((c) => c.name === "Chrome"));
+      assert.deepEqual(calls(r).map((c) => c.args?.[0]).sort(), ["--version", "--version", "balance", "balance"]);
+    } finally { r.cleanup(); }
+  });
+
   test("list estimates only selected scenarios without running Kane scenarios", async () => {
     const r = repo({ pricing: { mode: "pass", paths: ["src/app.js"] }, docs: { mode: "pass", paths: ["docs/**"] }, global: { mode: "pass", paths: [] } });
     try {
@@ -634,5 +648,40 @@ test("a native build bypasses an old cached pass and ignores a web serve setting
     assert.equal(second.scenarios[0]!.cached, false);
     assert.equal(runs(r).length, 2);
     assert.equal(readFileSync(join(r.dir, "tmp/app.apk"), "utf8"), "export const price = 2;\n");
+  } finally { r.cleanup(); }
+});
+
+test("mixed web and native checks build once before running, including with --reuse", { skip: noChrome }, async () => {
+  for (const reuse of [true, false]) {
+    const r = repo({ web: { mode: "pass" }, counter: { mode: "pass" } });
+    const server = createHttpServer((_req, res) => res.end("<h1>Shop</h1>"));
+    const port = await freePort();
+    try {
+      if (reuse) await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
+      writeFileSync(join(r.dir, ".proofed/scenarios/counter.md"), "---\ntarget: android\nexecution: cloud\napp: tmp/app.apk\npaths: [src/**]\n---\nAssert counter is 1. [fake:pass] [delay:1]\n");
+      writeFileSync(join(r.dir, "build.cjs"), "const fs = require('node:fs'); fs.appendFileSync('tmp/builds', 'build\\n'); fs.writeFileSync('tmp/app.apk', fs.readFileSync('src/app.js'));\n");
+      const ran = await cli(r, ["check", "--json", "--url", `http://127.0.0.1:${port}`, "--build", "node build.cjs", "--serve", `node server.cjs ${port}`, ...(reuse ? ["--reuse"] : [])]);
+      assert.equal(ran.code, 0, ran.stderr);
+      const doc = json(ran);
+      assert.equal(doc.app, reuse ? "reused" : "started");
+      assert.equal(doc.counts.passed, 2);
+      assert.equal(readFileSync(join(r.dir, "tmp/app.apk"), "utf8"), "export const price = 2;\n");
+      assert.equal(readFileSync(join(r.dir, "tmp/builds"), "utf8"), "build\n");
+      assert.equal(runs(r).length, 2);
+    } finally {
+      if (server.listening) await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      r.cleanup();
+    }
+  }
+});
+
+test("ad hoc native checks use the target selected by CLI flags in Kane's objective", async () => {
+  const r = repo({});
+  try {
+    const ran = await cli(r, ["check", "the counter increments", "--json", "--target", "android", "--execution", "cloud", "--app", "APP123"], { FAKE_KANE_DELAY_MS: "1" });
+    assert.equal(ran.code, 0, ran.stderr);
+    assert.equal(runs(r).length, 1);
+    assert.match(runs(r)[0]!.args![1]!, /check exactly that on an Android device/);
+    assert.doesNotMatch(runs(r)[0]!.args![1]!, /in the browser|the page loading/);
   } finally { r.cleanup(); }
 });

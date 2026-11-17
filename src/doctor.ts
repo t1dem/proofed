@@ -93,10 +93,11 @@ export async function doctorChecks(flags: Flags, io: Io): Promise<DoctorCheck[]>
   for (const target of targets) {
     for (const check of await targetChecks(target, { env: io.env, pendingBuild: !!resolveTarget({ flags, env: io.env, cwd: io.cwd }).build, launchPending: true })) checks.push({ ...check, name: `${target.kind}: ${check.name}` });
   }
+  if (targets.some((t) => ["web", "desktop"].includes(t.kind))) {
+    const chrome = findChrome(io.env);
+    add("Chrome", chrome ? "ok" : "fail", chrome ?? "not found", chrome ? undefined : "Install Google Chrome, or set CHROME_PATH to its binary.");
+  }
   if (!needsWeb) return checks;
-
-  const chrome = findChrome(io.env);
-  add("Chrome", chrome ? "ok" : "fail", chrome ?? "not found", chrome ? undefined : "Install Google Chrome, or set CHROME_PATH to its binary.");
 
   const ffmpeg = findOnPath("ffmpeg", io.env);
   add("ffmpeg", ffmpeg ? "ok" : "warn", ffmpeg ?? "not found: no clips, the verdicts still work", ffmpeg ? undefined : ffmpegInstallHint());

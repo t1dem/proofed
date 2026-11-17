@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { buildDoc } from "./result.ts";
 import { colorOn, ending, LiveView, palette, PlainView, since, stripAnsi, textWidth, truncate, type Plan } from "./render.ts";
 import { ran, refuted } from "./testing/results.ts";
+import { resolveScenarioTarget } from "./target.ts";
 
 const sink = (columns?: number) => {
   let text = "";
@@ -109,6 +110,21 @@ test("the terminal view settles on one line per scenario, then the same ending",
   ]);
   assert.equal(stripAnsi(out.text.slice(shown)).trim(), ending(doc, palette(false)).join("\n").trim());
   for (const line of stripAnsi(out.text).split(/\n|\x1b\[\d+F/)) assert.ok(textWidth(line) < 60, line);
+});
+
+test("both views estimate serial native runs plus parallel web runs", () => {
+  const native = ["android", "ios", "desktop"].map((target) => ({ id: target, name: target, resolvedTarget: resolveScenarioTarget({ target }, {}, {}, process.cwd()) }));
+  for (const View of [PlainView, LiveView]) {
+    for (const mixed of [false, true]) {
+      const out = sink(240);
+      const view = new View(out, { color: false });
+      const web = Array.from({ length: 4 }, (_, i) => ({ id: `web-${i}`, name: "Web" }));
+      view.plan({ ...plan, run: mixed ? [...native, ...web] : native, cached: [], concurrency: 3 });
+      view.close();
+      const text = stripAnsi(out.text);
+      assert.match(text, mixed ? /3 web at a time, other targets 1 at a time, so 5 to 20 minutes/ : /1 at a time, so 3 to 12 minutes/);
+    }
+  }
 });
 
 test("a narrow terminal still gets lines that fit", () => {

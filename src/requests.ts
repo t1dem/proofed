@@ -1,6 +1,8 @@
 import { effortsFor, isEffort, parseModel, type Effort } from "./models.ts";
 import type { ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
+import { checkedAt } from "./fixtarget.ts";
+import { resolveScenarioTarget, type Target } from "./target.ts";
 
 // "/proofed" in a PR comment re-runs the check, which also gives a PR opened before Proofed was
 // added its first run. "/proofed <what to check>" has Kane check just that. A slash command,
@@ -54,19 +56,22 @@ const NAMES = {
 };
 
 // "terminal": `proofed check "<text>"`, run by a person or a coding agent on their own machine.
-export function askedScenario(where: keyof typeof NAMES, text: string): Scenario {
-  return {
+export function askedScenario(where: keyof typeof NAMES, text: string, target: Target = resolveScenarioTarget({}, {}, process.env, process.cwd())): Scenario {
+  const scenario: Scenario = {
     id: where === "terminal" ? "asked" : `asked-in-${where}`,
     file: "",
     name: NAMES[where],
     paths: [],
     url: "/",
-    objective:
-      (where === "terminal"
-        ? `The developer of this app asked for this to be checked:\n\n${text}\n\n`
-        : `The author of this pull request asked for this to be checked:\n\n${text}\n\n`) +
-      "Open the app and check exactly that in the browser, the way a user would. It passes only if what they " +
-      "asked about actually works; the page loading is not enough." +
-      (where === "description" ? ` ${MAY_ASK_NOTHING}` : ""),
+    objective: "",
   };
+  const location = target.kind === "web" ? "in the browser" : checkedAt({ ...scenario, resolvedTarget: target });
+  scenario.objective =
+    (where === "terminal"
+      ? `The developer of this app asked for this to be checked:\n\n${text}\n\n`
+      : `The author of this pull request asked for this to be checked:\n\n${text}\n\n`) +
+    `Open the app and check exactly that ${location}, the way a user would. It passes only if what they ` +
+    `asked about actually works; the ${target.kind === "web" ? "page" : "app"} loading is not enough.` +
+    (where === "description" ? ` ${MAY_ASK_NOTHING}` : "");
+  return scenario;
 }

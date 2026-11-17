@@ -199,7 +199,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       // A scenario's id or name as the text would otherwise pay for a vague check of those words.
       const named = all.find((s) => [s.id, s.name].some((n) => n.toLowerCase() === text.trim().toLowerCase()));
       if (named) throw new SetupError("text_is_scenario", `"${text}" is the scenario ${named.id} in ${dir}, not a behavior to check.`, `Run that scenario: proofed check --only ${named.id}. Or describe the behavior in words: proofed check "<what to check>".`);
-      selected = [askedScenario("terminal", text)];
+      selected = [askedScenario("terminal", text, resolveScenarioTarget({}, flags, io.env, io.cwd))];
       skipped = all.map((s) => ({ id: s.id, name: s.name, why: "only your text is checked" }));
       selection = "your text";
     } else if (flags.only) {
@@ -350,7 +350,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       throw new SetupError("app_not_reachable", `Nothing answers at ${url}${fromNote(target.url!)}.`, `Start the app first, or pass the command that serves it: proofed check --serve "npm run dev"`);
     }
 
-    if (!needsHttp && (target.build || target.install)) {
+    if (appState !== "started" && toRun.some((s) => s.resolvedTarget!.kind !== "web") && (target.build || target.install)) {
       await buildApp({ build: target.build?.value, install: target.install, cwd: target.dir, logFile: join(out, "build.log"), onPhase: (line) => view.phase(line) });
     }
     for (const s of toRun) {
