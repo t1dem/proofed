@@ -212,11 +212,11 @@ jobs:
 - **Only flows with a scenario are checked.** A scenario whose `paths` miss a file isn't picked when that file changes.
 - **Slow next to unit tests.** One to four minutes of Kane per scenario, plus a build and a re-check per fix attempt.
 
-## What running Kane in CI took
+## What we ran into with Kane CLI
 
-Each fix is a few lines, found by a run that went wrong.
+What went wrong in real runs, and what Proofed does about it.
 
-| What went wrong | What Proofed does | Where |
+| What happened | What Proofed does | Where |
 |---|---|---|
 | Asked something vague, Kane waited and reported a pass | A pass with no `assert` step counts as "not checked" | `src/run.ts` |
 | Kane routed around a broken button and passed | Kane is told to do each step once, with no other way to the goal | `src/run.ts` |
