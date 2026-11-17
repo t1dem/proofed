@@ -63,6 +63,16 @@ npx proofed-cli check "the promo code welcome10 takes 10% off"
 
 The [dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo) needs no sign-in. Proofed also checks its own pull requests, for example [#25](https://github.com/t1dem/proofed/pull/25#issuecomment-6897255024).
 
+### Bugs from real projects
+
+Proofed replayed merged pull requests from open-source projects that shipped a bug. Each scenario failed on the buggy commit and passed, unchanged, on the commit that fixed it:
+
+| Buggy PR | What broke | Fixed |
+|---|---|---|
+| [Excalidraw #11974](https://github.com/excalidraw/excalidraw/pull/11974) | The main menu stays open after a click on the canvas | [#12053](https://github.com/excalidraw/excalidraw/pull/12053), 12 days later |
+| [frontend-mini-challenges #264](https://github.com/sadanandpai/frontend-mini-challenges/pull/264) | Delete leaves the todo item in the list | [#338](https://github.com/sadanandpai/frontend-mini-challenges/pull/338), 28 days later |
+| [omni-tools #32](https://github.com/iib0011/omni-tools/pull/32) | The numbers 1, 2 and 4 on separate lines add up to 0 instead of 7 | [#428](https://github.com/iib0011/omni-tools/pull/428), 567 days later |
+
 ## How it works
 
 <picture>
