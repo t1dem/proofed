@@ -1,6 +1,7 @@
 // One headless Claude Code run, for the fixer (fix.ts) and for the setup PR's scenarios (generate.ts).
 import { spawnSync } from "node:child_process";
 import type { Fixer } from "./models.ts";
+import { withoutJobSecrets } from "./secrets.ts";
 
 type ClaudeOutput = { result?: string; is_error?: boolean; api_error_status?: number };
 
@@ -23,7 +24,8 @@ export function askClaude(prompt: string, o: Options): ClaudeAnswer {
       "--model", o.model, "--effort", o.effort,
       ...(o.tools ? ["--tools", o.tools.join(",")] : []),
       "--allowedTools", o.allowedTools.join(",")],
-    { encoding: "utf8", maxBuffer: 50 * 1024 * 1024, timeout: o.timeoutMs, killSignal: "SIGKILL" },
+    // Its Bash runs the app's build, which may need the rest of the environment.
+    { env: withoutJobSecrets(process.env, ["CLAUDE_CODE_OAUTH_TOKEN"]), encoding: "utf8", maxBuffer: 50 * 1024 * 1024, timeout: o.timeoutMs, killSignal: "SIGKILL" },
   );
   if (run.error && "code" in run.error && run.error.code === "ETIMEDOUT") {
     return { ok: false, message: `Claude Code didn't finish within ${Math.round((o.timeoutMs ?? 0) / 60_000)} minutes` };

@@ -131,6 +131,8 @@ runs:
         ref: ${{ steps.mode.outputs.mode == 'fix' && steps.mode.outputs.head_ref || steps.mode.outputs.head_sha }}
         fetch-depth: 0
         token: ${{ inputs.github-token }}
+        # The agent can read the checkout. src/push.ts passes the token to git push itself.
+        persist-credentials: false
 
     - uses: actions/setup-node@v4
       if: inputs.cache != '' && (steps.mode.outputs.mode == 'check' || steps.mode.outputs.mode == 'fix')

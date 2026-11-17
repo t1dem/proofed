@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { findReport, MARKER, setStatus } from "./github.ts";
 import { ctx, env, putReport, readEvent } from "./pipeline.ts";
 import { addRun, dataComment, readReportData, type ReportData } from "./report.ts";
+import { maskSecrets } from "./secrets.ts";
 
 export type Stage = "install" | "build" | "serve";
 
@@ -26,11 +27,7 @@ export function blockedReport({ stage, command, dir, url, log, runUrl, sha, prev
         : `\`${command}\`${where} didn't answer at ${url} within a minute`;
   let tail = plain(log).trim().split("\n").slice(-LOG_LINES).join("\n");
   // Actions masks console output, not files copied into a comment through the API.
-  const secrets = ["GITHUB_TOKEN", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "CODEX_API_KEY", "ACTIONS_ID_TOKEN_REQUEST_TOKEN"]
-    .flatMap((name) => process.env[name] ? [process.env[name]!] : []);
-  const token = process.env.GITHUB_TOKEN;
-  if (token) secrets.push(Buffer.from(`x-access-token:${token}`).toString("base64"));
-  for (const value of secrets.sort((a, b) => b.length - a.length)) tail = tail.replaceAll(value, "***");
+  tail = maskSecrets(tail);
   return [
     `${MARKER}\n### Proofed\n\nProofed couldn't finish this check: ${what}, so Kane had no app to open.`,
     tail ? `\`\`\`\n${tail}\n\`\`\`` : "The command printed nothing.",

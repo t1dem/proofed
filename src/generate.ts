@@ -12,6 +12,7 @@ import { pushHead } from "./push.ts";
 import { readReportData, type Written } from "./report.ts";
 import { creditsOf, unchecked, type ScenarioResult } from "./run.ts";
 import { loadScenarios, parseScenario, type Scenario } from "./scenarios.ts";
+import { fileWithSecret } from "./secrets.ts";
 
 const MAX_SCENARIOS = 5;
 // Reading an app and writing a few files takes the agent a few minutes; one that runs this long is stuck,
@@ -108,7 +109,13 @@ async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Wr
     maxTurns: 60,
     timeoutMs: WRITE_TIMEOUT_MS,
   });
-  const files = keepOnlyNewScenarios();
+  // Scenarios go to Kane and into the PR, so one that holds a job credential is deleted unread.
+  const files = keepOnlyNewScenarios().filter((file) => {
+    if (!fileWithSecret([file])) return true;
+    rmSync(file, { force: true });
+    console.log(`Deleted ${file}: it held a credential of this job.`);
+    return false;
+  });
   if (!answer.ok) {
     console.log(`${agentName} couldn't write scenarios: ${answer.message}`);
     for (const file of files) rmSync(file, { force: true });

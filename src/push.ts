@@ -25,10 +25,10 @@ async function appToken() {
   }
 }
 
-// actions/checkout leaves the job's token in the repo's git config as an auth header for github.com,
-// and git would send it instead of any other credentials. Config from the environment is read last:
-// the empty value clears that header and the next one replaces it. The token stays out of the command
-// line, so a failed push can't print it.
+// The action checks out with persist-credentials: false, so the agent finds no token in .git/config;
+// each push brings its own. A checkout that did persist one leaves an auth header for github.com that
+// git would send instead. Config from the environment is read last: the empty value clears that header
+// and the next one replaces it. The token stays out of the command line, so a failed push can't print it.
 function push(branch: string, token?: string) {
   const args = ["push", "origin", `HEAD:${branch}`];
   if (!token) return void execFileSync("git", args, { encoding: "utf8" });
@@ -52,13 +52,14 @@ function push(branch: string, token?: string) {
 // whether the app pushed it.
 export async function pushHead(branch: string) {
   const token = await appToken();
+  const jobToken = process.env.GITHUB_TOKEN || undefined;
   try {
-    push(branch, token);
+    push(branch, token ?? jobToken);
     return !!token;
   } catch (e) {
     if (!token) throw e;
     console.log(`Pushing as the Proofed app failed (${e instanceof Error ? e.message.split("\n")[0] : e}): pushing with the job's token.`);
-    push(branch);
+    push(branch, jobToken);
     return false;
   }
 }

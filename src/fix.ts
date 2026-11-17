@@ -2,7 +2,7 @@
 // The agent gets the failure, Kane's steps and the PR diff; we rebuild, re-run the broken scenarios
 // in Chrome, and only push a fix that Kane has seen pass. Up to three attempts, each one told why the last one failed.
 import { execFileSync, execSync, spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { askAgent, configuredFixer } from "./agent.ts";
@@ -17,6 +17,7 @@ import { fixLoop, settled } from "./fixloop.ts";
 import { fixRequested, readReportData, WORKING, type FailureData } from "./report.ts";
 import type { ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
+import { fileWithSecret } from "./secrets.ts";
 
 type CommentEvent = { action: string; comment: { id: number; body: string }; issue: { number: number; pull_request?: object } };
 const event = readEvent<CommentEvent>();
@@ -147,12 +148,26 @@ const fixChanges = () => [
   ...git("ls-files", "--others", "--exclude-standard", "-z").split("\0"),
 ].filter(Boolean);
 
+// Checked before the change is built, served to Kane and recorded, since clips and reports are public.
+function discardLeak() {
+  const leaked = fileWithSecret(fixChanges());
+  if (!leaked) return undefined;
+  const untracked = new Set(git("ls-files", "--others", "--exclude-standard", "-z").split("\0").filter(Boolean));
+  git("checkout", "--", ".");
+  for (const file of untracked) rmSync(file, { force: true });
+  return `${agentName}'s change put a credential of this job into ${leaked}. Proofed discarded the change`;
+}
+
 const loop = await fixLoop({
   fixer,
   failures: data.failures,
   open: data.open ?? data.failures.map((f) => f.id),
   checked: pickScenarios({ changed: changedFiles(base), rev }).selected.map((s) => s.id),
-  ask: (failures, feedback) => askFixer(prompt(failures, feedback)),
+  ask: (failures, feedback) => {
+    const answer = askFixer(prompt(failures, feedback));
+    const leak = discardLeak();
+    return leak ? { ok: false, message: leak } : answer;
+  },
   putBack: () => putBack(env("PROOFED_SCENARIOS", ".proofed/scenarios")),
   hasChanges: () => !!git("status", "--porcelain"),
   build: () => {
@@ -217,6 +232,12 @@ const changes = git("diff", "--numstat", "HEAD").split("\n").filter(Boolean).map
   return { file, added: Number(added) || 0, removed: Number(removed) || 0 };
 });
 const names = data.failures.map((f) => f.name).join(", ");
+const leak = discardLeak();
+if (leak) {
+  console.log(leak);
+  await restoreReport(`${leak}; nothing was pushed.`, true, "The fix contained a credential; nothing was pushed");
+  process.exit(1);
+}
 live.fix({ doing: "pushing", tries: [...tries] });
 git("-c", `user.name=${provider}`, "-c", `user.email=${provider === "Codex" ? "codex@openai.com" : "noreply@anthropic.com"}`, "commit", "-am",
   `Fix ${names}\n\n${summary}\n\nWritten by ${agentName} from a Proofed report; Kane re-ran the scenario in Chrome and it passes.\n\nFixed-by: ${fixer.model} (${fixer.effort} effort)`);
