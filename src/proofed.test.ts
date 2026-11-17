@@ -407,6 +407,28 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     }
   });
 
+  test("a failed forced check invalidates a matching cached pass", async () => {
+    const r = repo({ pass: { mode: "pass" } });
+    const port = await freePort();
+    const dir = join(r.dir, "tmp");
+    const mode = join(dir, "current-outcome");
+    const file = join(r.dir, ".proofed/scenarios/pass.md");
+    const args = ["check", "--json", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`];
+    const check = (...more: string[]) => cli(r, [...args, ...more], { FAKE_KANE_MODES: dir }).then((result) => json(result));
+    try {
+      writeFileSync(file, readFileSync(file, "utf8").replace("[fake:pass]", "[fake-from:current-outcome]"));
+      writeFileSync(mode, "pass");
+      assert.equal((await check()).scenarios[0]?.outcome, "passed");
+      assert.equal((await check("--dry-run")).scenarios[0]?.cached, true);
+      writeFileSync(mode, "fail");
+      assert.equal((await check("--no-cache")).scenarios[0]?.outcome, "failed");
+      assert.equal((await check("--dry-run")).scenarios[0]?.cached, false);
+      assert.equal(runs(r).length, 2);
+    } finally {
+      r.cleanup();
+    }
+  });
+
   test("invalid concurrency in the environment fails before Kane is called", async () => {
     const r = repo({ pass: { mode: "pass" } });
     try {

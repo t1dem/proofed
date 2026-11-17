@@ -255,11 +255,14 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     const keys = new Map<string, string>();
     const items = new Map<string, Item>();
     for (const s of selected) {
-      if (s.file && (s.resolvedTarget!.kind !== "web" || url) && changed && !flags.noCache && kaneVersion !== "unknown") {
+      const hit = cache.passes[s.id];
+      if (s.file && (s.resolvedTarget!.kind !== "web" || url) && changed && (!flags.noCache || hit) && kaneVersion !== "unknown") {
         const key = cacheKey(s, s.resolvedTarget!.kind === "web" ? new URL(s.url, url!).href : "", changed, undefined, baseId, kaneVersion, target);
-        keys.set(s.id, key);
-        const hit = cache.passes[s.id];
-        if ((!flags.reuse || !target.build) && canReusePass(s, target.build?.value) && hit?.key === key) items.set(s.id, { scenario: s, cached: hit });
+        // A forced check can replace or invalidate the matching pass it bypassed.
+        if (!flags.noCache || hit?.key === key) keys.set(s.id, key);
+        if (!flags.noCache && (!flags.reuse || !target.build) && canReusePass(s, target.build?.value) && hit?.key === key) {
+          items.set(s.id, { scenario: s, cached: hit });
+        }
       }
       if (!items.has(s.id)) items.set(s.id, { scenario: s, estimate: estimate(cache, s, kaneVersion) });
     }
@@ -368,7 +371,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       const key = keys.get(e.id);
       if (e.result.end?.credits_consumed !== undefined) cache.last[historyKey(selected.find((s) => s.id === e.id)!, kaneVersion)] = { credits: creditsOf(e.result) };
       if (!key) { writeCache(cacheFile, cache); return; }
-      if (e.result.outcome === "passed" && cacheable) {
+      if (e.result.outcome === "passed" && cacheable && (!flags.noCache || cache.passes[e.id]?.key === key)) {
         const clip = e.result.clip && { ...(e.result.clip.mp4 && { mp4: resolve(e.result.clip.mp4) }), jpg: resolve(e.result.clip.jpg) };
         cache.passes[e.id] = { key, passedAt: new Date().toISOString(), seconds: e.result.seconds, ...(clip && { clip }) } satisfies CachedPass;
       } else {
