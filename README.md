@@ -7,7 +7,7 @@
 **Every pull request, run in Chrome before you merge it.**
 
 Kane CLI runs the user flows a pull request touches and posts the recording on the PR.<br>
-When a flow breaks, Claude Code fixes it, and the fix is pushed only after Kane has watched it pass.
+When a flow breaks, Claude Code or OpenAI Codex fixes it, and the fix is pushed only after Kane has watched it pass.
 
 [Website](https://proofed.neptunescodm.workers.dev) · [**Break it yourself**](https://proofed.neptunescodm.workers.dev/try) · [Dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo) · [Install on GitHub](https://proofed.neptunescodm.workers.dev/install) · [CLI](#locally-and-from-an-ai-agent)
 
@@ -74,7 +74,7 @@ The [dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo) needs no
 - A start page that crashes on load fails at once, with the browser's error and a screenshot, at no Kane credits.
 - Kane doesn't record video, so Proofed records Chrome itself. The clip cuts the waiting, shows where Kane clicked and zooms in on what it checks.
 - When Kane blames the test rather than the code, the scenario shows as "not checked", never as a pass.
-- A fix starts when someone ticks **Fix with Claude**, or on its own with [Fix automatically](#fix-automatically) on.
+- A fix starts when someone ticks **Fix with Claude** or **Fix with Codex**, or on its own with [Fix automatically](#fix-automatically) on.
 - Nothing is pushed until Kane has seen the broken flows pass. Then every scenario the pull request touches runs on the fix commit.
 - The fix commit's `Fixed-by:` line names the model.
 
@@ -101,17 +101,19 @@ Comment on a PR. Only people with write access can run them.
 |---|---|
 | `/proofed` | Check the PR again |
 | `/proofed <what to check>` | Kane checks just that, e.g. `/proofed the kettle goes into the bag at €45.00` |
-| `/proofed fix` | Same as ticking **Fix with Claude** |
-| `/proofed fix opus high` | This one fix with another model and effort |
+| `/proofed fix` | Fix with the repository's selected provider and model |
+| `/proofed fix opus high` | This one fix with Claude Opus at high effort |
+| `/proofed fix sol high` | This one fix with Codex GPT-6.1 Sol at high effort |
+| `/proofed fix codex` | This one fix with Codex GPT-6.1 Sol |
 
-The repo's model is set in the [dashboard](https://proofed.neptunescodm.workers.dev/app). Without it, fixes use Haiku 5.5 at xhigh effort.
+The repo's provider, model and effort are set in the [dashboard](https://proofed.neptunescodm.workers.dev/app), under Settings in the repo's model menu. The two icons switch between Claude and Codex. Without a choice, fixes use Claude Haiku 5.5 at xhigh effort. The same choice writes scenarios on the setup PR.
 
 ## Fix automatically
 
-By default a fix waits for someone to tick **Fix with Claude**. With **Fix automatically** on, it starts as soon as Kane sees a scenario fail. It doesn't start:
+By default a fix waits for someone to tick **Fix with Claude** or **Fix with Codex**. With **Fix automatically** on, it starts as soon as Kane sees a scenario fail. It doesn't start:
 
 - on draft pull requests,
-- on pushes by bots, so Claude's own fix commit doesn't start another fix,
+- on pushes by bots, so the fixer's own commit doesn't start another fix,
 - on a run Kane marked "not checked".
 
 In the [dashboard](https://proofed.neptunescodm.workers.dev/app), open Settings, click the model menu in the repo's row (it reads like "Haiku 5.5 · xhigh") and turn on **Fix automatically** at the bottom. Or with the GitHub CLI:
@@ -159,9 +161,9 @@ To check one thing without a scenario: `proofed check "the cart total updates" -
 
 ## Setup
 
-1. Sign in at [proofed.neptunescodm.workers.dev](https://proofed.neptunescodm.workers.dev/app) and save your TestMu and Claude keys.
+1. Sign in at [proofed.neptunescodm.workers.dev](https://proofed.neptunescodm.workers.dev/app) and save your TestMu keys and a Claude token or OpenAI API key.
 2. Install the GitHub App on a repo. Proofed opens a PR with the workflow and puts the keys into the repo's secrets.
-3. On that PR, Claude writes up to five scenarios for the app's main flows. Only the ones Kane saw pass are committed.
+3. On that PR, the selected provider writes up to five scenarios for the app's main flows. Only the ones Kane saw pass are committed.
 
 A scenario takes 1 to 4 minutes and about 30 Kane credits the first time. A fix attempt re-runs only the scenarios that broke.
 
@@ -170,7 +172,7 @@ A scenario takes 1 to 4 minutes and about 30 Kane credits the first time. A fix 
 
 <br>
 
-Add `LT_USERNAME` and `LT_ACCESS_KEY` (TestMu: Settings → Keys) and `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) to the repo secrets, then add one workflow. The whole file, working, is [proofed-demo-store's](https://github.com/t1dem/proofed-demo-store/blob/main/.github/workflows/proofed.yml); the part that matters:
+Add `LT_USERNAME` and `LT_ACCESS_KEY` (TestMu: Settings → Keys) and either `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `CODEX_API_KEY` (an OpenAI API key) to the repo secrets, then add one workflow. The whole file, working, is [proofed-demo-store's](https://github.com/t1dem/proofed-demo-store/blob/main/.github/workflows/proofed.yml); the part that matters:
 
 ```yaml
 on:
@@ -184,7 +186,7 @@ jobs:
     runs-on: ubuntu-latest
     concurrency:
       group: proofed-${{ github.event.pull_request.number || github.event.issue.number }}
-      # A new push cancels a stale check, but not the push of Claude's fix: that run waits for the fix run.
+      # A new push cancels a stale check, but not the push of the fix: that run waits for the fix run.
       cancel-in-progress: ${{ github.event_name == 'pull_request' && github.actor != 'proofed-by-kane[bot]' }}
     steps:
       - uses: t1dem/proofed@main
@@ -196,20 +198,24 @@ jobs:
           lt-username: ${{ secrets.LT_USERNAME }}
           lt-access-key: ${{ secrets.LT_ACCESS_KEY }}
           claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          codex-api-key: ${{ secrets.CODEX_API_KEY }}
           vars: ${{ toJSON(vars) }}
 ```
 
 - `vars` hands the action every Actions variable of the repo, so a new setting from the dashboard works without editing the workflow.
-- `id-token: write` lets the fixer push Claude's commit as the Proofed GitHub App, so your other workflows run on the fix commit without waiting for approval. Without it the fix is pushed with `GITHUB_TOKEN`.
+- `id-token: write` lets the fixer push the fix commit as the Proofed GitHub App, so your other workflows run on the fix commit without waiting for approval. Without it the fix is pushed with `GITHUB_TOKEN`.
 - Clips go to a `proofed-clips` branch of the same repo, so the GIFs render in the comment with no storage of your own, in private repos too.
-- In `/proofed fix <model> <effort>`, `haiku`, `sonnet`, `opus` and `fable` mean the latest version, `opus 5.1` picks a version, and a full ID like `claude-opus-5-1` is used as written. Effort is `low`, `medium`, `high`, `xhigh` or `max`.
+- Claude aliases: `haiku`, `sonnet`, `opus`, `fable`. A version such as `opus 5.1` and full Claude IDs are accepted. Effort: `low`, `medium`, `high`, `xhigh`, `max`.
+- Codex aliases: `sol`, `terra`, `astra`, `luna`. Full IDs: `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-astra`, `gpt-6-luna`. Effort: `low`, `medium`, `high`, `xhigh`, `max`; Sol, Terra and Astra also accept `ultra`.
+- Actions variables `PROOFED_PROVIDER`, `PROOFED_MODEL`, `PROOFED_EFFORT` and `PROOFED_AUTOFIX` store the menu choice. The provider can be inferred from the model. Existing Claude workflows and their checkbox label keep working. To enable Codex in an installed workflow, add `codex-api-key: ${{ secrets.CODEX_API_KEY }}` and let its edited-comment condition match `- [x] **Fix with Codex**` as well as `- [x] **Fix with Claude**`.
+- Codex CLI 0.169.0 is installed only for Codex runs. `codex exec` reads `CODEX_API_KEY`; local runs can also use `codex login`. Its workspace-write sandbox blocks command network access and writes outside the workspace. Codex has no per-command tool allowlist: the prompt limits commands to reading the app and building it, and Proofed restores changes to scenarios and workflows before checking a fix.
 
 </details>
 
 ## Limits
 
 - **Kane's verdict on the same failure varies.** On [#6](https://github.com/t1dem/proofed-demo-store/pull/6) the check that [#9](https://github.com/t1dem/proofed-demo-store/pull/9) reports as a break came back twice as "the test may be wrong". Without a failed check, Proofed shows such a run as not confirmed and starts no fix. A failed `assert:` that Kane blames on the scenario is run a second time, and stays a failure when it fails again.
-- **Fixes need Claude's usage limit to have room.** On [#7](https://github.com/t1dem/proofed-demo-store/pull/7) and [#8](https://github.com/t1dem/proofed-demo-store/pull/8) it ran out: Kane caught the break, no fix followed, and the report says so.
+- **Fixes need room in the selected provider's usage limit.** On [#7](https://github.com/t1dem/proofed-demo-store/pull/7) and [#8](https://github.com/t1dem/proofed-demo-store/pull/8) it ran out: Kane caught the break, no fix followed, and the report says so.
 - **Only flows with a scenario are checked.** A scenario whose `paths` miss a file isn't picked when that file changes.
 - **Slow next to unit tests.** One to four minutes of Kane per scenario, plus a build and a re-check per fix attempt.
 

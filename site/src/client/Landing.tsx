@@ -58,7 +58,7 @@ function Hero() {
           Every pull request, run in Chrome before you merge it.
         </h1>
         <p className="mt-6 max-w-xl text-lg leading-relaxed text-ink/85 sm:text-xl">
-          Proofed runs the user flows your diff touches in a real Chrome, posts the recording on the PR, and lets Claude fix what
+          Proofed runs the user flows your diff touches in a real Chrome, posts the recording on the PR, and lets Claude or Codex fix what
           broke. A fix is pushed only after Proofed has watched it pass.
         </p>
         <div className="mt-9 flex flex-wrap gap-3">
@@ -96,7 +96,7 @@ const SETUP = [
     body: (
       <>
         Proofed drives Chrome with Kane CLI: two keys come from TestMu, one from{" "}
-        <code className="font-mono text-[0.9em]">claude setup-token</code>. Kane and Claude bill your own accounts.
+        <code className="font-mono text-[0.9em]">claude setup-token</code>. You can also save an OpenAI API key for Codex. Runs and fixes use your own accounts.
       </>
     ),
     scene: <GlyphScene draw={drawSecrets} loop={SECRETS_LOOP} rest={5} label="Three keys in a padlock, locked and green" />,
@@ -216,7 +216,7 @@ function Footer() {
               </nav>
             ))}
           </div>
-          <p className="mt-12 text-[14px] text-muted">Runs on Kane CLI and Claude Code.</p>
+          <p className="mt-12 text-[14px] text-muted">Runs on Kane CLI, Claude Code and OpenAI Codex.</p>
         </div>
         {/* The name, big and printed in type, bleeding off the bottom of the card. */}
         <div aria-hidden className="relative -mb-[3%] h-[clamp(110px,24vw,330px)]">
