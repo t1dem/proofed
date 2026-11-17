@@ -488,17 +488,17 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
 
 describe("proofed list and doctor", () => {
   test("list estimates only selected scenarios without calling Kane", async () => {
-    const r = repo({ pricing: { mode: "pass", paths: ["src/app.js"] }, docs: { mode: "pass", paths: ["docs/**"] } });
+    const r = repo({ pricing: { mode: "pass", paths: ["src/app.js"] }, docs: { mode: "pass", paths: ["docs/**"] }, global: { mode: "pass", paths: [] } });
     try {
       type ListDoc = { estimatedCredits: number; scenarios: { id: string; selected: boolean; estimatedCredits: number; touched: boolean | null }[] };
       const doc = json<ListDoc>(await cli(r, ["list", "--json"]));
-      assert.equal(doc.estimatedCredits, 30);
-      assert.deepEqual(doc.scenarios.map((s) => [s.id, s.selected, s.estimatedCredits]), [["docs", false, 0], ["pricing", true, 30]]);
+      assert.equal(doc.estimatedCredits, 60);
+      assert.deepEqual(doc.scenarios.map((s) => [s.id, s.selected, s.estimatedCredits]), [["docs", false, 0], ["global", true, 30], ["pricing", true, 30]]);
       writeFileSync(join(r.dir, "src/app.js"), "export const price = 1;\n");
       assert.equal(json<ListDoc>(await cli(r, ["list", "--json"])).estimatedCredits, 0);
       rmSync(join(r.dir, ".git"), { recursive: true });
       const all = json<ListDoc>(await cli(r, ["list", "--json"]));
-      assert.equal(all.estimatedCredits, 60);
+      assert.equal(all.estimatedCredits, 90);
       assert.ok(all.scenarios.every((s) => s.selected && s.touched === null));
       assert.deepEqual(calls(r), []);
     } finally {

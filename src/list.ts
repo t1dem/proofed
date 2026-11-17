@@ -35,7 +35,7 @@ export function list(flags: Flags, io: Io): number {
       const hit = cache.passes[s.id];
       const cached = !!(hit && url && isHttpUrl(url) && changed && hit.key === cacheKey(s, new URL(s.url, url).href, changed, undefined, baseId));
       const touched = changed ? affectedBy([s], changed).length > 0 : null;
-      const selected = touched !== false;
+      const selected = touched !== false && changed?.length !== 0;
       return {
         id: s.id,
         name: s.name,

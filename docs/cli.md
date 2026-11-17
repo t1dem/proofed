@@ -28,7 +28,7 @@ A passed scenario isn't run again until its file, the URL, the base commit or a 
 Run `proofed doctor --json` to find setup problems and their fixes. Run `proofed list --json`
 to get each scenario's `selected`, `cached` and `estimatedCredits`, plus the total
 `estimatedCredits`. A selected scenario is touched by the change, or all scenarios when
-there is no Git base. Untouched scenarios and cached passes cost zero. Estimates use the
+there is no Git base. A clean diff selects nothing. Untouched scenarios and cached passes cost zero. Estimates use the
 last reported cost, or 30 credits for a first run. Invalid scenarios are in `errors`; fix
 those before checking. These commands do not spend credits.
 
