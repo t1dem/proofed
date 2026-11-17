@@ -12,7 +12,7 @@ import { getLive, liveFrame } from "./live";
 import { providerLabel, providerOf } from "./models";
 import { memo } from "./memo";
 import { fixedSummary, latestScenarios } from "../run-summary";
-import { getPull, type PullState } from "./runs";
+import { getPull, getPulls, type PullDetail, type PullState } from "./runs";
 
 // What the visitor picks from. `title` and `says` are the pull request's own title and description:
 // each reads like an ordinary small change. What it breaks is for Kane to find.
@@ -61,8 +61,7 @@ async function visitorOf(request: Request, env: Env) {
 }
 
 // A run as the page shows it. `over` is when nothing more will happen on the pull request by itself.
-async function describe(env: Env, row: TryRow & { pr: number }): Promise<TryRun & { over: boolean }> {
-  const detail = await getPull(env, env.TRY_REPO, row.pr, "/api/try");
+function describe(row: TryRow & { pr: number }, detail?: PullDetail): TryRun & { over: boolean } {
   const state = detail?.pull.state ?? "running";
   const fix = detail?.runs[0]?.fix;
   const over =
@@ -87,8 +86,11 @@ async function describe(env: Env, row: TryRow & { pr: number }): Promise<TryRun 
 }
 
 async function view(env: Env): Promise<TryView> {
-  const { results } = await env.DB.prepare("SELECT * FROM tries ORDER BY started_at DESC LIMIT 8").all<TryRow>();
-  const today = await env.DB.prepare("SELECT COUNT(*) AS n FROM tries WHERE started_at > ?1").bind(Date.now() - DAY).first<{ n: number }>();
+  const [{ results }, today] = await Promise.all([
+    env.DB.prepare("SELECT * FROM tries ORDER BY started_at DESC LIMIT 8").all<TryRow>(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM tries WHERE started_at > ?1").bind(Date.now() - DAY).first<{ n: number }>(),
+  ]);
+  const details = await getPulls(env, env.TRY_REPO, results.flatMap((row) => row.pr === null ? [] : [row.pr]), "/api/try");
   let current: TryRun | null = null;
   const recent: TryRun[] = [];
   for (const row of results) {
@@ -97,7 +99,7 @@ async function view(env: Env): Promise<TryView> {
       if (Date.now() - row.started_at > 60_000) await env.DB.prepare("DELETE FROM tries WHERE id = ?1").bind(row.id).run();
       continue;
     }
-    const { over, ...run } = await describe(env, { ...row, pr: row.pr });
+    const { over, ...run } = describe({ ...row, pr: row.pr }, details.get(row.pr));
     if (row.finished_at === null && over) {
       const at = Date.now();
       await env.DB.prepare("UPDATE tries SET finished_at = ?2 WHERE id = ?1").bind(row.id, at).run();

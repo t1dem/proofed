@@ -7,12 +7,8 @@ import { DEMO, installed, prefetch, useAsk, useLoad, useRoute, type Ask, type Ro
 import { Palette } from "./Palette";
 import { Pull } from "./Pull";
 import { Settings } from "./Settings";
+import { storedTheme, storeTheme, type Theme } from "./theme";
 import { Avatar, focus, iconButton, kindOf, Link, marks, soft, solid, useDismiss, type Kind } from "./ui";
-
-export type Theme = "dark" | "light";
-const THEME_KEY = "proofed-theme";
-
-export const storedTheme = (): Theme => (localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark");
 
 function useTheme() {
   const [theme, setTheme] = useState(storedTheme);
@@ -20,7 +16,7 @@ function useTheme() {
     document.documentElement.dataset.theme = theme;
     // The browser's bar and the installed app's status bar take the page's own background.
     document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#121110" : "#f4f1ea");
-    if (!DEMO) localStorage.setItem(THEME_KEY, theme);
+    if (!DEMO) storeTheme(theme);
   }, [theme]);
   return [theme, () => setTheme(theme === "dark" ? "light" : "dark")] as const;
 }

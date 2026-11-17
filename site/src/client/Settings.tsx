@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import type { FixerView, MeView, RepoView } from "../worker/api";
 import { defaultModel, effortsFor, modelLabel, MODELS, PROVIDERS, providerLabel, providerOf, type Provider } from "../worker/models";
 import type { PullDetail, PullView } from "../worker/runs";
-import type { Theme } from "./App";
+import type { Theme } from "./theme";
 import { api, DEMO, message, mutate, useLoad } from "./lib";
 import { Avatar, Backdrop, field, focus, link, NEEDS_WRITE, outline, PageTitle, popover, soft, solid, useDismiss, useSheetDrag } from "./ui";
 

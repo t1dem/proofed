@@ -32,15 +32,18 @@ export const message = (e: unknown) => (e instanceof Error ? e.message : String(
 
 export type Load<T> = { status: "loading" } | { status: "signed-out" } | { status: "error"; message: string } | { status: "ok"; data: T };
 
-// The last answer for each GET path, kept in memory and in localStorage: a page opens on what it
-// showed last time and the fresh answer replaces it when it arrives, so "Loading…" shows only once.
-const STORE_KEY = "proofed-cache:";
+// Keep dashboard data in this document. Public demo responses can survive a reload.
+const STORE_KEY = "proofed-public-cache:";
 const memory = new Map<string, unknown>();
 const watchers = new Map<string, Set<(data: unknown) => void>>();
 const inFlight = new Map<string, Promise<unknown>>();
+const persistent = PUBLIC && !DEMO;
+
+// Older builds cached authenticated responses without scoping them to the signed-in user.
+if (!DEMO && !PUBLIC) clearStorage("proofed-cache:");
 
 function cached<T>(path: string): T | undefined {
-  if (!memory.has(path) && !DEMO) {
+  if (!memory.has(path) && persistent) {
     try {
       const saved = localStorage.getItem(STORE_KEY + path);
       if (saved) memory.set(path, JSON.parse(saved));
@@ -54,20 +57,24 @@ function cached<T>(path: string): T | undefined {
 function store(path: string, data: unknown) {
   memory.set(path, data);
   try {
-    if (!DEMO) localStorage.setItem(STORE_KEY + path, JSON.stringify(data));
+    if (persistent) localStorage.setItem(STORE_KEY + path, JSON.stringify(data));
   } catch {
     // Full or blocked storage only costs the next cold start its instant paint.
   }
   for (const watch of watchers.get(path) ?? []) watch(data);
 }
 
+function clearStorage(prefix: string) {
+  try {
+    for (const key of Object.keys(localStorage)) if (key.startsWith(prefix)) localStorage.removeItem(key);
+  } catch {
+    // Storage may be blocked.
+  }
+}
+
 function forgetAll() {
   memory.clear();
-  try {
-    for (const key of Object.keys(localStorage)) if (key.startsWith(STORE_KEY)) localStorage.removeItem(key);
-  } catch {
-    // Nothing stored.
-  }
+  if (persistent) clearStorage(STORE_KEY);
 }
 
 // One request per path at a time; everyone showing that path gets the answer.

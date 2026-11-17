@@ -181,3 +181,31 @@ export async function getPull(env: Env, repo: string, pr: number, api = "/api"):
   const all = runs.results.map((r) => toRun(r, api));
   return { pull: toPull(report, all[0]), runs: all };
 }
+
+// The demo reads several pull requests at once. Keep the same 20-run history per pull.
+export async function getPulls(env: Env, repo: string, prs: number[], api: string) {
+  const details = new Map<number, PullDetail>();
+  if (!prs.length) return details;
+  const marks = prs.map(() => "?").join(", ");
+  const [reports, rows] = await Promise.all([
+    env.DB.prepare(`SELECT * FROM reports WHERE repo = ? AND pr IN (${marks})`)
+      .bind(repo, ...prs).all<ReportRow>(),
+    env.DB.prepare(
+      `SELECT * FROM (
+         SELECT runs.*, ROW_NUMBER() OVER (PARTITION BY pr ORDER BY created_at DESC) AS position
+         FROM runs WHERE repo = ? AND pr IN (${marks})
+       ) WHERE position <= 20 ORDER BY pr, position`,
+    ).bind(repo, ...prs).all<RunRow>(),
+  ]);
+  const runs = new Map<number, RunRow[]>();
+  for (const row of rows.results) {
+    const history = runs.get(row.pr);
+    if (history) history.push(row);
+    else runs.set(row.pr, [row]);
+  }
+  for (const report of reports.results) {
+    const all = (runs.get(report.pr) ?? []).map((row) => toRun(row, api));
+    details.set(report.pr, { pull: toPull(report, all[0]), runs: all });
+  }
+  return details;
+}
