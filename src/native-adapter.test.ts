@@ -11,7 +11,8 @@ import { resolveScenarioTarget } from "./target.ts";
 
 for (const kind of ["ios", "android"] as const) test(`${kind} records with fake device tools, finalizes video, and cleans only owned files`, { skip: process.platform !== "darwin" || process.arch !== "arm64" ? "Kane local mobile requires an Apple Silicon Mac" : false }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "proofed-native-test-"));
-  const oldPath = process.env.PATH, oldKane = process.env.KANE_CLI;
+  const saved = { ...process.env };
+  const oldPath = process.env.PATH;
   const log = join(dir, "log");
   const tool = (name: string, source: string) => {
     const file = join(dir, name);
@@ -19,6 +20,7 @@ for (const kind of ["ios", "android"] as const) test(`${kind} records with fake 
     chmodSync(file, 0o755); return file;
   };
   try {
+    Object.assign(process.env, { TMPDIR: dir, TEMP: dir, TMP: dir });
     process.env.PATH = `${dir}${delimiter}${oldPath}`;
     tool("xcodebuild", "console.log('Xcode 26');");
     tool("xcrun", `if(a.includes('recordVideo')) { process.on('SIGINT',()=>{fs.writeFileSync(a.at(-1),'portrait-video');process.exit(0)}); setInterval(()=>{},100); } else console.log(JSON.stringify({devices:{'com.apple.CoreSimulator.SimRuntime.iOS-26-4':[{name:'iPhone 17',udid:'test-'+process.ppid,state:'Booted'}]}}));`);
@@ -53,7 +55,11 @@ else if(a.includes('rm')) fs.unlinkSync(${JSON.stringify(remote)});`);
     if (kind === "android") { assert.match(calls, /--time-limit 175/); assert.match(calls, /pull.*native-0.mp4/); assert.ok(calls.indexOf('pull ') < calls.lastIndexOf('shell rm ')); }
     if (kind === "ios") assert.match(calls, /--target simulator --app .*simulator.zip/);
     assert.ok(existsSync(app));
-  } finally { process.env.PATH = oldPath; if (oldKane === undefined) delete process.env.KANE_CLI; else process.env.KANE_CLI = oldKane; rmSync(dir, { recursive: true, force: true }); }
+  } finally {
+    for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+    Object.assign(process.env, saved);
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("cloud preparation is screenshot-only and never starts a local device", async () => {

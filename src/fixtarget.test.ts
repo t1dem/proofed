@@ -128,6 +128,7 @@ if(a[0]==='balance') console.log('Available credits: 100');
 else if(a[0]==='run') { const path=a[a.indexOf('--app')+1]; fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({args:a,artifact:fs.readFileSync(path,'utf8')})+'\\n');
 console.log(JSON.stringify({step:1,status:'done',remark:'assert: counter is 1',ts:new Date().toISOString()})); console.log(JSON.stringify({type:'run_end',status:'passed'})); }
 else throw new Error('unexpected command');`);
+    Object.assign(process.env, { TMPDIR: dir, TEMP: dir, TMP: dir });
     process.env.KANE_CLI = kane;
     process.env.PROOFED_FIX = "true";
     delete process.env.PROOFED_TARGET;
@@ -146,5 +147,9 @@ else throw new Error('unexpected command');`);
     assert.equal(uploads.length, 9);
     assert.deepEqual(uploads.map((u) => u.artifact), ["android", "android", "ios"].flatMap((target) => ["attempt-1", "attempt-2", "final"].map((phase) => `${target}:${phase}`)));
     assert.ok(uploads.every((u) => !u.args.includes("--url") && !u.args.includes("--cdp-endpoint")));
-  } finally { process.env = saved; rmSync(dir, { recursive: true, force: true }); }
+  } finally {
+    for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+    Object.assign(process.env, saved);
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
