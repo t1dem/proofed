@@ -65,9 +65,9 @@ The [dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo) needs no
 
 ### Bugs from real projects
 
-Proofed replayed merged pull requests from open-source projects that shipped a bug. Each scenario failed on the buggy commit and passed, unchanged, on the commit that fixed it:
+Three merged pull requests from open-source projects, replayed with Proofed. Each scenario failed on the commit that shipped the bug and passed, unchanged, on the commit that fixed it:
 
-| Buggy PR | What broke | Fixed |
+| Shipped with the bug | What broke | Fixed |
 |---|---|---|
 | [Excalidraw #11974](https://github.com/excalidraw/excalidraw/pull/11974) | The main menu stays open after a click on the canvas | [#12053](https://github.com/excalidraw/excalidraw/pull/12053), 12 days later |
 | [frontend-mini-challenges #264](https://github.com/sadanandpai/frontend-mini-challenges/pull/264) | Delete leaves the todo item in the list | [#338](https://github.com/sadanandpai/frontend-mini-challenges/pull/338), 28 days later |
@@ -220,7 +220,7 @@ jobs:
 - Claude aliases: `haiku`, `sonnet`, `opus`, `fable`. A version such as `opus 5.1` and full Claude IDs are accepted. Effort: `low`, `medium`, `high`, `xhigh`, `max`.
 - Codex aliases: `sol`, `terra`, `astra`, `luna`. Full IDs: `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-astra`, `gpt-6-luna`. Effort: `low`, `medium`, `high`, `xhigh`, `max`; Sol, Terra and Astra also accept `ultra`.
 - Actions variables `PROOFED_PROVIDER`, `PROOFED_MODEL`, `PROOFED_EFFORT` and `PROOFED_AUTOFIX` store the menu choice. The provider can be inferred from the model. Existing Claude workflows and their checkbox label keep working. To enable Codex in an installed workflow, add `codex-api-key: ${{ secrets.CODEX_API_KEY }}` and let its edited-comment condition match `- [x] **Fix with Codex**` as well as `- [x] **Fix with Claude**`.
-- Codex CLI 0.169.0 is installed only for Codex runs. `codex exec` reads `CODEX_API_KEY`; local runs can also use `codex login`. Its workspace-write sandbox blocks command network access and writes outside the workspace. Codex has no per-command tool allowlist: the prompt limits commands to reading the app and building it, and Proofed restores changes to scenarios and workflows before checking a fix.
+- Codex CLI is installed only for Codex runs. `codex exec` reads `CODEX_API_KEY`; local runs can also use `codex login`. Its workspace-write sandbox blocks command network access and writes outside the workspace, and Proofed restores changes to scenarios and workflows before checking a fix.
 - The checkout keeps no token in `.git/config` (`persist-credentials: false`); the push hands the token to git itself. Claude and Codex start without the job's tokens. A change that still contains one is discarded before it is built or checked, and the agent's answer is masked before it reaches the PR or the dashboard.
 
 </details>
@@ -256,25 +256,6 @@ What went wrong in real runs, and what Proofed does about it.
 | On a page that was fine, Kane reported a heading as not visible and blamed the scenario | A failed check Kane blames on the scenario is run a second time; two failures stay failed; a failure followed by a pass is not checked | `src/run.ts` |
 | In 13 of 36 parallel starts, a scenario exited within seconds | One `kane-cli login` before the scenarios, and one retry; the retry always reached a verdict | `action.yml`, `src/run.ts` |
 
-## Code
-
-Node 22.18+ runs the checkout's TypeScript directly, so the GitHub Action needs no build or package install. `pnpm build` emits the CLI and its imports to `dist/` for npm; `npm pack` builds it automatically. `pnpm typecheck` and `pnpm test` check the source. `pnpm check:package` builds a tarball, checks its contents, installs it into a temporary prefix and runs its version and help, then removes its temp files.
-
-Releasing to npm is manual: [docs/release.md](docs/release.md).
-
-| File | What it does |
-|---|---|
-| `src/cli.ts` | The PR check |
-| `src/fix.ts` | The fix loop |
-| `src/run.ts` | One scenario: Chrome, recorder, Kane, clip |
-| `src/generate.ts` | The setup PR's first scenarios |
-| `src/mode.ts` | Decides what an event asks for |
-| `site/` | The dashboard, `/try` and the Cloudflare Worker behind them |
-
-## License
-
-[MIT](LICENSE)
-
 ### Text checks and uncertain passes
 
 For web runs, Proofed cross-checks a final explicit positive text check such as
@@ -294,15 +275,24 @@ failed. A failure followed by a pass is `not_checked`: both runs' reasons are ke
 
 ### Credit figures
 
-`credits` is Kane's estimate, including reported costs of retries. The terminal,
-reports and dashboard label it as an estimate; JSON includes
-`creditsSource: "kane_estimate"`. An interrupted run can spend credits before Kane
-reports any cost.
+`credits` is Kane's own estimate, retries included, and is labelled as an estimate in the terminal, the reports and the dashboard (`creditsSource: "kane_estimate"` in JSON). An interrupted run can spend credits before Kane reports any cost.
 
-The free `kane-cli balance` command can also provide `accountBalance` before and
-after the final attempt, with the observed account debit. Proofed takes the shared
-`/tmp/proofed-kane.lock` while measuring. Concurrent local Proofed runs invalidate
-that observation; a failed balance read also discards it. These snapshots do not
-replace the estimate: the CLI exposes no transaction attribution, and another
-machine can spend from the same account without holding this local lock. Account
-debit is therefore an account observation, not a measured scenario price.
+Proofed can also read the free `kane-cli balance` before and after a scenario and report the account's debit as `accountBalance`. That figure covers the whole account: another run on the same account at the same time makes it wrong, so Proofed drops it when it sees one on the same machine.
+## Code
+
+Node 22.18+ runs the checkout's TypeScript directly, so the GitHub Action needs no build or package install. `pnpm build` emits the CLI and its imports to `dist/` for npm; `npm pack` builds it automatically. `pnpm typecheck` and `pnpm test` check the source. `pnpm check:package` builds a tarball, checks its contents, installs it into a temporary prefix and runs its version and help, then removes its temp files.
+
+Releasing to npm is manual: [docs/release.md](docs/release.md).
+
+| File | What it does |
+|---|---|
+| `src/cli.ts` | The PR check |
+| `src/fix.ts` | The fix loop |
+| `src/run.ts` | One scenario: Chrome, recorder, Kane, clip |
+| `src/generate.ts` | The setup PR's first scenarios |
+| `src/mode.ts` | Decides what an event asks for |
+| `site/` | The dashboard, `/try` and the Cloudflare Worker behind them |
+
+## License
+
+[MIT](LICENSE)
