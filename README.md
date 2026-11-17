@@ -11,6 +11,8 @@ When a flow breaks, Claude Code fixes it, and the fix is pushed only after Kane 
 
 [Website](https://proofed.neptunescodm.workers.dev) · [**Break it yourself**](https://proofed.neptunescodm.workers.dev/try) · [Dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo) · [Demo store](https://github.com/t1dem/proofed-demo-store) · [Install on GitHub](https://proofed.neptunescodm.workers.dev/install)
 
+Or in a terminal, in your app's repo: `npx proofed-cli check` ([what it needs](#locally-and-from-an-ai-agent))
+
 <sub>Built for the Kane CLI hackathon, November 2026.</sub>
 
 <br>
@@ -40,13 +42,7 @@ When a flow breaks, Claude Code fixes it, and the fix is pushed only after Kane 
 
 ## For judges
 
-- **[Break it yourself](https://proofed.neptunescodm.workers.dev/try)**, no account. Pick one of four prepared pull requests and watch Kane catch the break and Claude fix it on the real [demo store](https://github.com/t1dem/proofed-demo-store). A run takes 8 to 14 minutes, one at a time, 3 per visitor a day.
-- **[Dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo)**, no sign-in. `sample-coffee-store` in it is made up and labelled "Sample data"; the rest is copied from GitHub.
-- **Proofed checks itself.** Every pull request here runs five dashboard scenarios through Kane, for example [#25](https://github.com/t1dem/proofed/pull/25#issuecomment-6897255024).
-
-<img src="docs/try-run.jpg" alt="A finished run on /try: Kane caught a break, Claude fixed it, Kane confirmed. The fix and a before and after comparison of the page.">
-
-If you'd rather read than wait, all four changes have already run:
+Four prepared pull requests on the [demo store](https://github.com/t1dem/proofed-demo-store), each breaking one flow. All four have already run:
 
 | PR | What Kane found | What happened next |
 |---|---|---|
@@ -54,6 +50,13 @@ If you'd rather read than wait, all four changes have already run:
 | [#9](https://github.com/t1dem/proofed-demo-store/pull/9) | The confirmation page charges €13.00 instead of €17.90 | Kane rejected the first attempt, the second passed ([`f9fa5a6`](https://github.com/t1dem/proofed-demo-store/commit/f9fa5a6)) |
 | [#11](https://github.com/t1dem/proofed-demo-store/pull/11) | The + button in the bag leaves the quantity at 1 | Fixed on the first attempt ([`9999a0d`](https://github.com/t1dem/proofed-demo-store/commit/9999a0d)), 8.5 minutes |
 | [#12](https://github.com/t1dem/proofed-demo-store/pull/12) | A €44.50 bag ships free | Fixed on the first attempt ([`f54f1b5`](https://github.com/t1dem/proofed-demo-store/commit/f54f1b5)), 8.5 minutes |
+
+- **Have 10 minutes? [Break it yourself](https://proofed.neptunescodm.workers.dev/try)**, no account. Pick one of the four and watch Kane catch the break and Claude fix it on the real demo store. A run takes 8 to 14 minutes, one at a time, 3 per visitor a day.
+- **[Dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo)**, no sign-in. `sample-coffee-store` in it is made up and labelled "Sample data"; the rest is copied from GitHub.
+- **From a terminal**, with [Kane CLI](https://www.npmjs.com/package/@testmuai/kane-cli) signed in, Node 22.18+, Chrome and ffmpeg: clone the demo store and run `npx proofed-cli check "the promo code welcome10 takes 10% off"` in it. Its workflow already says how to build and serve the app.
+- **Proofed checks itself.** Every pull request here runs five dashboard scenarios through Kane, for example [#25](https://github.com/t1dem/proofed/pull/25#issuecomment-6897255024).
+
+<img src="docs/try-run.jpg" alt="A finished run on /try: Kane caught a break, Claude fixed it, Kane confirmed. The fix and a before and after comparison of the page.">
 
 ## How it works
 
