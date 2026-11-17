@@ -60,7 +60,7 @@ export async function targetChecks(target: Target, options: { env?: NodeJS.Proce
     if (!target.cdp_endpoint) add("Desktop CDP", false, "No cdp_endpoint", "Set --cdp-endpoint http://127.0.0.1:<port> and --launch, or --reuse for an existing app.");
     else {
       try { const page = await renderer(target.cdp_endpoint); add("Desktop CDP", true, `Experimental Electron renderer: ${page.url}`, "Keep exactly one page renderer."); }
-      catch (e) { checks.push({ name: "Desktop CDP", status: target.launch && options.launchPending ? "warn" : "fail", detail: String(e), fix: target.launch ? "proofed check will launch the app; doctor never launches it." : "Start the app with remote debugging and exactly one page renderer." }); }
+      catch (e) { checks.push({ name: "Desktop CDP", status: target.launch && options.launchPending ? "ok" : "fail", detail: target.launch && options.launchPending ? `not running, as expected: proofed check launches it (${String(e)})` : String(e), fix: target.launch ? "proofed check will launch the app; doctor never launches it." : "Start the app with remote debugging and exactly one page renderer." }); }
     }
     if (!target.launch && !target.reuse) add("Desktop ownership", false, "Existing endpoints require --reuse", "Pass --reuse; Proofed will not close the existing app.");
     return checks;
@@ -70,10 +70,10 @@ export async function targetChecks(target: Target, options: { env?: NodeJS.Proce
   add("App artifact type", validType, app ?? "No app artifact", `Set --app to ${target.kind === "ios" ? target.execution === "local" ? "a simulator .app or .zip" : "a device .ipa" : target.execution === "local" ? "an .apk" : "an .apk or .aab"}, or an APP ID.`);
   if (app && !/^APP[\w-]+$/.test(app)) {
     const present = existsSync(app) && (app.endsWith(".app") ? statSync(app).isDirectory() : statSync(app).isFile());
-    checks.push({ name: "App artifact", status: present ? "ok" : options.pendingBuild ? "warn" : "fail", detail: present ? app : options.pendingBuild ? `artifact_pending_build: ${app}` : `Missing ${app}`, fix: "Build the app before running the check." });
+    checks.push({ name: "App artifact", status: present || options.pendingBuild ? "ok" : "fail", detail: present ? app : options.pendingBuild ? `artifact_pending_build: proofed check builds ${app} first` : `Missing ${app}`, fix: "Build the app before running the check." });
   }
   if (target.execution === "cloud") {
-    checks.push({ name: "Cloud recording", status: "warn", detail: "Screenshot-only; no local video stream", fix: "Use local execution for MP4 recording." });
+    checks.push({ name: "Cloud recording", status: "ok", detail: "screenshots only, no video clip; local execution records MP4", fix: "Use local execution for MP4 recording." });
     return checks;
   }
   if (target.kind === "ios") {

@@ -542,6 +542,7 @@ describe("proofed list and doctor", () => {
       assert.deepEqual([by["Kane login"]!.status, by["Kane login"]!.fix], ["fail", "kane-cli login (or export LT_USERNAME and LT_ACCESS_KEY from TestMu: Settings → Keys)"]);
       assert.equal(by.Credits!.status, "warn");
       assert.equal(by.App!.status, "fail");
+      assert.deepEqual(doc.checks.filter((c) => c.status !== "ok" && !c.fix), []);
       assert.equal(doc.exitCode, 3);
       assert.deepEqual(calls(r).map((c) => c.args?.[0]).sort(), ["--version", "balance"]);
 
@@ -549,6 +550,11 @@ describe("proofed list and doctor", () => {
       const credits = signedIn.checks.find((c) => c.name === "Credits")!;
       assert.deepEqual([signedIn.checks.find((c) => c.name === "Kane login")!.status, credits.status], ["ok", "ok"]);
       assert.match(credits.detail, /^1234 available/);
+
+      const served = json<{ exitCode: number; checks: { name: string; status: string; detail: string }[] }>(await cli(r, ["doctor", "--json"], { PROOFED_URL: "http://127.0.0.1:9", PROOFED_SERVE: "npm start" }));
+      const app = served.checks.find((c) => c.name === "App")!;
+      assert.deepEqual([app.status, served.exitCode], ["ok", 0]);
+      assert.match(app.detail, /proofed check starts it/);
     } finally {
       r.cleanup();
     }

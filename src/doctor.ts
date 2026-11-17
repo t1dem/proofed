@@ -18,6 +18,8 @@ import { SetupError } from "./setuperror.ts";
 import { isHttpUrl, resolveTarget, resolveScenarioTarget } from "./target.ts";
 import { findKane, findOnPath } from "./which.ts";
 
+// "warn" and "fail" always carry a fix. A state proofed check resolves itself (an app it starts,
+// an artifact it builds) is "ok": agents treat a warning as work to do.
 export type Status = "ok" | "warn" | "fail";
 export type DoctorCheck = { name: string; status: Status; detail: string; fix?: string };
 
@@ -75,7 +77,7 @@ export async function doctorChecks(flags: Flags, io: Io): Promise<DoctorCheck[]>
     else add("Kane login", "ok", login.detail);
     const left = /credits:\s*([\d.,]+)/i.exec(login.balance ?? "")?.[1];
     if (login.state === "not_signed_in" || login.state === "keys_rejected") {
-      add("Credits", "warn", "unknown until Kane accepts the login");
+      add("Credits", "warn", "unknown until Kane accepts the login", login.state === "keys_rejected" ? KEYS_FIX : LOGIN_FIX);
     } else if (left) {
       const n = Number(left.replace(/,/g, ""));
       add("Credits", n >= DEFAULT_CREDITS ? "ok" : "warn", `${Math.floor(n)} available; ${needsWeb ? `a first web run is estimated at ${DEFAULT_CREDITS} credits` : "the cost of a first mobile or desktop run is unknown"}`, n >= DEFAULT_CREDITS ? undefined : "Top up your TestMu account before running scenarios.");
@@ -116,7 +118,7 @@ export async function doctorChecks(flags: Flags, io: Io): Promise<DoctorCheck[]>
       const up = await answers(url.value);
       if (up && target.build) add("App", "warn", `${url.value} answers now, maybe from an old build: proofed check stops rather than test it`, "Stop that server so Proofed builds and serves the current code, or pass --reuse to proofed check.");
       else if (up) add("App", "ok", `${url.value} answers now`);
-      else if (target.serve) add("App", "warn", `${url.value} doesn't answer now; proofed check starts it with the serve command`);
+      else if (target.serve) add("App", "ok", `not running, as expected: proofed check ${target.build ? "builds and starts" : "starts"} it at ${url.value}`);
       else add("App", "fail", `${url.value} doesn't answer and there is no serve command`, 'Start the app, or tell Proofed how: --serve "npm run dev", PROOFED_SERVE, or "serve" in .proofed/config.json');
     }
   } catch (e) {
