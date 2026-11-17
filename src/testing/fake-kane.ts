@@ -10,6 +10,8 @@
 //   [fake:flaky]       the same on the first run of an objective in FAKE_KANE_LOG, a pass after
 //   [fake:error]       exits without a run_end     [fake:hang]       never finishes (with a child)
 //   [fake:signedout]   refuses to run, as kane-cli does without a login (so does FAKE_KANE_SIGNED_IN=0)
+//   [fake-from:name]   whatever the file FAKE_KANE_MODES/name says at the time of the run, so a test can
+//                      have one scenario's outcome change between runs
 // `balance` answers as kane-cli does: without a login or keys (FAKE_KANE_SIGNED_IN=0) it says so, and
 // keys TestMu doesn't know (FAKE_KANE_KEYS=rejected) get its 401.
 // [delay:ms] (FAKE_KANE_DELAY_MS) is the pause between steps, [credits:n] (FAKE_KANE_CREDITS) the
@@ -51,7 +53,8 @@ const option = (name: string) => {
   return i === -1 ? undefined : args[i + 1];
 };
 const marker = (name: string) => new RegExp(`\\[${name}:([\\w.]+)\\]`).exec(objective)?.[1];
-const asked = marker("fake") ?? process.env.FAKE_KANE_MODE ?? "pass";
+const from = /\[fake-from:([\w.-]+)\]/.exec(objective)?.[1];
+const asked = (from && readFileSync(`${process.env.FAKE_KANE_MODES}/${from}`, "utf8").trim()) || marker("fake") || process.env.FAKE_KANE_MODE || "pass";
 const ranBefore = () =>
   readFileSync(process.env.FAKE_KANE_LOG ?? "", "utf8")
     .split("\n")
