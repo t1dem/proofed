@@ -127,6 +127,9 @@ os_version: '26.4'
 Tap Add once. Assert that the counter reads 1.
 ```
 
+Kane gets 5 minutes per scenario. A long native flow can ask for more with
+`timeout_minutes: 10` (1 to 30) in its frontmatter.
+
 Use `--target`, `--execution`, `--app`, `--device`, `--os-version`, `--launch`,
 and `--cdp-endpoint` with `check`, `doctor`, or `list`. Their environment equivalents
 are `PROOFED_TARGET`, `PROOFED_EXECUTION`, `PROOFED_APP`, `PROOFED_DEVICE`,

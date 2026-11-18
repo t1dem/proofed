@@ -31,3 +31,9 @@ test("scenario filenames cannot name the output directory or its parent", () => 
     assert.throws(() => parseScenario(file, "---\nname: unsafe\n---\nOpen the app."), /unsafe scenario id/);
   }
 });
+
+test("a scenario can give Kane more time", () => {
+  assert.equal(parseScenario("long.md", "---\ntimeout_minutes: 10\n---\nOpen the app.").timeoutMinutes, 10);
+  assert.equal(parseScenario("short.md", "---\nname: short\n---\nOpen the app.").timeoutMinutes, undefined);
+  assert.throws(() => parseScenario("bad.md", "---\ntimeout_minutes: 90\n---\nOpen the app."), /timeout_minutes/);
+});

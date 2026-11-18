@@ -9,9 +9,13 @@ import { live } from "./live.ts";
 import { NOT_SIGNED_IN } from "./kaneauth.ts";
 import { log as logLine } from "./log.ts";
 import { runKane, type RunEnd, type Step } from "./kane.ts";
+
 import { NOTHING_CHECKED } from "./runfile.ts";
 import { startRecorder, type Rect } from "./recorder.ts";
 import { checkScenarioId, type Scenario } from "./scenarios.ts";
+
+// Kane's --timeout counts active time; the wall-clock limit leaves a minute on top, as the defaults do.
+const kaneTimeouts = (s: Scenario) => s.timeoutMinutes ? { timeoutSeconds: s.timeoutMinutes * 60, wallTimeoutSeconds: s.timeoutMinutes * 60 + 60 } : {};
 
 // "unsure": the run says nothing about the code. Either Kane decided the test itself looks wrong
 // before it could check the page (verdict family automation_bug, no failed assert), or it reported
@@ -204,7 +208,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     if (!recorder) {
       let nativeClip: Promise<Clip | undefined> | undefined;
       const stopNative = () => nativeClip ??= prepared.native?.stop();
-      const kane = await runKane({ onEnd: () => { void stopNative()?.catch(() => {}); }, objective: kaneObjective(scenario.objective), kaneArgs: prepared.kaneArgs, rawFile: join(dir, "kane.ndjson"), username: o.username, accessKey: o.accessKey, onStep: (step) => o.onEvent?.({ type: "step", id: scenario.id, step }) });
+      const kane = await runKane({ onEnd: () => { void stopNative()?.catch(() => {}); }, objective: kaneObjective(scenario.objective), ...kaneTimeouts(scenario), kaneArgs: prepared.kaneArgs, rawFile: join(dir, "kane.ndjson"), username: o.username, accessKey: o.accessKey, onStep: (step) => o.onEvent?.({ type: "step", id: scenario.id, step }) });
       let recordingNote = prepared.metadata.recordingNote;
       const clip = await stopNative()?.catch((e: unknown) => { recordingNote = `Native recording failed: ${String(e)}`; return undefined; });
       const end = reconciledEnd(kane.end, kane.steps);
@@ -240,7 +244,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     const asserted = assertSnapshots(expected, () => recorder.visibleText());
     const kane = await runKane({
       signal: controller.signal,
-      objective: kaneObjective(scenario.objective),
+      objective: kaneObjective(scenario.objective), ...kaneTimeouts(scenario),
       kaneArgs: prepared.kaneArgs,
       rawFile: join(dir, "kane.ndjson"),
       username: o.username,

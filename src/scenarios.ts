@@ -12,6 +12,8 @@ export type Scenario = TargetFields & {
   paths: string[];
   url: string;
   objective: string;
+  // Kane's limit for this scenario. Long native flows need more than the default 5 minutes.
+  timeoutMinutes?: number;
 };
 
 export function checkScenarioId(id: string, platform = process.platform) {
@@ -53,6 +55,9 @@ export function parseScenario(file: string, text: string): Scenario {
   checkScenarioId(id);
   const objective = body.trim();
   if (!objective) throw new Error(`${file}: empty objective`);
+  const timeout = meta.get("timeout_minutes");
+  const timeoutMinutes = timeout === undefined ? undefined : Number(timeout);
+  if (timeoutMinutes !== undefined && !(Number.isInteger(timeoutMinutes) && timeoutMinutes >= 1 && timeoutMinutes <= 30)) throw new Error(`${file}: timeout_minutes must be a whole number from 1 to 30`);
   return {
     ...Object.fromEntries([...meta].filter(([key]) => ["target", "execution", "app", "device", "os_version", "launch", "cdp_endpoint"].includes(key))),
     id,
@@ -61,6 +66,7 @@ export function parseScenario(file: string, text: string): Scenario {
     paths: list(meta.get("paths")),
     url: meta.get("url") ?? (meta.has("target") && meta.get("target") !== "web" ? "" : "/"),
     objective,
+    ...(timeoutMinutes && { timeoutMinutes }),
   };
 }
 
