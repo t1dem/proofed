@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { changedFiles } from "./changes.ts";
 import { live } from "./live.ts";
-import { runAll } from "./pipeline.ts";
+import { publish, runAll } from "./pipeline.ts";
+import type { RunFile } from "./runfile.ts";
 import { loadScenariosOr, pickScenarios } from "./scenarios.ts";
 import { resolveScenarioTarget } from "./target.ts";
 
@@ -110,3 +111,60 @@ test("base scenarios keep special filenames and surface invalid files", () => in
   rmSync(".proofed", { recursive: true });
   assert.throws(() => loadScenariosOr(".proofed/scenarios", "HEAD"), /broken\.md: missing frontmatter/);
 }));
+
+test("the clips and their run file go into one commit at the same URLs", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "proofed-publish-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const extensions = ["gif", "mp4", "jpg"] as const;
+  const clip = { gif: join(dir, "clip.gif"), mp4: join(dir, "clip.mp4"), jpg: join(dir, "clip.jpg") };
+  for (const ext of extensions) writeFileSync(clip[ext], ext);
+
+  const requests: string[] = [];
+  const blobs = new Map<string, string>();
+  const paths = new Map<string, string>();
+  t.mock.method(globalThis, "fetch", async (url: string, init: RequestInit) => {
+    const path = new URL(url).pathname.replace("/repos/fixture/repo", "");
+    requests.push(`${init.method} ${path}`);
+    if (path === "/git/ref/heads/proofed-clips") return Response.json({}, { status: 404 });
+    if (path === "/git/blobs") {
+      const sha = String(blobs.size);
+      const { content } = JSON.parse(String(init.body)) as { content: string };
+      blobs.set(sha, Buffer.from(content, "base64").toString());
+      return Response.json({ sha });
+    }
+    if (path === "/git/trees") {
+      const { tree } = JSON.parse(String(init.body)) as { tree: { path: string; sha: string }[] };
+      for (const entry of tree) paths.set(entry.path, blobs.get(entry.sha)!);
+      return Response.json({ sha: "tree" });
+    }
+    if (path === "/git/commits") {
+      assert.equal(JSON.parse(String(init.body)).tree, "tree");
+      return Response.json({ sha: "commit" });
+    }
+    if (path === "/git/refs") {
+      assert.deepEqual(JSON.parse(String(init.body)), { ref: "refs/heads/proofed-clips", sha: "commit" });
+      return Response.json({});
+    }
+    if (path === "/issues/1/comments" && init.method === "GET") return Response.json([]);
+    if (path === "/issues/1/comments" && init.method === "POST") return Response.json({ id: 1, html_url: "https://example.test/report" });
+    if (path === "/statuses/abcdef12") return Response.json({});
+    throw new Error(`Unexpected request ${path}`);
+  });
+
+  const scenario = { id: "counter", name: "Counter", file: "", paths: [], url: "/", objective: "Check the counter." };
+  await publish({
+    repo: { owner: "fixture", name: "repo", token: "fake-token" }, pr: 1, sha: "abcdef12",
+    results: [{ scenario, outcome: "passed", steps: [], end: undefined, clip }], skipped: [], runUrl: undefined, outDir: dir,
+  });
+
+  const prefix = `pr-1/abcdef1-${process.env.GITHUB_RUN_ID ?? "local"}`;
+  assert.deepEqual([...paths.keys()].sort(), ["counter.gif", "counter.jpg", "counter.mp4", "run.json"].map((file) => `${prefix}/${file}`));
+  const archived = JSON.parse(paths.get(`${prefix}/run.json`)!) as RunFile;
+  for (const ext of extensions) {
+    const path = `${prefix}/counter.${ext}`;
+    assert.equal(paths.get(path), ext);
+    assert.equal(archived.scenarios[0]?.clip?.[ext], `https://github.com/fixture/repo/raw/proofed-clips/${path}`);
+  }
+  assert.equal(requests.filter((r) => r === "POST /git/commits").length, 1);
+  assert.equal(requests.filter((r) => r === "POST /git/refs").length, 1);
+});

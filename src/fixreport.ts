@@ -4,6 +4,7 @@ import { publishClips, readFile, type Repo } from "./github.ts";
 import { withGaveUpAttempt, type FixNote } from "./report.ts";
 import { COMMENT_LIMIT, oneLine, readRunKey, runMarker } from "./reportdata.ts";
 import { RUN_FILE, type RunFile } from "./runfile.ts";
+import { timedAsync } from "./timing.ts";
 
 export async function gaveUpReport({ body, repo, pr, brokenSha, outDir, runUrl }: {
   body: string;
@@ -32,7 +33,7 @@ export async function gaveUpReport({ body, repo, pr, brokenSha, outDir, runUrl }
               summary: [fix.summary, attemptNote].filter(Boolean).join(" "), attempts: fix.tries,
             },
           } satisfies RunFile));
-          await publishClips(repo, [{ path: `${fixKey}/${RUN_FILE}`, local }]);
+          await timedAsync("publish", () => publishClips(repo, [{ path: `${fixKey}/${RUN_FILE}`, local }]));
           report = withRun;
         }
       } catch {

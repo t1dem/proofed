@@ -186,8 +186,12 @@ const CLIPS_BRANCH = "proofed-clips";
 // Clips go to an orphan branch of the same repo, so the repo needs no storage of its own.
 // Links go through github.com/…/raw/…, not raw.githubusercontent.com: for a private repo GitHub
 // redirects a signed-in viewer to a tokened raw URL, so the GIF still renders in the PR comment.
+export function clipUrl(repo: Repo, path: string) {
+  return `https://github.com/${repo.owner}/${repo.name}/raw/${CLIPS_BRANCH}/${path}`;
+}
+
 export async function publishClips(repo: Repo, files: { path: string; local: string }[]) {
-  if (files.length === 0) return new Map<string, string>();
+  if (files.length === 0) return;
 
   for (let attempt = 0; ; attempt++) {
     const parent = await api<{ object: { sha: string } }>(repo, "GET", `/git/ref/heads/${CLIPS_BRANCH}`).catch(
@@ -229,8 +233,4 @@ export async function publishClips(repo: Repo, files: { path: string; local: str
       throw e;
     }
   }
-
-  return new Map(
-    files.map((f) => [f.path, `https://github.com/${repo.owner}/${repo.name}/raw/${CLIPS_BRANCH}/${f.path}`]),
-  );
 }

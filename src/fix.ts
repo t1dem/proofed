@@ -20,6 +20,7 @@ import { descriptionCheckNote, isDescriptionScenario, replayAskedScenario } from
 import { pickScenarios, type Scenario } from "./scenarios.ts";
 import { maskSecrets } from "./secrets.ts";
 import { targetChecks } from "./targetchecks.ts";
+import { timedAsync } from "./timing.ts";
 import type { ScenarioResult } from "./types.ts";
 
 type CommentEvent = { action: string; comment: { id: number; body: string }; issue: { number: number; pull_request?: object } };
@@ -345,7 +346,7 @@ async function pushFix(plan: FixPlan, verified: VerifiedFix, committed: Committe
   const { names, changes } = committed;
   let asApp: boolean;
   try {
-    asApp = await pushHead(branch);
+    asApp = await timedAsync("push", () => pushHead(branch));
   } catch (e) {
     // Keep remote URLs and other git output out of the report and status.
     const note = "Proofed couldn't push the fix to the branch.";

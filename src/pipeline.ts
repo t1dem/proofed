@@ -5,7 +5,7 @@ import { providerOf } from "./models.ts";
 // Shared by the PR check (cli.ts) and the fix loop (fix.ts).
 import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { editComment, listReports, minimize, postComment, publishClips, setStatus, type Repo } from "./github.ts";
+import { clipUrl, editComment, listReports, minimize, postComment, publishClips, setStatus, type Repo } from "./github.ts";
 import { live } from "./live.ts";
 import { log } from "./log.ts";
 import { crashResult, findCrashes } from "./precheck.ts";
@@ -16,6 +16,7 @@ import { creditsOf, scenarioDoubted } from "./runresult.ts";
 import { FAILED_CHECK_ACTION, FAILED_CHECK_REASON, RUN_FILE, type RunFile } from "./runfile.ts";
 import type { Scenario } from "./scenarios.ts";
 import { SetupError } from "./setuperror.ts";
+import { timedAsync } from "./timing.ts";
 import type { RunEvent, ScenarioResult } from "./types.ts";
 
 type RunAllOptions = {
@@ -174,7 +175,11 @@ export function runFile({ sha, results, skipped, runUrl, fix }: PublishInput, cl
   };
 }
 
-export async function publish(input: PublishInput) {
+export function publish(input: PublishInput) {
+  return timedAsync("publish", () => publishRun(input));
+}
+
+async function publishRun(input: PublishInput) {
   const { repo, pr, sha, results, skipped, runUrl, outDir, fix, asked, previous, written, requested = false } = input;
   const clips = new Map<string, ClipLinks>();
   let runKey: string | undefined;
@@ -186,12 +191,11 @@ export async function publish(input: PublishInput) {
       // A crash's screenshot comes without a video.
       return [...(clip.mp4 ? [file("gif", clip.gif), file("mp4", clip.mp4)] : []), file("jpg", clip.jpg)];
     });
-    const urls = await publishClips(repo, files);
-    for (const f of files) clips.set(f.id, { ...clips.get(f.id), [f.kind]: urls.get(f.path) });
-    // In a commit of its own, after the clips: the file holds their links.
+    for (const f of files) clips.set(f.id, { ...clips.get(f.id), [f.kind]: clipUrl(repo, f.path) });
+    // Links use the final branch paths, so the clips and their index can be committed together.
     const local = join(outDir, RUN_FILE);
     writeFileSync(local, JSON.stringify(runFile(input, clips)));
-    await publishClips(repo, [{ path: `${prefix}/${RUN_FILE}`, local }]);
+    await publishClips(repo, [...files, { path: `${prefix}/${RUN_FILE}`, local }]);
     runKey = prefix;
   }
 

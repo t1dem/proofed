@@ -1,5 +1,6 @@
 import { resolveScenarioTarget } from "./target.ts";
 import type { Scenario } from "./scenarios.ts";
+import { timedAsync } from "./timing.ts";
 
 export const scenarioTarget = (s: Scenario) => s.resolvedTarget ?? resolveScenarioTarget(s, {}, process.env, process.cwd());
 
@@ -37,7 +38,7 @@ export function fixRefusal(scenarios: Scenario[], build: string | undefined) {
 
 // Both attempts and the final check use runAll directly, never the CLI pass cache.
 export async function checkFix<T>(scenarios: Scenario[], serve: () => Promise<() => void | Promise<void>>, check: (scenarios: Scenario[]) => Promise<T>) {
-  const stop = needsWeb(scenarios) ? await serve() : undefined;
-  try { return await check(scenarios); }
+  const stop = needsWeb(scenarios) ? await timedAsync("app ready", serve) : undefined;
+  try { return await timedAsync("re-check", () => check(scenarios)); }
   finally { await stop?.(); }
 }

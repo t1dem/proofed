@@ -15,6 +15,7 @@ import { readReportData, type Written } from "./report.ts";
 import { creditsOf, unchecked } from "./runresult.ts";
 import { loadScenarios, parseScenario, type Scenario } from "./scenarios.ts";
 import { fileWithSecret } from "./secrets.ts";
+import { timed, timedAsync } from "./timing.ts";
 import type { ScenarioResult } from "./types.ts";
 
 const MAX_SCENARIOS = 5;
@@ -128,14 +129,14 @@ const why = (r: ScenarioResult) =>
 
 async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Written; sha: string }> {
   console.log(`Asking ${writer.model} (${writer.effort}) to write scenarios in ${dir}/`);
-  const answer = askAgent(android ? androidPrompt() : webPrompt(), {
+  const answer = timed("scenario writer", () => askAgent(android ? androidPrompt() : webPrompt(), {
     ...writer,
     permissionMode: "default",
     tools: ["Read", "Glob", "Grep", "Write", "Edit"],
     allowedTools: ["Read", "Glob", "Grep", `Write(./${dir}/**)`, `Edit(./${dir}/**)`],
     maxTurns: 60,
     timeoutMs: WRITE_TIMEOUT_MS,
-  });
+  }));
   // Scenarios go to Kane and into the PR, so one that holds a job credential is deleted unread.
   const files = keepOnlyNewScenarios().filter((file) => {
     if (!fileWithSecret([file])) return true;
@@ -188,7 +189,7 @@ async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Wr
     // The app's push starts a check of the new commit. It waits for this job (the workflow's
     // concurrency doesn't let that push cancel a run) and then skips Kane, since the report
     // published below is already about that commit (mode.ts).
-    const asApp = await pushHead(env("PROOFED_HEAD_REF"));
+    const asApp = await timedAsync("push", () => pushHead(env("PROOFED_HEAD_REF")));
     console.log(`Pushed the scenarios to ${env("PROOFED_HEAD_REF")}${asApp ? " as the Proofed app" : ""}`);
   } catch (e) {
     console.log(`Couldn't push the scenarios: ${e instanceof Error ? e.message.split("\n")[0] : e}`);

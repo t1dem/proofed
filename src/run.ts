@@ -14,6 +14,8 @@ import { NOTHING_CHECKED } from "./runfile.ts";
 import { scenarioDoubted } from "./runresult.ts";
 import { startRecorder, type Rect } from "./recorder.ts";
 import { checkScenarioId, type Scenario } from "./scenarios.ts";
+import { maskSecrets } from "./secrets.ts";
+import { timedAsync } from "./timing.ts";
 import type { Clip, Outcome, RunEvent, ScenarioResult } from "./types.ts";
 
 // Kane's --timeout counts active time; the wall-clock limit leaves a minute on top, as the defaults do.
@@ -142,6 +144,8 @@ export async function runScenario(scenario: Scenario, o: RunOptions): Promise<Sc
 
 async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResult> {
   const log = (line: string) => logLine(`[${scenario.id}] ${line}`);
+  const name = JSON.stringify(maskSecrets(scenario.id));
+  const kaneRun = (options: Parameters<typeof runKane>[0]) => timedAsync(`Kane scenario ${name}`, () => runKane(options));
   const dir = join(o.outDir, scenario.id);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
@@ -159,8 +163,11 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     const recorder = prepared.recorder;
     if (!recorder) {
       let nativeClip: Promise<Clip | undefined> | undefined;
-      const stopNative = () => nativeClip ??= prepared.native?.stop();
-      const kane = await runKane({ onEnd: () => { void stopNative()?.catch(() => {}); }, objective: kaneObjective(scenario.objective), ...timeouts, kaneArgs: prepared.kaneArgs, rawFile: join(dir, "kane.ndjson"), username: o.username, accessKey: o.accessKey, onStep: (step) => o.onEvent?.({ type: "step", id: scenario.id, step }) });
+      const stopNative = () => {
+        const native = prepared.native;
+        if (native) return nativeClip ??= timedAsync(`clip encode ${name}`, () => native.stop());
+      };
+      const kane = await kaneRun({ onEnd: () => { void stopNative()?.catch(() => {}); }, objective: kaneObjective(scenario.objective), ...timeouts, kaneArgs: prepared.kaneArgs, rawFile: join(dir, "kane.ndjson"), username: o.username, accessKey: o.accessKey, onStep: (step) => o.onEvent?.({ type: "step", id: scenario.id, step }) });
       let recordingNote = prepared.metadata.recordingNote;
       const clip = await stopNative()?.catch((e: unknown) => { recordingNote = `Native recording failed: ${String(e)}`; return undefined; });
       const end = reconciledEnd(kane.end, kane.steps);
@@ -194,7 +201,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     if (recorder.unexpectedPage) controller.abort();
     const expected = target.kind === "web" ? expectedText(scenario.objective) : { check: "", literals: [], quoted: false };
     const asserted = assertSnapshots(expected, () => recorder.visibleText());
-    const kane = await runKane({
+    const kane = await kaneRun({
       signal: controller.signal,
       objective: kaneObjective(scenario.objective), ...timeouts,
       kaneArgs: prepared.kaneArgs,
@@ -233,10 +240,8 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     // A step starts when Kane announces it (the "running" event), not when it reports it done.
     const announced = new Map(kane.steps.filter((s) => s.status === "running").map((s) => [s.step, s.ts]));
     const marks = kane.steps.map((s) => Date.parse(announced.get(s.step) ?? s.ts) / 1000);
-    const made = await makeClip(
-      { ...film, marks, endpoint: prepared.montage ? await prepared.montage() : prepared.clipEndpoint! },
-      join(dir, "clip"),
-    ).catch((e: unknown) => {
+    const endpoint = prepared.montage ? await prepared.montage() : prepared.clipEndpoint!;
+    const made = await timedAsync(`clip encode ${name}`, () => makeClip({ ...film, marks, endpoint }, join(dir, "clip"))).catch((e: unknown) => {
       log(`clip failed: ${String(e)}`);
       return undefined;
     });

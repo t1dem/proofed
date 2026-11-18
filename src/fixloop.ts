@@ -9,6 +9,7 @@ import { providerLabel, providerOf, type Fixer } from "./models.ts";
 import type { FailureData, FixAttempt } from "./report.ts";
 import { descriptionCheckNote } from "./requests.ts";
 import type { ScenarioResult } from "./types.ts";
+import { timed } from "./timing.ts";
 import { affectedBy, touches, type Scenario } from "./scenarios.ts";
 
 export const MAX_ATTEMPTS = 3;
@@ -76,7 +77,7 @@ export async function fixLoop(o: FixLoopInput): Promise<FixLoopEnd> {
   for (let attempt = 1; attempt <= max; attempt++) {
     console.log(`\n=== Attempt ${attempt}: asking ${o.fixer.model} (${o.fixer.effort}) about ${failures.map((f) => f.name).join(", ")}`);
     live.fix({ attempt, of: max, doing: "writing", ...o.fixer, tries: [...tries] });
-    const answer = o.ask(failures, feedback);
+    const answer = timed("fixer", () => o.ask(failures, feedback));
     if (!answer.ok) {
       feedback = answer.message;
       return end("no-claude", attempt);

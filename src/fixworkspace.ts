@@ -6,6 +6,7 @@ import { offLimits } from "./guard.ts";
 import { env } from "./env.ts";
 import { findGitBash, killTree } from "./process.ts";
 import { fileWithSecret } from "./secrets.ts";
+import { timed } from "./timing.ts";
 
 export const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trimEnd();
 
@@ -18,7 +19,7 @@ export function prepareBuild(appDir: string) {
   const buildCommand = `bash ${sh(buildScript.replaceAll("\\", "/"))}`;
   writeFileSync(buildScript, `set -e -o pipefail\ncd ${sh(resolve(appDir).replaceAll("\\", "/"))}\n${buildInput}\n`);
   return {
-    buildInput, buildCommand, build: () => build(buildScript), serve: () => serve(appDir),
+    buildInput, buildCommand, build: () => timed("rebuild", () => build(buildScript)), serve: () => serve(appDir),
     cleanup: () => rmSync(buildScript, { force: true }),
   };
 }

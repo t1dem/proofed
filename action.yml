@@ -136,81 +136,99 @@ runs:
         PROOFED_BASE_SHA: ${{ steps.mode.outputs.base_sha }}
       run: node "$GITHUB_ACTION_PATH/src/actiontarget.ts"
 
-    - uses: actions/setup-node@v4
-      if: inputs.cache != '' && (steps.mode.outputs.mode == 'check' || steps.mode.outputs.mode == 'fix')
-      with:
-        node-version: 24
-        cache: ${{ inputs.cache }}
+    - name: Find package stores and cache keys
+      id: stores
+      if: steps.mode.outputs.mode == 'check' || steps.mode.outputs.mode == 'fix'
+      shell: bash
+      env:
+        PROOFED_DIR: ${{ inputs.working-directory }}
+        PROOFED_CACHE: ${{ inputs.cache }}
+      run: node "$GITHUB_ACTION_PATH/src/action/dependencies.ts"
 
-    # apt-get install ffmpeg took 35-65 s of every run. A static build (ffmpeg 7.0.2 with libx264, from
-    # eugeneware/ffmpeg-static) is one 25-30 MB download, checked against its SHA-256 and kept in the cache.
-    # Other runners use their system package manager; failed Linux downloads fall back to apt-get.
-    - name: Pick an ffmpeg build
-      id: ffmpeg
+    - name: Restore the package store
+      id: package-cache
+      if: steps.stores.outputs.package_key != ''
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.stores.outputs.package_path }}
+        key: ${{ steps.stores.outputs.package_key }}
+        restore-keys: ${{ steps.stores.outputs.package_restore }}
+
+    - name: Restore Gradle caches and wrapper
+      id: gradle-cache
+      if: steps.stores.outputs.gradle_key != ''
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.stores.outputs.gradle_path }}
+        key: ${{ steps.stores.outputs.gradle_key }}
+
+    - name: Select tools and cache keys
+      id: tool-plan
       if: steps.mode.outputs.mode != 'none'
       shell: bash
-      run: |
-        case "$RUNNER_OS-$RUNNER_ARCH" in
-          Linux-X64) echo "arch=x64" >> "$GITHUB_OUTPUT" ;;
-          Linux-ARM64) echo "arch=arm64" >> "$GITHUB_OUTPUT" ;;
-        esac
-        echo "dir=${RUNNER_TOOL_CACHE:-$RUNNER_TEMP}/proofed-ffmpeg" >> "$GITHUB_OUTPUT"
+      env:
+        PROOFED_MODE: ${{ steps.mode.outputs.mode }}
+        PROOFED_GENERATE: ${{ steps.mode.outputs.generate }}
+        PROOFED_AUTOFIX: ${{ steps.mode.outputs.autofix }}
+        PROOFED_PROVIDER: ${{ steps.mode.outputs.provider }}
+        PROOFED_KANE_VERSION: ${{ inputs.kane-version }}
+      run: node "$GITHUB_ACTION_PATH/src/action/tools.ts" select
 
-    - uses: actions/cache/restore@v4
-      if: steps.ffmpeg.outputs.arch != ''
+    - name: Restore Kane CLI
+      uses: actions/cache/restore@v4
+      if: steps.tool-plan.outputs.kane_key != ''
       with:
-        path: ${{ steps.ffmpeg.outputs.dir }}
-        key: proofed-ffmpeg-b6.1.1-${{ steps.ffmpeg.outputs.arch }}
+        path: ${{ steps.tool-plan.outputs.kane_dir }}
+        key: ${{ steps.tool-plan.outputs.kane_key }}
 
-    - name: Install Kane CLI and ffmpeg
+    - name: Restore Codex CLI
+      uses: actions/cache/restore@v4
+      if: steps.tool-plan.outputs.codex_key != ''
+      with:
+        path: ${{ steps.tool-plan.outputs.codex_dir }}
+        key: ${{ steps.tool-plan.outputs.codex_key }}
+
+    - name: Restore ffmpeg
+      id: ffmpeg-cache
+      uses: actions/cache/restore@v4
+      if: steps.tool-plan.outputs.ffmpeg_key != ''
+      with:
+        path: ${{ steps.tool-plan.outputs.ffmpeg_dir }}
+        key: ${{ steps.tool-plan.outputs.ffmpeg_key }}
+        restore-keys: ${{ steps.tool-plan.outputs.ffmpeg_legacy }}
+
+    - name: Install Kane CLI and ffmpeg, plus the fixer if needed
       id: tools
       if: steps.mode.outputs.mode != 'none'
       shell: bash
       env:
-        FFMPEG_ARCH: ${{ steps.ffmpeg.outputs.arch }}
-        FFMPEG_DIR: ${{ steps.ffmpeg.outputs.dir }}
-      run: |
-        npm install -g "@testmuai/kane-cli@${{ inputs.kane-version }}" >/dev/null
-        if [ "${{ steps.mode.outputs.mode }}" = fix ] || [ "${{ steps.mode.outputs.generate }}" = true ]; then
-          if [ "${{ steps.mode.outputs.provider }}" = codex ]; then npm install -g @openai/codex@0.169.0 >/dev/null; else npm install -g @anthropic-ai/claude-code >/dev/null; fi
-        fi
-        if [ -n "$FFMPEG_ARCH" ] && [ ! -x "$FFMPEG_DIR/ffmpeg" ]; then
-          case "$FFMPEG_ARCH" in
-            x64) sum=bfe8a8fc511530457b528c48d77b5737527b504a3797a9bc4866aeca69c2dffa ;;
-            arm64) sum=754a678672298bc68156adff58aa7385a592c2b30b1d0ae8750c45c915c4bac0 ;;
-          esac
-          mkdir -p "$FFMPEG_DIR"
-          if curl -fsSL --retry 2 -o "$FFMPEG_DIR/ffmpeg.gz" "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-linux-$FFMPEG_ARCH.gz" &&
-            echo "$sum  $FFMPEG_DIR/ffmpeg.gz" | sha256sum -c --quiet - &&
-            gunzip -f "$FFMPEG_DIR/ffmpeg.gz" && chmod +x "$FFMPEG_DIR/ffmpeg" && "$FFMPEG_DIR/ffmpeg" -version >/dev/null; then
-            echo "fetched=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Couldn't get the static ffmpeg; installing it with apt-get"
-            rm -rf "$FFMPEG_DIR"
-          fi
-        fi
-        if [ -n "$FFMPEG_ARCH" ] && "$FFMPEG_DIR/ffmpeg" -version >/dev/null 2>&1; then
-          echo "$FFMPEG_DIR" >> "$GITHUB_PATH"
-          "$FFMPEG_DIR/ffmpeg" -version | sed -n 1p
-        else
-          if ! command -v ffmpeg >/dev/null; then
-            case "$RUNNER_OS" in
-              macOS) brew install ffmpeg ;;
-              Windows) choco install ffmpeg -y --no-progress ;;
-              *) sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null ;;
-            esac
-          fi
-        fi
-        kane-cli --version
+        PROOFED_KANE_VERSION: ${{ inputs.kane-version }}
+        PROOFED_KANE_DIR: ${{ steps.tool-plan.outputs.kane_dir }}
+        PROOFED_CODEX_DIR: ${{ steps.tool-plan.outputs.codex_dir }}
+        PROOFED_SYNC_PROVIDER: ${{ steps.tool-plan.outputs.sync_provider }}
+      run: node "$GITHUB_ACTION_PATH/src/action/tools.ts" install
 
-    # Saved right away: the cache action's own post step skips saving when the job fails, and a red run is common here.
-    - uses: actions/cache/save@v4
-      if: steps.tools.outputs.fetched == 'true'
+    - name: Save Kane CLI
+      uses: actions/cache/save@v4
+      if: steps.tools.outputs.kane_installed == 'true' && steps.tool-plan.outputs.kane_key != ''
       with:
-        path: ${{ steps.ffmpeg.outputs.dir }}
-        key: proofed-ffmpeg-b6.1.1-${{ steps.ffmpeg.outputs.arch }}
+        path: ${{ steps.tool-plan.outputs.kane_dir }}
+        key: ${{ steps.tool-plan.outputs.kane_key }}
 
-    # Each stage leaves its name and output behind, so a failure before Kane can be reported on the PR.
+    - name: Save Codex CLI
+      uses: actions/cache/save@v4
+      if: steps.tools.outputs.codex_installed == 'true' && steps.tool-plan.outputs.codex_key != ''
+      with:
+        path: ${{ steps.tool-plan.outputs.codex_dir }}
+        key: ${{ steps.tool-plan.outputs.codex_key }}
+
+    - name: Save ffmpeg
+      uses: actions/cache/save@v4
+      if: steps.tools.outputs.static_ffmpeg == 'true' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+      with:
+        path: ${{ steps.tool-plan.outputs.ffmpeg_dir }}
+        key: ${{ steps.tool-plan.outputs.ffmpeg_key }}
+
     - name: Install the app's dependencies
       id: deps
       if: steps.mode.outputs.mode == 'check' || steps.mode.outputs.mode == 'fix'
@@ -218,9 +236,14 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         PROOFED_INSTALL: ${{ inputs.install }}
-      run: |
-        echo install > "$RUNNER_TEMP/proofed-stage"
-        bash -e -o pipefail -c "$PROOFED_INSTALL" 2>&1 | tee "$RUNNER_TEMP/proofed-app.log"
+      run: node "$GITHUB_ACTION_PATH/src/action/app.ts" install
+
+    - name: Save the package store
+      if: steps.deps.outcome == 'success' && steps.stores.outputs.package_key != '' && steps.package-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ steps.stores.outputs.package_path }}
+        key: ${{ steps.stores.outputs.package_key }}
 
     - name: Build and serve the app
       id: app
@@ -238,16 +261,9 @@ runs:
         PROOFED_OS_VERSION: ${{ inputs.os-version }}
         PROOFED_LAUNCH: ${{ inputs.launch }}
         PROOFED_CDP_ENDPOINT: ${{ inputs.cdp-endpoint }}
-      run: |
-        echo build > "$RUNNER_TEMP/proofed-stage"
-        bash -e -o pipefail -c "$PROOFED_BUILD" 2>&1 | tee "$RUNNER_TEMP/proofed-app.log"
-        echo serve > "$RUNNER_TEMP/proofed-stage"
-        if [ "${{ steps.targets.outputs.web }}" = true ] && [ -n "$PROOFED_SERVE" ]; then
-          (bash -c "$PROOFED_SERVE" > "$RUNNER_TEMP/proofed-app.log" 2>&1 &)
-          npx --yes wait-on@8 -t 60000 "$PROOFED_URL"
-        fi
+        PROOFED_WEB: ${{ steps.targets.outputs.web }}
+      run: node "$GITHUB_ACTION_PATH/src/action/app.ts" build
 
-    # Without this the PR gets a red cross and no word on why: Kane never ran, so no report was written.
     - name: Say on the PR that the app didn't start
       if: failure() && steps.mode.outputs.mode == 'check' && (steps.deps.outcome == 'failure' || steps.app.outcome == 'failure')
       shell: bash
@@ -272,6 +288,13 @@ runs:
         CODEX_API_KEY: ${{ inputs.codex-api-key }}
       run: node "$GITHUB_ACTION_PATH/src/blocked.ts"
 
+    - name: Save Gradle caches and wrapper after the build
+      if: ${{ !cancelled() && steps.mode.outputs.mode == 'check' && steps.deps.outcome == 'success' && steps.stores.outputs.gradle_key != '' && steps.gradle-cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ steps.stores.outputs.gradle_path }}
+        key: ${{ steps.stores.outputs.gradle_key }}
+
     - name: Log Kane in
       if: steps.mode.outputs.mode != 'none'
       shell: bash
@@ -280,7 +303,15 @@ runs:
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
       # Logging in once sets up the TestMu project and folder before the parallel runs start;
       # otherwise the first runs race to create them and fail.
-      run: kane-cli login --username "$LT_USERNAME" --access-key "$LT_ACCESS_KEY" </dev/null
+      run: node "$GITHUB_ACTION_PATH/src/action/runtime.ts" login
+
+    - name: Start preparing Codex for autofix
+      id: codex-background
+      if: steps.tool-plan.outputs.background == 'true'
+      shell: bash
+      env:
+        PROOFED_CODEX_DIR: ${{ steps.tool-plan.outputs.codex_dir }}
+      run: node "$GITHUB_ACTION_PATH/src/action/runtime.ts" start-codex
 
     - name: Run scenarios with Kane
       id: run
@@ -305,7 +336,6 @@ runs:
         PROOFED_PROVIDER: ${{ steps.mode.outputs.provider }}
         PROOFED_MODEL: ${{ steps.mode.outputs.model }}
         PROOFED_EFFORT: ${{ steps.mode.outputs.effort }}
-        PROOFED_OUT: ${{ runner.temp }}/proofed
         LT_USERNAME: ${{ inputs.lt-username }}
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
@@ -313,39 +343,48 @@ runs:
         # Whether each provider has a credential, so the report offers only a fix this workflow can start.
         PROOFED_CLAUDE: ${{ inputs.claude-code-oauth-token != '' }}
         PROOFED_CODEX: ${{ inputs.codex-api-key != '' || inputs.codex-auth-json != '' }}
-        # Same cold-Chrome defaults TestMu's own action uses on runners.
-        KANE_CLI_CDP_TIMEOUT_MS: "60000"
-        KANE_CLI_CDP_RETRIES: "2"
-        KANE_CLI_USER_AGENT: github-action
-      run: |
-        echo "report=$PROOFED_OUT/report.md" >> "$GITHUB_OUTPUT"
-        node "$GITHUB_ACTION_PATH/src/cli.ts"
+      run: node "$GITHUB_ACTION_PATH/src/action/runtime.ts" check
 
     - name: Prepare Codex subscription credentials
       id: codex-auth
       if: >-
         !cancelled() && steps.mode.outputs.provider == 'codex' &&
         inputs.codex-api-key == '' && inputs.codex-auth-json != '' &&
-        ((success() && (steps.mode.outputs.mode == 'fix' || steps.mode.outputs.generate == 'true')) ||
-        (steps.mode.outputs.autofix == 'true' && steps.run.outputs.fixable == 'true'))
+        ((success() && steps.tool-plan.outputs.sync_provider == 'codex') ||
+        (steps.tool-plan.outputs.background == 'true' && steps.run.outputs.fixable == 'true'))
       shell: bash
       env:
         CODEX_AUTH_JSON: ${{ inputs.codex-auth-json }}
-      run: |
-        dir=$(mktemp -d "$RUNNER_TEMP/proofed-codex-auth.XXXXXX")
-        trap 'rm -rf -- "$dir"' EXIT
-        chmod 700 "$dir"
-        umask 077
-        printf '%s' "$CODEX_AUTH_JSON" > "$dir/auth.json"
-        chmod 600 "$dir/auth.json"
-        printf 'dir=%s\n' "$dir" >> "$GITHUB_OUTPUT"
-        trap - EXIT
+      run: node "$GITHUB_ACTION_PATH/src/action/runtime.ts" write-auth
 
-    # "Fix automatically" in the dashboard: a check that saw a scenario fail goes on to fix it in this job,
-    # as a ticked "Fix with Claude" would (src/mode.ts decides when). The check's app server is stopped
-    # first, so Kane re-checks the fixer's own build rather than the old one still on the port.
-    - name: Fix automatically
+    - name: Stop the check server and prepare the autofix CLI
+      id: autofix-tools
       if: ${{ !cancelled() && steps.mode.outputs.autofix == 'true' && steps.run.outputs.fixable == 'true' && steps.codex-auth.outcome != 'failure' }}
+      shell: bash
+      env:
+        PROOFED_URL: ${{ inputs.url }}
+        PROOFED_PROVIDER: ${{ steps.mode.outputs.provider }}
+        PROOFED_CODEX_DIR: ${{ steps.tool-plan.outputs.codex_dir }}
+        PROOFED_CODEX_BACKGROUND: ${{ steps.codex-background.outputs.dir }}
+      run: node "$GITHUB_ACTION_PATH/src/action/runtime.ts" prepare-autofix
+
+    - name: Collect the background Codex install
+      id: codex-result
+      if: ${{ !cancelled() && steps.codex-background.outputs.dir != '' }}
+      shell: bash
+      env:
+        PROOFED_CODEX_BACKGROUND: ${{ steps.codex-background.outputs.dir }}
+      run: node "$GITHUB_ACTION_PATH/src/action/runtime.ts" collect-codex
+
+    - name: Save Codex CLI prepared for autofix
+      if: ${{ !cancelled() && (steps.codex-result.outputs.installed == 'true' || steps.autofix-tools.outputs.installed == 'true') }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ steps.tool-plan.outputs.codex_dir }}
+        key: ${{ steps.tool-plan.outputs.codex_key }}
+
+    - name: Fix automatically
+      if: ${{ !cancelled() && steps.autofix-tools.outcome == 'success' }}
       shell: bash
       env:
         PROOFED_AUTO: "true"
@@ -368,37 +407,15 @@ runs:
         PROOFED_PROVIDER: ${{ steps.mode.outputs.provider }}
         PROOFED_MODEL: ${{ steps.mode.outputs.model }}
         PROOFED_EFFORT: ${{ steps.mode.outputs.effort }}
-        PROOFED_OUT: ${{ runner.temp }}/proofed
         LT_USERNAME: ${{ inputs.lt-username }}
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
         CODEX_API_KEY: ${{ inputs.codex-api-key }}
         PROOFED_CODEX_HOME: ${{ steps.codex-auth.outputs.dir }}
-        KANE_CLI_CDP_TIMEOUT_MS: "60000"
-        KANE_CLI_CDP_RETRIES: "2"
-        KANE_CLI_USER_AGENT: github-action
         GITHUB_TOKEN: ${{ inputs.github-token }}
         PROOFED_SERVER: ${{ inputs.proofed-url }}
-      run: |
-        if [ -n "$PROOFED_URL" ]; then
-          port=$(node -e 'const u = new URL(process.argv[1]); console.log(u.port || (u.protocol === "https:" ? 443 : 80))' "$PROOFED_URL")
-          if [ "$RUNNER_OS" = Windows ]; then
-            PROOFED_PORT="$port" powershell.exe -NoProfile -NonInteractive -Command \
-              'Get-NetTCPConnection -LocalPort ([int]$env:PROOFED_PORT) -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { & taskkill.exe /PID $_ /T /F }' >/dev/null 2>&1 || true
-          else
-            (fuser -k "$port/tcp" || lsof -ti "tcp:$port" | while IFS= read -r pid; do kill "$pid"; done) >/dev/null 2>&1 || true
-          fi
-          for i in $(seq 1 20); do curl -s -o /dev/null "$PROOFED_URL" || break; sleep 0.5; done
-        fi
-        if [ "$PROOFED_PROVIDER" = codex ]; then npm install -g @openai/codex@0.169.0 >/dev/null; else npm install -g @anthropic-ai/claude-code >/dev/null; fi
-        if [ -n "$PROOFED_CODEX_HOME" ]; then
-          export CODEX_HOME="$PROOFED_CODEX_HOME"
-          unset CODEX_API_KEY
-        fi
-        node "$GITHUB_ACTION_PATH/src/fix.ts"
+      run: node "$GITHUB_ACTION_PATH/src/action/runtime.ts" fix
 
-    # The setup PR's check, while it holds only the stock scenario (src/mode.ts): the selected agent writes the first
-    # scenarios, Kane runs them with the stock one, and the ones that pass are pushed to the setup branch.
     - name: Write scenarios, run them with Kane
       id: generate
       if: steps.mode.outputs.mode == 'check' && steps.mode.outputs.generate == 'true'
@@ -421,24 +438,14 @@ runs:
         PROOFED_MODEL: ${{ steps.mode.outputs.model }}
         PROOFED_EFFORT: ${{ steps.mode.outputs.effort }}
         PROOFED_FIX: ${{ inputs.fix }}
-        PROOFED_OUT: ${{ runner.temp }}/proofed
         LT_USERNAME: ${{ inputs.lt-username }}
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
         CODEX_API_KEY: ${{ inputs.codex-api-key }}
         PROOFED_CODEX_HOME: ${{ steps.codex-auth.outputs.dir }}
-        KANE_CLI_CDP_TIMEOUT_MS: "60000"
-        KANE_CLI_CDP_RETRIES: "2"
-        KANE_CLI_USER_AGENT: github-action
         GITHUB_TOKEN: ${{ inputs.github-token }}
         PROOFED_SERVER: ${{ inputs.proofed-url }}
-      run: |
-        echo "report=$PROOFED_OUT/report.md" >> "$GITHUB_OUTPUT"
-        if [ -n "$PROOFED_CODEX_HOME" ]; then
-          export CODEX_HOME="$PROOFED_CODEX_HOME"
-          unset CODEX_API_KEY
-        fi
-        node "$GITHUB_ACTION_PATH/src/generate.ts"
+      run: node "$GITHUB_ACTION_PATH/src/action/runtime.ts" generate
 
     - name: Fix, verify with Kane
       if: steps.mode.outputs.mode == 'fix'
@@ -462,23 +469,21 @@ runs:
         PROOFED_PROVIDER: ${{ steps.mode.outputs.provider }}
         PROOFED_MODEL: ${{ steps.mode.outputs.model }}
         PROOFED_EFFORT: ${{ steps.mode.outputs.effort }}
-        PROOFED_OUT: ${{ runner.temp }}/proofed
         LT_USERNAME: ${{ inputs.lt-username }}
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
         CODEX_API_KEY: ${{ inputs.codex-api-key }}
         PROOFED_CODEX_HOME: ${{ steps.codex-auth.outputs.dir }}
-        KANE_CLI_CDP_TIMEOUT_MS: "60000"
-        KANE_CLI_CDP_RETRIES: "2"
-        KANE_CLI_USER_AGENT: github-action
         GITHUB_TOKEN: ${{ inputs.github-token }}
         PROOFED_SERVER: ${{ inputs.proofed-url }}
-      run: |
-        if [ -n "$PROOFED_CODEX_HOME" ]; then
-          export CODEX_HOME="$PROOFED_CODEX_HOME"
-          unset CODEX_API_KEY
-        fi
-        node "$GITHUB_ACTION_PATH/src/fix.ts"
+      run: node "$GITHUB_ACTION_PATH/src/action/runtime.ts" fix
+
+    - name: Save Gradle caches and wrapper after the fix
+      if: ${{ !cancelled() && steps.mode.outputs.mode == 'fix' && steps.deps.outcome == 'success' && steps.stores.outputs.gradle_key != '' && steps.gradle-cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ steps.stores.outputs.gradle_path }}
+        key: ${{ steps.stores.outputs.gradle_key }}
 
     - name: Keep the recordings
       if: always() && steps.mode.outputs.mode != 'none'
@@ -499,4 +504,11 @@ runs:
       shell: bash
       env:
         PROOFED_CODEX_HOME: ${{ steps.codex-auth.outputs.dir }}
-      run: rm -rf -- "$PROOFED_CODEX_HOME"
+      run: node "$GITHUB_ACTION_PATH/src/action/runtime.ts" remove-auth
+
+    - name: Clean up the background Codex install
+      if: always() && steps.codex-background.outputs.dir != ''
+      shell: bash
+      env:
+        PROOFED_CODEX_BACKGROUND: ${{ steps.codex-background.outputs.dir }}
+      run: node "$GITHUB_ACTION_PATH/src/action/runtime.ts" remove-background
