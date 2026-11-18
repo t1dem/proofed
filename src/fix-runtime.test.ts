@@ -15,6 +15,7 @@ function fixture(target = "android", extra = "", build = "node build.cjs", final
   extraScenario?: boolean;
   changeAfterAttempt?: boolean;
   buildOutput?: boolean;
+  agentBuildOutput?: "with-source" | "only";
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "proofed-fix-runtime-"));
   const log = join(dir, "events.jsonl");
@@ -32,13 +33,17 @@ function fixture(target = "android", extra = "", build = "node build.cjs", final
   writeFileSync(join(dir, ".proofed/scenarios/counter.md"), `---\nname: Counter\ntarget: ${target}\n${target === "desktop" ? "execution: local\n" : `execution: cloud\napp: app.${target === "ios" ? "ipa" : "apk"}\n`}${extra}---\nAssert counter is 1. [fake-from:counter] [delay:1]\n`);
   writeFileSync(join(dir, "build.cjs"), `const fs=require('node:fs'); fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({type:'build',code:fs.readFileSync('app.js','utf8')})+'\\n'); fs.writeFileSync('app.${target === "ios" ? "ipa" : "apk"}',fs.readFileSync('app.js')); ${finalFails ? `const rounds=fs.readFileSync(${JSON.stringify(log)},'utf8').split('"type":"build"').length-1;if(rounds===2)fs.writeFileSync('modes/extra','fail');` : ""}`);
   git("init", "-q", "-b", "main");
-  if (options.buildOutput) {
+  if (options.buildOutput || options.agentBuildOutput) {
     mkdirSync(join(dir, "dist"));
     writeFileSync(join(dir, "dist/index.html"), "committed output");
     writeFileSync(join(dir, "dist/old.html"), "committed old output");
+    if (options.agentBuildOutput) {
+      writeFileSync(join(dir, ".gitignore"), readFileSync(join(dir, ".gitignore"), "utf8") + "dist/\n");
+      git("add", "-f", "--", "dist");
+    }
+  }
+  if (options.buildOutput) {
     writeFileSync(join(dir, "dist/config.js"), "original config");
-    git("add", "-f", "--", "dist");
-    writeFileSync(join(dir, ".gitignore"), readFileSync(join(dir, ".gitignore"), "utf8") + "dist/\n");
     const buildScript = join(dir, "build.cjs");
     writeFileSync(buildScript, readFileSync(buildScript, "utf8") + `
 fs.writeFileSync('dist/index.html', 'rebuilt output');
@@ -63,11 +68,13 @@ export const setStatus=async(_repo,_sha,state,description)=>record('status',{sta
 export const publishClips=async()=>new Map();
 export const minimize=async()=>{};`;
   const agent = `export * from ${JSON.stringify(new URL("./agent.ts", import.meta.url).href)};
+import { execFileSync } from 'node:child_process';
 export function askAgent(prompt){
   globalThis.fixtureLog('ask',prompt);
   const fs=globalThis.fixtureFs;
-  fs.writeFileSync('app.js','fixed\\n');
-  fs.writeFileSync('new-helper.js','verified new file\\n');
+  ${options.agentBuildOutput !== "only" ? "fs.writeFileSync('app.js','fixed\\n');" : ""}
+  ${options.agentBuildOutput ? "fs.writeFileSync('dist/index.html','agent built output');" : "fs.writeFileSync('new-helper.js','verified new file\\n');"}
+  ${options.agentBuildOutput === "with-source" ? "execFileSync('git', ['rm', '--quiet', '--', 'dist/old.html']);" : ""}
   ${options.buildOutput ? "if (fs.existsSync('build-output.js')) fs.writeFileSync('dist/config.js','fixed config');" : ""}
   return {ok:true,text:'SUMMARY: Fix counter'};
 }`;
@@ -139,6 +146,31 @@ test("a retried fix commits agent edits and restores tracked build output", () =
     assert.equal(readFileSync(join(f.dir, "dist/index.html"), "utf8"), "committed output");
     assert.equal(readFileSync(join(f.dir, "dist/old.html"), "utf8"), "committed old output");
     assert.equal(f.git("status", "--porcelain"), "?? build-output.js");
+  } finally { f.cleanup(); }
+});
+
+test("a fix restores ignored tracked output rewritten or deleted by the agent", () => {
+  const f = fixture("android", "", "node build.cjs", false, { agentBuildOutput: "with-source" });
+  try {
+    const ran = f.run();
+    assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+    assert.equal(f.git("diff", "--name-only", f.original, "HEAD"), "app.js");
+    assert.equal(readFileSync(join(f.dir, "dist/index.html"), "utf8"), "committed output");
+    assert.equal(readFileSync(join(f.dir, "dist/old.html"), "utf8"), "committed old output");
+    assert.equal(f.git("status", "--porcelain"), "");
+    assert.ok(f.events().some((e) => e.type === "push"));
+  } finally { f.cleanup(); }
+});
+
+test("agent edits to ignored tracked output alone do not start the build", () => {
+  const f = fixture("android", "", "node build.cjs", false, { agentBuildOutput: "only" });
+  try {
+    const ran = f.run();
+    assert.equal(ran.status, 1, ran.stdout + ran.stderr);
+    assert.equal(f.git("rev-parse", "HEAD"), f.original);
+    const events = f.events();
+    assert.equal(events.some((e) => ["build", "push"].includes(e.type)), false);
+    assert.ok(events.some((e) => e.type === "report" && /You made no changes to the code/.test(e.value as string)));
   } finally { f.cleanup(); }
 });
 

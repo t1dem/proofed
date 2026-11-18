@@ -182,6 +182,10 @@ const agentTouched = new Set<string>();
 let beforeAnswer = new Map<string, string>();
 let lastAttemptTree: string | undefined;
 
+// Ignore rules mark build output even if the project tracks it and the fixer rebuilds it.
+// Include HEAD entries so staged deletions are matched too.
+const ignoredTrackedPaths = () => new Set(git("ls-files", "-z", "--cached", "--ignored", "--exclude-standard", "--with-tree=HEAD").split("\0").filter(Boolean));
+
 // Checked before the change is built, served to Kane and recorded, since clips and reports are public.
 function discardLeak() {
   const leaked = fileWithSecret(fixChanges());
@@ -220,7 +224,10 @@ const loop = await fixLoop({
     }
     return undone;
   },
-  hasChanges: () => fixChanges().some((file) => agentTouched.has(file)),
+  hasChanges: () => {
+    const ignored = ignoredTrackedPaths();
+    return fixChanges().some((file) => agentTouched.has(file) && !ignored.has(file));
+  },
   build,
   changedFiles: fixChanges,
   allScenarios: () => targetScenarios(pickScenarios({ rev }).selected),
@@ -321,17 +328,19 @@ if (leak) {
   await restoreReport(`${leak}; nothing was pushed.`, true, "The fix contained a credential; nothing was pushed");
   process.exit(1);
 }
+const ignored = ignoredTrackedPaths();
+const shouldCommit = (file: string) => agentTouched.has(file) && !ignored.has(file);
 const buildOnlyTracked = [...new Set([
   ...diffPaths("--diff-filter=a", "HEAD"),
   ...diffPaths("--cached", "--diff-filter=a", "HEAD"),
-])].filter((file) => !agentTouched.has(file));
+])].filter((file) => !shouldCommit(file));
 if (buildOnlyTracked.length) git("--literal-pathspecs", "checkout", "HEAD", "--", ...buildOnlyTracked);
-const buildOnlyAdded = diffPaths("--cached", "--diff-filter=A", "HEAD").filter((file) => !agentTouched.has(file));
+const buildOnlyAdded = diffPaths("--cached", "--diff-filter=A", "HEAD").filter((file) => !shouldCommit(file));
 if (buildOnlyAdded.length) git("--literal-pathspecs", "reset", "HEAD", "--", ...buildOnlyAdded);
-const trackedEdits = diffPaths().filter((file) => agentTouched.has(file));
+const trackedEdits = diffPaths().filter(shouldCommit);
 const untracked = untrackedPaths();
-const newFiles = untracked.filter((file) => agentTouched.has(file));
-const buildOnlyUntracked = new Set(untracked.filter((file) => !agentTouched.has(file)));
+const newFiles = untracked.filter(shouldCommit);
+const buildOnlyUntracked = new Set(untracked.filter((file) => !shouldCommit(file)));
 if (trackedEdits.length) git("--literal-pathspecs", "add", "-u", "--", ...trackedEdits);
 if (newFiles.length) git("--literal-pathspecs", "add", "--", ...newFiles);
 if (!diffPaths("--cached").length) {
