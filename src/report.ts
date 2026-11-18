@@ -1,38 +1,21 @@
-import { checkedAt, checkedWhere } from "./fixtarget.ts";
+import { checkedWhere } from "./fixtarget.ts";
 import { gitPath } from "./paths.ts";
 import { MARKER, OLD_MARKER } from "./github.ts";
-import { BLANK_PAGE, FAILED_CHECK_ACTION, FAILED_CHECK_REASON, runMarker } from "./runfile.ts";
+import { BLANK_PAGE, FAILED_CHECK_ACTION, FAILED_CHECK_REASON } from "./runfile.ts";
 import type { Step } from "./kane.ts";
 import { DEFAULT_FIXER, describeFixer, providerLabel, providerOf, type Fixer, type Provider } from "./models.ts";
 import { DESCRIPTION_DOUBTED, DESCRIPTION_UNCHECKED, descriptionCheckNote, isDescriptionScenario } from "./requests.ts";
 import { creditsOf, scenarioDoubted, unchecked, type ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
 import type { FixSetup } from "./fixsetup.ts";
+import {
+  addRun, collectReportData, COMMENT_LIMIT, compactReportData, dataComment, kaneSteps, MAX_STEPS, oneLine, runMarker,
+  type ClipLinks, type FailureData, type ReportData, type RunEntry, type RunState,
+} from "./reportdata.ts";
 
-export type ClipLinks = { gif?: string; mp4?: string; jpg?: string };
+export { addRun, alreadyReported, dataComment, outcomeOf, postsNew, readReportData, readRunKey, runMarker } from "./reportdata.ts";
+export type { ClipLinks, FailureData, Outcome, ReportData, RunEntry, RunState } from "./reportdata.ts";
 
-// What the fix workflow needs to know about a failure, kept in the comment itself
-// so the fix run doesn't depend on artifacts from another workflow.
-// `clip` is the "before" side of the report after a fix; reports written before it existed have none.
-export type FailureData = {
-  id: string;
-  name: string;
-  file: string;
-  objective: string;
-  reason: string;
-  diagnosis: string;
-  checkedAt?: string;
-  failedCheck?: "scenario_doubted";
-  steps: string[];
-  clip?: ClipLinks;
-};
-// "unsure": nothing broke, but a scenario wasn't confirmed either (run.ts), so the run isn't a pass.
-export type RunState = "failed" | "passed" | "fixed" | "error" | "unsure";
-export type RunEntry = { sha: string; state: RunState };
-// `asked`: one-off checks from the PR description or a /proofed comment, kept so the fixer can re-run them.
-// `history`: one entry per published report, newest last.
-// `open`: the scenarios that didn't pass (failed, couldn't finish, not confirmed); left out when there are none.
-export type ReportData = { sha: string; failures: FailureData[]; asked?: Scenario[]; history?: RunEntry[]; open?: string[]; descriptionNote?: ReturnType<typeof descriptionCheckNote> };
 export type FileChange = { file: string; added: number; removed: number };
 // One round of the fix loop: what Claude said it changed, and what came of it.
 export type FixAttempt = { summary: string; result: string };
@@ -55,75 +38,20 @@ export type Written = (
   | { status: "failed" }
 ) & { credits?: number; provider?: Provider };
 
-const DATA_RE = /<!-- proofed:data (.*?) -->/s;
 // Claude keeps its old label: installed workflows filter edits by this exact text.
 export const FIX_BOX = "Fix with Claude";
-const COMMENT_LIMIT = 65_536;
-const HISTORY_SIZE = 8;
-const MAX_STEPS = 30;
-const MAX_STEP = 200;
-
-export function readReportData(body: string): ReportData | undefined {
-  const raw = DATA_RE.exec(body)?.[1];
-  if (!raw) return undefined;
-  try {
-    return JSON.parse(raw) as ReportData;
-  } catch {
-    return undefined;
-  }
-}
-
-// A push of the very commit the report is about: the Proofed app pushing the fixer's fix, which the fix
-// run checked and reported before it ended. Any other push brings a new commit, and a /proofed
-// comment always runs, whatever the commit.
-export const alreadyReported = (action: string | undefined, headSha: string, report: ReportData | undefined) =>
-  action === "synchronize" && report?.sha === headSha;
 
 export const fixRequested = (body: string) => /^- \[x\] \*\*Fix with (?:Claude|Codex)\*\*/m.test(body);
 
 export const WORKING = "⏳ **Claude is working on a fix**";
 
-// JSON inside an HTML comment: "--" would end the comment early, so escape it.
-export const dataComment = (data: ReportData) => `<!-- proofed:data ${JSON.stringify(data).replaceAll("--", "\\u002d\\u002d")} -->`;
-
-// What a report says: the overall state, as the dashboard reads it, and which scenarios aren't passing.
-export type Outcome = { state: "passing" | "failing" | "blocked"; open: string[] };
-const STATES: Record<RunState, Outcome["state"]> = { failed: "failing", error: "blocked", passed: "passing", fixed: "passing", unsure: "passing" };
-
-// Reports from before `open` was kept name only the failures.
-export function outcomeOf(data: ReportData): Outcome {
-  const last = data.history?.at(-1);
-  const state = last?.sha === data.sha ? STATES[last.state] : data.failures.length > 0 ? "failing" : "passing";
-  return { state, open: [...(data.open ?? data.failures.map((f) => f.id))].sort() };
-}
-
-// GitHub notifies on a new comment, not on an edit. So a report is posted anew when someone should hear
-// of it: the first report, a run a person asked for or a fix that ended (`notify`), or an outcome that
-// changed. A push that finds the same as the current report only updates it.
-export function postsNew(current: string | undefined, next: string, notify: boolean) {
-  if (notify || current === undefined) return true;
-  const was = readReportData(current);
-  const now = readReportData(next);
-  if (!was || !now) return true;
-  // A fix's report keeps its before and after: the next commit gets its own.
-  if (was.sha !== now.sha && was.history?.at(-1)?.state === "fixed") return true;
-  const [a, b] = [outcomeOf(was), outcomeOf(now)];
-  return a.state !== b.state || a.open.join("\n") !== b.open.join("\n");
-}
-
+export const FIX_BOX_LINE = /^- \[[ x]\] \*\*Fix with (?:Claude|Codex)\*\*[^\n]*/m;
 const LIVE_LINES = /\n\n(?:- \[[ x]\] \*\*Fix with (?:Claude|Codex)\*\*|⏳ \*\*(?:Claude|Codex) is working on a fix\*\*)[^\n]*/g;
+const OMISSION_NOTE = "_Some report details were omitted to fit GitHub's comment limit._";
 
 // A report a newer one replaced: without the fix box, so nobody ticks a stale one, or a "working" line
 // that would never end, and with a marker that nothing reads as the PR's report.
 export const outdated = (body: string) => body.replaceAll(MARKER, OLD_MARKER).replace(LIVE_LINES, "");
-
-// A re-run on the same commit replaces its entry. Re-checking a commit Claude pushed keeps it a fix.
-export function addRun(history: RunEntry[] = [], run: RunEntry): RunEntry[] {
-  const last = history.at(-1);
-  if (last?.sha !== run.sha) return [...history, run].slice(-HISTORY_SIZE);
-  const state = last.state === "fixed" && run.state === "passed" ? "fixed" : run.state;
-  return [...history.slice(0, -1), { sha: run.sha, state }].slice(-HISTORY_SIZE);
-}
 
 const quote = (text = "") =>
   text
@@ -134,11 +62,6 @@ const quote = (text = "") =>
 
 const short = (sha: string) => sha.slice(0, 7);
 
-// Kane's and the fixer's words on one line, cut to `max` characters.
-const oneLine = (text = "", max = 300) => {
-  const line = text.replace(/\s+/g, " ").trim();
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
-};
 // Inside <details> and tables GitHub would take "<Cart>" for a tag and drop it.
 const html = (text: string) => text.replaceAll("<", "&lt;");
 const cell = (text: string) => html(oneLine(text)).replaceAll("|", "\\|");
@@ -160,27 +83,11 @@ function screenshot(links: ClipLinks | undefined, url: string) {
   return `\n\n<img src="${links!.jpg}" width="720" alt="${SCREENSHOT_ALT}">\n\n<sub>This is what a user sees on opening ${code(url)}.</sub>`;
 }
 
-// The before/after table needs the video and a picture; the GIF only stands in for a missing still.
-function storedClip(links: ClipLinks | undefined): ClipLinks | undefined {
-  if (!links?.mp4 && !links?.jpg && !links?.gif) return undefined;
-  return links.jpg ? { mp4: links.mp4, jpg: links.jpg } : { mp4: links.mp4, gif: links.gif };
-}
-
 function still(links: ClipLinks | undefined) {
   const src = links?.jpg ?? links?.gif;
   if (!src) return "";
   const img = `<img src="${src}" width="360" alt="${isScreenshot(links) ? SCREENSHOT_ALT : "Kane's run"}">`;
   return links?.mp4 ? `<a href="${links.mp4}">${img}</a>` : img;
-}
-
-// The last `keep` steps Kane finished, each cut to MAX_STEP characters.
-function kaneSteps(steps: Step[], keep = MAX_STEPS) {
-  const done = steps.filter((s) => s.status !== "running" && s.remark);
-  const from = Math.max(done.length - keep, 0);
-  return {
-    from: from + 1,
-    steps: done.slice(from).map((s) => ({ failed: s.status === "failed", text: oneLine(s.remark, MAX_STEP) })),
-  };
 }
 
 function stepList(steps: Step[]) {
@@ -195,6 +102,26 @@ function attemptList(fix: FixNote) {
   if (tries.length < 2) return "";
   const items = tries.map((t, i) => `${i + 1}. ${html(oneLine([t.summary, t.result].filter(Boolean).join(" ")))}`);
   return `\n\n<details><summary>${tries.length} attempts</summary>\n\n${items.join("\n")}\n\n</details>`;
+}
+
+function gaveUpSummary(fix: FixNote) {
+  return `**Tried ${fix.attempts} times with ${describeFixer(fix)} and couldn't make it pass.** Nothing was pushed.`;
+}
+
+// Add the attempted fix to the original report without recomputing its check results.
+export function withGaveUpAttempt(body: string, fix: FixNote, attemptNote: string) {
+  const summary = gaveUpSummary(fix);
+  const passed = attemptNote ? `\n\n${html(attemptNote)}` : "";
+  const details = `${summary} Last attempt: ${html(oneLine(fix.summary))}${passed}${attemptList(fix)}`;
+  const place = (text: string) => FIX_BOX_LINE.test(body)
+    ? body.replace(FIX_BOX_LINE, () => text)
+    : body.replace(/(### Proofed\n\n[^\n]*)/, (_, headline: string) => `${headline}\n\n${text}`);
+  const shortNote = "**The fix failed.** Nothing was pushed.";
+  for (const note of [details, summary + passed, summary, shortNote]) {
+    const edited = place(note);
+    if (edited.length <= COMMENT_LIMIT) return edited;
+  }
+  return body.replace(OMISSION_NOTE, shortNote).replace(/^- \[x\] (\*\*Fix with (?:Claude|Codex)\*\*)/m, "- [ ] $1");
 }
 
 function whatChanged(fix: FixNote) {
@@ -371,7 +298,7 @@ function compose(
     );
   } else if (fix?.status === "gave-up") {
     sections.push(
-      `**Tried ${fix.attempts} times with ${describeFixer(fix)} and couldn't make it pass.** Nothing was pushed. Last attempt: ${fix.summary}` +
+      `${gaveUpSummary(fix)} Last attempt: ${fix.summary}` +
         attemptList(fix),
     );
   }
@@ -438,26 +365,7 @@ function compose(
   const state: RunState = failed.length > 0 ? "failed" : errored.length > 0 ? "error" : fix?.status === "fixed" ? "fixed" : unsure.length > 0 ? "unsure" : "passed";
   const history = addRun(previous?.history, { sha, state });
   const open = [...failed, ...errored, ...unsure].map((r) => r.scenario.id);
-  const rerun = asked?.filter((s) => !descriptionNote || !isDescriptionScenario(s));
-  const data: ReportData = {
-    sha,
-    ...(rerun?.length && { asked: rerun }),
-    ...(descriptionNote && { descriptionNote }),
-    failures: failed.map((r) => ({
-      id: r.scenario.id,
-      name: r.scenario.name,
-      file: r.scenario.file,
-      objective: r.scenario.objective,
-      checkedAt: checkedAt(r.scenario),
-      reason: r.end?.reason ?? "",
-      diagnosis: r.end?.verdict?.root_cause ?? r.end?.summary ?? "",
-      ...(scenarioDoubted(r) && { failedCheck: "scenario_doubted" as const }),
-      steps: kaneSteps(r.steps, storedSteps).steps.map((s) => `${s.failed ? "✗" : "·"} ${s.text}`),
-      clip: storedClip(clips.get(r.scenario.id)),
-    })),
-    history,
-    ...(open.length && { open }),
-  };
+  const data = collectReportData({ sha, failed, open, asked, descriptionNote, clips, storedSteps, history });
 
   const footer = [`Run by Kane CLI on ${short(sha)}`, credits > 0 && `${Math.round(credits)} credits (Kane estimate)`, runUrl && `[logs](${runUrl})`]
     .filter(Boolean)
@@ -471,24 +379,11 @@ function compose(
   const body = `${sections.join("\n\n")}\n\n<sub>${lines}</sub>\n${dataComment(data)}${marker}`;
   if (storedSteps > 0 || body.length <= COMMENT_LIMIT) return body;
 
-  const note = "_Some report details were omitted to fit GitHub's comment limit._";
-  const { asked: _asked, failures, ...outcome } = data;
-  // The fixer can re-read file-backed objectives. Ad hoc objectives aren't stored anywhere else.
-  const compact = failures.map((f) => ({ ...f, objective: "", steps: [] }));
-  const { open: _open, ...historyOnly } = outcome;
-  // Keep valid metadata for the whole report even when the failure records won't fit.
-  for (const compactData of [
-    { ...outcome, failures: compact },
-    { ...outcome, failures: compact.filter((f) => f.file).map(({ id, name, file, failedCheck }) => ({
-      id, name, file, failedCheck, objective: "", steps: [], reason: "", diagnosis: "",
-    })) },
-    { ...outcome, failures: [] },
-    { ...historyOnly, failures: [] },
-  ]) {
-    const hint = canFix && compactData.failures.some((f) => f.file)
+  for (const compact of compactReportData(data)) {
+    const hint = canFix && compact.failures.some((f) => f.file)
       ? "\n\nComment `/proofed fix` to fix the file-backed scenarios."
       : "";
-    const tail = `\n\n${note}${hint}\n${dataComment(compactData)}${marker}`;
+    const tail = `\n\n${OMISSION_NOTE}${hint}\n${dataComment(compact)}${marker}`;
     const remaining = COMMENT_LIMIT - tail.length;
     if (remaining >= summary[0]!.length) {
       const visible = summary.join("\n\n");
@@ -496,5 +391,5 @@ function compose(
       return visible.slice(0, Math.max(cut, summary[0]!.length)).trimEnd() + tail;
     }
   }
-  return `${summary[0]}\n\n${note}`;
+  return `${summary[0]}\n\n${OMISSION_NOTE}`;
 }
