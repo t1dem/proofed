@@ -45,6 +45,7 @@ test("update notices are not the reason, and a cloud run that never started name
     "TestMu gave Kane no real device (iPhone 15, iOS 18) within 6 minutes; that model may be busy. Pick another from kane-cli devices list --target ios --remote.",
   );
   assert.equal(cutOffReason("Update available: 0.10.4\nstill thinking\n", ios, true), "Kane stopped responding and the run was cut off after 6 minutes; Kane's last line: still thinking");
+  assert.equal(cutOffReason("", ios, true, 540), "Kane stopped responding and the run was cut off after 9 minutes");
   assert.equal(cutOffReason("", { kind: "web", execution: "local", sources: {}, dir: "." }, false), "Kane stopped responding and the run was cut off after 6 minutes");
 });
 

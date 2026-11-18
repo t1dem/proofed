@@ -32,13 +32,15 @@ function owned(bin: string, args: string[], cwd?: string, env = process.env, she
   };
 }
 
-async function required(bin: string, args: string[]) {
-  const result = await command(bin, args);
+async function required(bin: string, args: string[], timeout?: number) {
+  const result = await command(bin, args, process.env, timeout);
   if (!result.ok) throw new Error(result.text);
   return result.text;
 }
 
 async function nativeRecorder(target: Extract<Target, { kind: "ios" | "android" }>, dir: string, id: string) {
+  // Transferring and encoding long recordings can take minutes on CI runners.
+  const recordingTimeout = 10 * 60 * 1000;
   const segments: string[] = [];
   let stopped = false;
   let current: ReturnType<typeof owned> | undefined;
@@ -66,8 +68,9 @@ async function nativeRecorder(target: Extract<Target, { kind: "ios" | "android" 
       if (target.kind === "android" && !remotePid) { await current.stop(); throw new Error(`screenrecord did not return its PID: ${current.error()}`); }
       began();
       await current.exited;
+      remotePid = undefined;
       if (target.kind === "android") {
-        await required("adb", ["-s", id, "pull", remote, file]);
+        await required("adb", ["-s", id, "pull", remote, file], recordingTimeout);
         await required("adb", ["-s", id, "shell", "rm", remote]);
       }
       await current.stop();
@@ -84,7 +87,11 @@ async function nativeRecorder(target: Extract<Target, { kind: "ios" | "android" 
     stop(): Promise<Clip> {
       return stopping ??= (async () => {
         stopped = true;
-        if (target.kind === "android" && remotePid) await required("adb", ["-s", id, "shell", "kill", "-2", remotePid]);
+        if (target.kind === "android" && remotePid) {
+          const signal = await command("adb", ["-s", id, "shell", "kill", "-2", remotePid]);
+          // The segment can expire while adb is delivering the signal.
+          if (!signal.ok && !/no such process/i.test(signal.text)) throw new Error(signal.text);
+        }
         if (target.kind === "ios") await current?.stop();
         await loop;
         const list = join(dir, "segments.txt");
@@ -93,18 +100,18 @@ async function nativeRecorder(target: Extract<Target, { kind: "ios" | "android" 
         const untrimmed = join(dir, "clip-untrimmed.mp4");
         try {
           // Use a constant frame rate so the thumbnail seek finds a frame even when the Android screen stops changing.
-          await required("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", list, "-vf", "fps=10,scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-bf", "0", "-pix_fmt", "yuv420p", untrimmed]);
-          const { text } = await command("ffmpeg", ["-hide_banner", "-i", untrimmed]);
+          await required("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", list, "-vf", "fps=10,scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-bf", "0", "-pix_fmt", "yuv420p", untrimmed], recordingTimeout);
+          const { text } = await command("ffmpeg", ["-hide_banner", "-i", untrimmed], process.env, recordingTimeout);
           const duration = /^\s*Duration: (\d+):(\d{2}):(\d{2}\.\d+),/m.exec(text);
           const seconds = duration ? Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3]) : 0;
           // Kane closes the app at the end, so cut away the launcher frames.
-          if (seconds > 3) await required("ffmpeg", ["-y", "-i", untrimmed, "-t", (seconds - 1.5).toFixed(2), "-c", "copy", mp4]);
+          if (seconds > 3) await required("ffmpeg", ["-y", "-i", untrimmed, "-t", (seconds - 1.5).toFixed(2), "-c", "copy", mp4], recordingTimeout);
           else renameSync(untrimmed, mp4);
         } finally {
           rmSync(untrimmed, { force: true });
         }
-        await required("ffmpeg", ["-y", "-sseof", "-0.1", "-i", mp4, "-frames:v", "1", jpg]);
-        await required("ffmpeg", ["-y", "-i", mp4, "-vf", "fps=6,scale=480:-1", gif]);
+        await required("ffmpeg", ["-y", "-sseof", "-0.1", "-i", mp4, "-frames:v", "1", jpg], recordingTimeout);
+        await required("ffmpeg", ["-y", "-i", mp4, "-vf", "fps=6,scale=480:-1", gif], recordingTimeout);
         return { mp4, jpg, gif };
       })();
     },

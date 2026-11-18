@@ -8,10 +8,10 @@ const exec = promisify(execFile);
 export type TargetCheck = { name: string; status: "ok" | "warn" | "fail"; detail: string; fix: string };
 export const kaneTarget = (target: Target) => target.kind === "ios" ? (target.execution === "local" ? "simulator" : "ios") : target.kind === "android" ? (target.execution === "local" ? "emulator" : "android") : "desktop";
 
-export async function command(bin: string, args: string[], env = process.env) {
+export async function command(bin: string, args: string[], env = process.env, timeout = 20_000) {
   try {
     const cmd = executableCommand(bin, args, env);
-    const { stdout, stderr } = await exec(cmd.file, cmd.args, { env, windowsHide: true, timeout: 20_000, maxBuffer: 4 * 1024 * 1024 });
+    const { stdout, stderr } = await exec(cmd.file, cmd.args, { env, windowsHide: true, timeout, maxBuffer: 4 * 1024 * 1024 });
     return { ok: true, text: `${stdout}\n${stderr}`.trim() };
   } catch (error) {
     const e = error as { stdout?: string; stderr?: string; message?: string };

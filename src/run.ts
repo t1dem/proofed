@@ -205,19 +205,20 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     return { scenario, outcome: "error", steps: [], end: undefined, clip: undefined, error: String(e) };
   }
   let stills: NodeJS.Timeout | undefined;
+  const timeouts = kaneTimeouts(scenario);
   try {
     const recorder = prepared.recorder;
     if (!recorder) {
       let nativeClip: Promise<Clip | undefined> | undefined;
       const stopNative = () => nativeClip ??= prepared.native?.stop();
-      const kane = await runKane({ onEnd: () => { void stopNative()?.catch(() => {}); }, objective: kaneObjective(scenario.objective), ...kaneTimeouts(scenario), kaneArgs: prepared.kaneArgs, rawFile: join(dir, "kane.ndjson"), username: o.username, accessKey: o.accessKey, onStep: (step) => o.onEvent?.({ type: "step", id: scenario.id, step }) });
+      const kane = await runKane({ onEnd: () => { void stopNative()?.catch(() => {}); }, objective: kaneObjective(scenario.objective), ...timeouts, kaneArgs: prepared.kaneArgs, rawFile: join(dir, "kane.ndjson"), username: o.username, accessKey: o.accessKey, onStep: (step) => o.onEvent?.({ type: "step", id: scenario.id, step }) });
       let recordingNote = prepared.metadata.recordingNote;
       const clip = await stopNative()?.catch((e: unknown) => { recordingNote = `Native recording failed: ${String(e)}`; return undefined; });
       const end = reconciledEnd(kane.end, kane.steps);
       const outcome = outcomeOf(end, kane.steps);
       writeFileSync(join(dir, "metadata.json"), JSON.stringify({ ...prepared.metadata, recordingNote }));
       const error = kane.timedOut
-        ? cutOffReason(kane.stderr, target, kane.steps.length > 0)
+        ? cutOffReason(kane.stderr, target, kane.steps.length > 0, timeouts.wallTimeoutSeconds)
         : end?.reason || (end ? `Kane ended with status ${end.status}` : kaneError(kane.stderr) || "Kane exited without run_end");
       return {
         scenario, outcome, accountBalance: kane.accountBalance,
@@ -246,7 +247,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     const asserted = assertSnapshots(expected, () => recorder.visibleText());
     const kane = await runKane({
       signal: controller.signal,
-      objective: kaneObjective(scenario.objective), ...kaneTimeouts(scenario),
+      objective: kaneObjective(scenario.objective), ...timeouts,
       kaneArgs: prepared.kaneArgs,
       rawFile: join(dir, "kane.ndjson"),
       username: o.username,
@@ -276,7 +277,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     const end = verdict && outcome === "unsure" && verdict.status === "passed" ? { ...verdict, reason: contradiction ?? NOTHING_CHECKED } : verdict;
     log(`→ ${outcome}${end?.reason ? `: ${end.reason}` : ""} (${frames.length} frames)`);
     const error = recorder.unexpectedPage ? "Experimental desktop attach failed: Kane opened another page instead of using the chosen renderer" : kane.timedOut
-      ? cutOffReason(kane.stderr, target, kane.steps.length > 0)
+      ? cutOffReason(kane.stderr, target, kane.steps.length > 0, timeouts.wallTimeoutSeconds)
       : (end?.reason || (end ? `Kane ended with status ${end.status}` : kaneError(kane.stderr) || "Kane exited without run_end"));
     const film = { frames, actions: recorded.actions, focus: focusRect };
     writeFileSync(join(dir, "film.json"), JSON.stringify(film));
