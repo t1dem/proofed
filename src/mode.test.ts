@@ -6,7 +6,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { SETUP_BRANCH } from "./setup.ts";
 
-const pr = { number: 7, head: { sha: "head", ref: "fork" }, base: { sha: "base", ref: "main" } };
+const repository = { full_name: "owner/repo" };
+const pr = {
+  number: 7,
+  head: { sha: "head", ref: "feature", repo: repository },
+  base: { sha: "base", ref: "main", repo: repository },
+};
 const report = {
   id: 12, user: { type: "Bot" },
   body: '<!-- proofed -->\n- [x] **Fix with Claude**\n<!-- proofed:data {"sha":"head","failures":[{}]} -->',
@@ -16,11 +21,13 @@ const comment = (action = "created", body = "/proofed") => ({
   comment: action === "edited" ? report : { id: 13, body, user: { type: "User" }, author_association: "MEMBER" },
 });
 
-function run(event: object, permission: string | number, replyFails = false, env: Record<string, string> = {}) {
+function run(event: object, permission: string | number, replyFails = false, env: Record<string, string> = {}, fetchedPr: object = pr) {
   const dir = mkdtempSync(join(tmpdir(), "proofed-mode-"));
   try {
     const path = join(dir, "event.json");
+    const summary = join(dir, "summary.md");
     writeFileSync(path, JSON.stringify(event));
+    writeFileSync(summary, "");
     const script = `
       import assert from "node:assert/strict";
       const calls = [];
@@ -36,7 +43,7 @@ function run(event: object, permission: string | number, replyFails = false, env
           return new Response(null, { status: ${replyFails ? 403 : 204} });
         }
         if (path.endsWith("/comments")) return Response.json([${JSON.stringify(report)}]);
-        if (path.endsWith("/pulls/7")) return Response.json(${JSON.stringify(pr)});
+        if (path.endsWith("/pulls/7")) return Response.json(${JSON.stringify(fetchedPr)});
         throw new Error("Unexpected request: " + path);
       };
       await import(${JSON.stringify(new URL("./mode.ts", import.meta.url).href)});
@@ -45,11 +52,12 @@ function run(event: object, permission: string | number, replyFails = false, env
       encoding: "utf8",
       env: {
         ...process.env, GITHUB_EVENT_PATH: path, GITHUB_TOKEN: "job-token", GITHUB_REPOSITORY: "owner/repo",
-        GITHUB_OUTPUT: "", PROOFED_VARS: "{}", PROOFED_FIX: "true", PROOFED_CLAUDE: "false", PROOFED_CODEX: "false", ...env,
+        GITHUB_OUTPUT: "", GITHUB_STEP_SUMMARY: summary, PROOFED_VARS: "{}",
+        PROOFED_FIX: "true", PROOFED_CLAUDE: "false", PROOFED_CODEX: "false", ...env,
       },
     });
     assert.equal(result.status, 0, result.stderr);
-    return result.stdout;
+    return result.stdout + readFileSync(summary, "utf8");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -87,6 +95,33 @@ test("pull request events and unrelated comments need no permission lookup", () 
   assert.doesNotMatch(unrelated, /\/permission/);
 });
 
+test("fork and deleted-head PR comments get one refusal and no checkout ref", () => {
+  for (const repo of [{ full_name: "fork/repo" }, null]) {
+    const fork = { ...pr, head: { ...pr.head, ref: "main", repo } };
+    for (const event of [comment(), comment("created", "/proofed fix"), comment("edited")]) {
+      const result = run(event, "write", false, {}, fork);
+      assert.match(result, /^mode=none$/m);
+      assert.doesNotMatch(result, /^head_(ref|sha)=/m);
+      assert.match(result, /"method":"POST","body":\{"body":"Proofed can only run on pull requests from branches in this repository\."/);
+      assert.equal(result.match(/"method":"POST"/g)?.length, 1);
+    }
+  }
+});
+
+test("fork pull request events skip without a comment or other API calls", () => {
+  const fork = { ...pr, head: { ...pr.head, repo: { full_name: "fork/repo" } } };
+  const result = run({ action: "opened", pull_request: fork }, "write");
+  assert.match(result, /^mode=none$/m);
+  assert.match(result, /^api=\[\]$/m);
+  assert.equal(result.match(/^Proofed skipped this fork pull request because it needs repository secrets\.$/gm)?.length, 2);
+});
+
+test("fix: false refuses a checked fix box", () => {
+  const result = run(comment("edited"), "write", false, { PROOFED_FIX: "false" });
+  assert.match(result, /^mode=none$/m);
+  assert.doesNotMatch(result, /^head_(ref|sha)=/m);
+  assert.match(result, /"method":"POST","body":\{"body":"Fixing is turned off for this repository\."/);
+});
 
 test("mode resolves Codex aliases, provider variables and effort before installing", () => {
   const configured = { PROOFED_VARS: JSON.stringify({PROOFED_PROVIDER:"codex",PROOFED_MODEL:"gpt-6.1-terra",PROOFED_EFFORT:"ultra",PROOFED_AUTOFIX:"true"}), PROOFED_CODEX:"true" };

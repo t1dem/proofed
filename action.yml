@@ -298,6 +298,8 @@ runs:
         PROOFED_SCENARIOS: ${{ inputs.scenarios }}
         PROOFED_ONLY: ${{ inputs.only }}
         PROOFED_FIX: ${{ inputs.fix }}
+        PROOFED_SHA: ${{ steps.mode.outputs.head_sha }}
+        PROOFED_BASE_SHA: ${{ steps.mode.outputs.base_sha }}
         PROOFED_PROVIDER: ${{ steps.mode.outputs.provider }}
         PROOFED_MODEL: ${{ steps.mode.outputs.model }}
         PROOFED_EFFORT: ${{ steps.mode.outputs.effort }}

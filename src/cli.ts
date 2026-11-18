@@ -39,6 +39,7 @@ if (command !== undefined && parseFix(command)) {
 }
 
 const pr = event.pull_request ?? (repo && event.issue?.pull_request ? await getPullRequest(repo, event.issue.number) : undefined);
+// The action pins the checkout and comparison SHAs before the PR metadata lookup.
 const sha = env("PROOFED_SHA", pr?.head.sha ?? process.env.GITHUB_SHA ?? "local");
 const base = process.env.PROOFED_BASE_SHA || (pr && baseRev(pr.base));
 

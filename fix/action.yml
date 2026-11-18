@@ -76,8 +76,15 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
-        gh api "repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}" \
-          --jq '"base=\(.base.sha)\nbase_ref=\(.base.ref)\nhead_ref=\(.head.ref)"' >> "$GITHUB_OUTPUT"
+        pr=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}" \
+          --jq 'select(.head.repo.full_name != null and .head.repo.full_name == .base.repo.full_name) |
+            "base=\(.base.sha)\nbase_ref=\(.base.ref)\nhead_ref=\(.head.ref)"')
+        # Checkout and push both use branch names in the base repository.
+        if [ -z "$pr" ]; then
+          echo "::error::Proofed can only fix pull requests from branches in this repository."
+          exit 1
+        fi
+        printf '%s\n' "$pr" >> "$GITHUB_OUTPUT"
 
     - uses: actions/checkout@v4
       with:

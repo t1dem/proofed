@@ -12,10 +12,15 @@ import { APP_LOGIN, onlyFirstScenario, SETUP_BRANCH } from "./setup.ts";
 
 type Event = {
   action: string;
-  pull_request: PullRequest;
+  pull_request: PullRequestWithRepositories;
   issue: { number: number; pull_request?: object };
   comment: { id: number; body: string; user: { type: string } };
   sender?: { type: string; login?: string };
+};
+
+type PullRequestWithRepositories = PullRequest & {
+  head: { repo?: { full_name: string } | null };
+  base: { repo?: { full_name: string } };
 };
 
 const output = (values: Record<string, string | number>) => {
@@ -56,27 +61,43 @@ const requireWriteAccess = async (notify: boolean) => {
 let mode: "check" | "fix" = "check";
 let asked: Exclude<FixCommand, { error: string }> = {};
 
-if (event.action === "edited" && event.comment) {
-  // Someone ticked "Fix with Claude" in Proofed's report.
-  const { body, user } = event.comment;
-  if (user.type !== "Bot" || !fixRequested(body) || !readReportData(body)) skip("No fix requested.");
-  await requireWriteAccess(false);
+const refuse = async (message: string) => {
+  await reply(repo, number, message).catch((e: unknown) => console.log(`Couldn't reply: ${e instanceof Error ? e.message : e}`));
+  return skip(message);
+};
+
+const checkbox = event.action === "edited" ? event.comment : undefined;
+const command = event.comment && !checkbox ? parseCommand(event.comment.body) : undefined;
+if (event.comment) {
+  if (checkbox) {
+    const { body, user } = checkbox;
+    if (user.type !== "Bot" || !fixRequested(body) || !readReportData(body)) skip("No fix requested.");
+  } else if (command === undefined) skip("The comment doesn't ask for /proofed.");
+  await requireWriteAccess(!checkbox);
+}
+
+const pr: PullRequestWithRepositories = event.pull_request ?? (await getPullRequest(repo, number));
+// Comment jobs have repository secrets, and fix jobs check out and push a branch in the base repo.
+if (!pr.head.repo?.full_name || pr.head.repo.full_name !== pr.base.repo?.full_name) {
+  if (event.comment) await refuse("Proofed can only run on pull requests from branches in this repository.");
+  const message = "Proofed skipped this fork pull request because it needs repository secrets.";
+  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${message}\n`);
+  skip(message);
+}
+
+const fixingDisabled = process.env.PROOFED_FIX === "false";
+const fixingDisabledMessage = "Fixing is turned off for this repository.";
+if (checkbox) {
   // A tick that raced a newer report: the box was on a report that's no longer the one.
-  if ((await findReport(repo, number))?.id !== event.comment.id) skip("A newer report has replaced the one the box was ticked in.");
+  if ((await findReport(repo, number))?.id !== checkbox.id) skip("A newer report has replaced the one the box was ticked in.");
+  if (fixingDisabled) await refuse(fixingDisabledMessage);
   mode = "fix";
-} else if (event.comment) {
-  const command = parseCommand(event.comment.body);
-  if (command === undefined) skip("The comment doesn't ask for /proofed.");
-  await requireWriteAccess(true);
+} else if (event.comment && command !== undefined) {
   const fix = parseFix(command);
   if (fix) {
     await acknowledge(repo, event.comment.id).catch(() => {});
-    const refuse = async (message: string) => {
-      await reply(repo, number, message);
-      skip(message);
-    };
     if ("error" in fix) await refuse(fix.error);
-    else if (process.env.PROOFED_FIX === "false") await refuse("Fixing is turned off for this repository.");
+    else if (fixingDisabled) await refuse(fixingDisabledMessage);
     else {
       const report = await findReport(repo, number);
       const data = report?.body ? readReportData(report.body) : undefined;
@@ -116,10 +137,7 @@ const configured = resolveFixer({
 });
 // A bad fixer setting must not cost the PR its check: only the fixer waits until the setting is corrected.
 const badSetting = "error" in configured ? `The fixer setting in this repository's variables is invalid: ${configured.error}` : undefined;
-if (badSetting && mode === "fix") {
-  await reply(repo, number, badSetting).catch((e: unknown) => console.log(`Couldn't reply: ${e instanceof Error ? e.message : e}`));
-  skip(badSetting);
-}
+if (badSetting && mode === "fix") await refuse(badSetting);
 if (badSetting) console.log(`::warning::${badSetting} The check runs; fixing and writing scenarios are off until it is corrected.`);
 const fixer = resolveFixer(asked, "error" in configured ? DEFAULT_FIXER : configured);
 if ("error" in fixer) {
@@ -127,7 +145,6 @@ if ("error" in fixer) {
   skip(fixer.error);
 }
 const credential = fixer.provider === "codex" ? process.env.PROOFED_CODEX === "true" : process.env.PROOFED_CLAUDE === "true";
-const pr = event.pull_request ?? (await getPullRequest(repo, number));
 
 // The setup PR's check has the selected agent write the first scenarios before Kane runs them (generate.ts):
 // only while the branch holds just the stock scenario, so a person's scenarios are never touched,
@@ -153,7 +170,7 @@ const opened = event.action === "opened" || event.action === "reopened";
 const byBot = event.sender?.type === "Bot" && !(opened && event.sender.login === APP_LOGIN);
 const autofix =
   mode === "check" && !generate && !!event.pull_request && vars.PROOFED_AUTOFIX === "true" && !pr.draft &&
-  !byBot && credential && !badSetting && process.env.PROOFED_FIX !== "false";
+  !byBot && credential && !badSetting && !fixingDisabled;
 
 output({
   mode,
