@@ -201,7 +201,7 @@ test("a stale report asks for a fresh check without starting the fix or updating
     const events = f.events();
     assert.deepEqual(events.map((e) => e.type), ["report"]);
     const body = events[0]!.value as string;
-    assert.match(body, /This report is for a different commit\. Comment `\/proofed` to run a fresh check\./);
+    assert.match(body, /This report is for an older commit\. Proofed checks new commits on its own; comment `\/proofed` only if no check is running\./);
     assert.match(body, /- \[ \] \*\*Fix with Claude\*\*/);
     assert.deepEqual(readReportData(body), readReportData(f.body));
   } finally { f.cleanup(); }

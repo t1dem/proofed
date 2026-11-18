@@ -52,7 +52,8 @@ const withLine = (text: string, line: string) =>
   BOX.test(text) ? text.replace(BOX, line) : text.replace(/(### Proofed\n\n[^\n]*\n)/, `$1\n${line}\n`);
 
 if (data.sha !== brokenSha) {
-  const note = "This report is for a different commit. Comment `/proofed` to run a fresh check.";
+  // The new commit's own check is usually already running, so a /proofed now would pay for it twice.
+  const note = "This report is for an older commit. Proofed checks new commits on its own; comment `/proofed` only if no check is running.";
   console.log(note);
   await restoreReport(note, false, null);
   process.exit(0);
@@ -157,6 +158,7 @@ ${diff}
 ${feedback ? `\nA previous fix attempt didn't work:\n${feedback}\n` : ""}
 ${failures.some((f) => f.failedCheck) ? "Kane's opinion is not proof that the scenario is wrong. If the app change was intended, stop and explain that the scenario needs review. Otherwise fix the app. Do not make a check pass by changing its expectations." : "Find the cause in the application code and fix it with the smallest change that keeps what the PR set out to do."}
 Don't edit anything under .proofed/, don't change the scenario expectations, and don't commit.
+Your change is committed without the project's git hooks, so match the surrounding code style exactly (indentation, quotes, semicolons, import order), as the project's formatter and linter would.
 Do not run commands other than reading application code and the build. Do not access the network or external services.
 You may run \`${buildCommand}\` to check that your change builds (it runs \`${env("PROOFED_BUILD")}\` ${appDir === "." ? "at the repo root" : `in \`${appDir}\``}).
 End your answer with one line in English that starts with "SUMMARY:". It goes into the pull request as is, so it says only what was wrong in the code and what you changed, nothing about tools, builds, tests or permissions.`;
