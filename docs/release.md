@@ -1,6 +1,8 @@
 # Releasing proofed-cli
 
-To release, confirm the version in `package.json` (currently `0.2.0`); published versions cannot be reused. From a clean checkout with Node 22.18+:
+To release, confirm the version in `package.json` (currently `0.2.0`). Published versions cannot be reused.
+Publish from macOS or Linux. The package check uses POSIX npm install paths.
+Run these commands from a clean checkout with Node 22.18+.
 
 ```sh
 pnpm install --frozen-lockfile

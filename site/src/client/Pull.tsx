@@ -6,6 +6,7 @@ import { ago, fixerName, movingName, titleName, useLoad, type Ask, type Route, t
 import { LiveRun } from "./Live";
 import { creditSummary, defaultScenario, fixedSummary, latestScenarios, scenarioStory as story } from "../run-summary";
 import { Backdrop, bone, focus, iconButton, kindOf, Link, link, Mark, marks, MobileBar, NEEDS_WRITE, outline, PageTitle, panel, popover, useSheetDrag, plain, Segmented, sha7, soft, solid, useDismiss } from "./ui";
+import { BLANK_PAGE } from "../../../src/runfile";
 
 type Seen = { run: Run; scenario: RunScenario };
 
@@ -83,7 +84,7 @@ function Recording({ clip, steps, seek, onTime }: { clip: NonNullable<RunScenari
     const screenshot = !clip.gif;
     return still ? (
       <>
-        <img src={still} alt={screenshot ? "What a user sees on opening the page" : "Where Kane's run in the browser ended"} className="block w-full" />
+        <img src={still} alt={screenshot ? "What a user sees on opening the page" : "Where Kane's run ended"} className="block w-full" />
         {screenshot && <p className="border-t border-edge px-3.5 py-2 text-[13px] text-dim">What a user sees on opening the page</p>}
       </>
     ) : null;
@@ -452,8 +453,8 @@ function ScenarioView({ now, before, fix, tabs }: { now: Seen; before: Seen | un
             <div className="min-w-0 space-y-7 lg:col-start-1 lg:row-start-1">
               {crashed && why && (
                 <div>
-                  {/* A failure without steps is a page that crashed on load: Kane never ran, the browser said this. */}
-                  <Label>Browser console error</Label>
+                  {/* A page that crashed on load: Kane never ran, the browser said this. Other step-less failures carry Kane's diagnosis. */}
+                  <Label>{now.scenario.reason === BLANK_PAGE ? "Browser console error" : "What Kane saw"}</Label>
                   <p className="font-mono text-[13px] text-dim">{why}</p>
                 </div>
               )}

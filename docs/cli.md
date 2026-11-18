@@ -15,6 +15,10 @@ The URL and the commands that install, build and serve the app are taken from th
 3. `.proofed/config.json`
 4. the Proofed step of the repo's workflow, so a repo that already runs Proofed on its PRs needs no flags
 
+The CLI inherits only these workflow inputs: `url`, `install`, `build`, `serve`, `working-directory`,
+`target`, `execution`, `app`, `device`, `os-version`, `launch` and `cdp-endpoint`.
+Use literal, single-line values. The CLI ignores `${{ }}` expressions, block scalars and the `scenarios` input.
+
 A build or install set in config or the workflow belongs to its serve command. Overriding
 `serve` also drops that layer's build/install; pass them explicitly when needed.
 
@@ -24,7 +28,7 @@ If the app isn't running, Proofed starts it and stops it at the end. It installs
 
 ## Caching and output
 
-A passed scenario isn't run again until its file, the URL, the resolved target, Kane version, the base commit or a changed file in its `paths` changes. Native and desktop checks with a build command always rebuild and run again; an old artifact's pass cannot skip the build. `--dry-run` shows what would run and the credit estimate, for free. In a terminal the scenarios update in place; in a pipe each event is one line, with a "still running" line at least every 30 seconds.
+A passed scenario isn't run again until its file, the URL, the web serve/build/install commands, the resolved target, Kane version, the base commit or a changed file in its `paths` changes. Native and desktop checks with a build command always rebuild and run again; an old artifact's pass cannot skip the build. `--dry-run` shows what would run and the credit estimate, for free. In a terminal the scenarios update in place; in a pipe each event is one line, with a "still running" line at least every 30 seconds.
 
 ## For an agent
 

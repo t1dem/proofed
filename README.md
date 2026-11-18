@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="site/public/favicon.svg" width="64" alt="">
+<img src="https://raw.githubusercontent.com/t1dem/proofed/main/site/public/favicon.svg" width="64" alt="">
 
 # Proofed
 
@@ -15,7 +15,7 @@ When a flow breaks, Claude Code or OpenAI Codex fixes it, and the fix is pushed 
 
 <br>
 
-<img src="docs/devices.png" width="880" alt="The Proofed dashboard in a browser and on a phone: pull requests grouped into Needs you, Kane is checking, Claude is fixing and Passed">
+<img src="https://raw.githubusercontent.com/t1dem/proofed/main/docs/devices.png" width="880" alt="The Proofed dashboard in a browser and on a phone: pull requests grouped into Needs you, Kane is checking, Claude is fixing and Passed">
 
 </div>
 
@@ -51,7 +51,7 @@ Four pull requests on the [demo store](https://github.com/t1dem/proofed-demo-sto
 
 To watch one run live, open [Break it yourself](https://proofed.neptunescodm.workers.dev/try). It needs no account and takes 8 to 14 minutes.
 
-<img src="docs/try-run.jpg" alt="A finished run on /try: Kane caught a break, Claude fixed it, Kane confirmed. The fix and a before and after comparison of the page.">
+<img src="https://raw.githubusercontent.com/t1dem/proofed/main/docs/try-run.jpg" alt="A finished run on /try: Kane caught a break, Claude fixed it, Kane confirmed. The fix and a before and after comparison of the page.">
 
 To run Proofed on your machine, with a signed-in [Kane CLI](https://www.npmjs.com/package/@testmuai/kane-cli), Node 22.18+, Chrome, ffmpeg and pnpm (`npm install -g pnpm`):
 
@@ -84,14 +84,14 @@ The web replays ran on GitHub's Ubuntu runners. The Android and Electron replays
 ## How it works
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/flow-dark.svg">
-  <img src="docs/flow-light.svg" alt="Pull request, then Kane runs the flows it touches in Chrome, then a report with clips on the PR. If a flow broke, Claude fixes it and Kane re-checks; the fix is pushed on a pass, otherwise Claude tries again, up to 3 times.">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/t1dem/proofed/main/docs/flow-dark.svg">
+  <img src="https://raw.githubusercontent.com/t1dem/proofed/main/docs/flow-light.svg" alt="Pull request, then Kane runs the flows it touches in Chrome, then a report with clips on the PR. If a flow broke, Claude fixes it and Kane re-checks; the fix is pushed on a pass, otherwise Claude tries again, up to 3 times.">
 </picture>
 
 - Only the scenarios whose `paths` the diff touches run.
 - For web, a start page that crashes on load fails at once, with the browser's error and a screenshot, at no Kane credits.
 - For web, Kane doesn't record video, so Proofed records Chrome itself. The clip cuts the waiting, shows where Kane clicked and zooms in on what it checks.
-- When Kane blames the test without a failed assertion, the scenario shows as "not checked". A failed assertion is retried; two failures stay failed.
+- When Kane blames the test without a failed assertion, the scenario shows as "not checked". A failed check that Kane blames on the scenario runs a second time; two failures stay failed.
 - A fix starts when someone ticks **Fix with Claude** or **Fix with Codex**, or on its own with [Fix automatically](#fix-automatically) on.
 - Each attempt rebuilds and re-checks the broken flows and affected neighbors. The final check reuses the last attempt's results on the same tree and rebuilds only when scenarios still need to run, before committing and pushing.
 - The fix commit's `Fixed-by:` line names the model.
@@ -161,7 +161,7 @@ In the app's repo:
 | `proofed list` | Every scenario, whether the change touches it and whether its pass is cached |
 | `proofed check` | Runs the scenarios the change touches; `proofed check "the cart total updates"` checks just that |
 
-In a repo that already runs Proofed on its PRs, `proofed check` needs no flags. `--dry-run` shows what would run and the credit estimate, for free. How the check finds the app, the exit codes, the JSON output and a sample run are in [docs/cli.md](docs/cli.md).
+In a repo that already runs Proofed on its PRs, `proofed check` needs no flags. `--dry-run` shows what would run and the credit estimate, for free. How the check finds the app, the exit codes, the JSON output and a sample run are in [docs/cli.md](https://github.com/t1dem/proofed/blob/main/docs/cli.md).
 
 For an agent, add this to the app's `AGENTS.md` or `CLAUDE.md`:
 
@@ -244,8 +244,8 @@ A scenario can set `target: ios`, `android` or `desktop`; scenarios without it s
 - **Desktop** is experimental and covers one Electron Chromium window: give `launch` (or `app`) and `cdp_endpoint`. Native menus, OS file dialogs, Safari, Tauri and WKWebView are not supported.
 - **Fixing** uses the same checkbox and auto-fix setting on every target. Set `build` to produce the artifact in `app`, or the desktop code started by `launch`. Each check installs, uploads or launches the rebuild. `url` and `serve` are needed only for web scenarios. Pre-uploaded `APP…` IDs and desktop endpoints without a launch command or app path cannot verify a rebuild, so the report says why fixing didn't run.
 
-Commands and Android cloud, self-hosted Android and macOS Electron Actions examples: [docs/cli.md](docs/cli.md#github-actions-examples).
-Real-run verification by target and host is listed in [Platform support](docs/cli.md#platform-support); only web on Linux/macOS is verified so far.
+Commands and Android cloud, self-hosted Android and macOS Electron Actions examples: [docs/cli.md](https://github.com/t1dem/proofed/blob/main/docs/cli.md#github-actions-examples).
+Real-run verification by target and host is listed in [Platform support](https://github.com/t1dem/proofed/blob/main/docs/cli.md#platform-support).
 
 ## Limits
 
@@ -262,7 +262,7 @@ What went wrong in real runs, and what Proofed does about it.
 |---|---|---|
 | Asked something vague, Kane waited and reported a pass | A pass with no `assert` step counts as "not checked" | `src/run.ts` |
 | Kane routed around a broken button and passed | Kane is told to do each step once, with no other way to the goal | `src/run.ts` |
-| A run was still going after 361 seconds | A 360-second wall-clock limit over Kane's own `--timeout 300` | `src/kane.ts` |
+| A run was still going after 361 seconds | A 360-second wall-clock limit over Kane's own `--timeout 300`; `timeout_minutes` in a scenario raises both | `src/kane.ts` |
 | Kane's children outlived a plain kill and held the output open | Kane runs in its own process group, killed as a whole | `src/kane.ts` |
 | On a page that was fine, Kane reported a heading as not visible and blamed the scenario | A failed check Kane blames on the scenario is run a second time; two failures stay failed; a failure followed by a pass is not checked | `src/run.ts` |
 | In 13 of 36 parallel starts, a scenario exited within seconds | One `kane-cli login` before the scenarios, and one retry; the retry always reached a verdict | `action.yml`, `src/run.ts` |
@@ -288,7 +288,7 @@ Proofed can also read the free `kane-cli balance` before and after a scenario an
 
 Node 22.18+ runs the checkout's TypeScript directly, so the GitHub Action needs no build or package install. `pnpm build` emits the CLI and its imports to `dist/` for npm; `npm pack` builds it automatically. `pnpm typecheck` and `pnpm test` check the source. `pnpm check:package` builds a tarball, checks its contents, installs it into a temporary prefix and runs its version and help, then removes its temp files.
 
-Releasing to npm is manual: [docs/release.md](docs/release.md).
+Releasing to npm is manual: [docs/release.md](https://github.com/t1dem/proofed/blob/main/docs/release.md).
 
 | File | What it does |
 |---|---|
