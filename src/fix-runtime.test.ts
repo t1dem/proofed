@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { dataComment, readReportData, type FailureData } from "./report.ts";
 import { askedScenario } from "./requests.ts";
 import { kaneObjective } from "./run.ts";
+import type { RunFile } from "./runfile.ts";
 import { resolveScenarioTarget } from "./target.ts";
 
 const description = askedScenario("description", "Check that the counter survives a restart.\n\n[delay:1]",
@@ -18,8 +19,10 @@ const fakeKane = fileURLToPath(new URL("./testing/fake-kane.ts", import.meta.url
 
 function fixture(target = "android", extra = "", build = "node build.cjs", finalFails = false, options: {
   extraScenario?: boolean;
+  partialFix?: boolean;
   changeAfterAttempt?: boolean;
   buildOutput?: boolean;
+  ignoredBuildOutput?: boolean;
   agentBuildOutput?: "with-source" | "only";
   description?: "stored" | "missing" | "doubted";
   rejectPush?: boolean;
@@ -32,9 +35,9 @@ function fixture(target = "android", extra = "", build = "node build.cjs", final
   mkdirSync(join(dir, "modes"));
   writeFileSync(join(dir, "modes/counter"), "pass");
   writeFileSync(join(dir, "app.js"), "broken\n");
-  if (options.extraScenario || finalFails) {
+  if (options.extraScenario || options.partialFix || finalFails) {
     writeFileSync(join(dir, "extra.js"), "old\n");
-    writeFileSync(join(dir, "modes/extra"), "pass");
+    writeFileSync(join(dir, "modes/extra"), options.partialFix ? "fail" : "pass");
     writeFileSync(join(dir, ".proofed/scenarios/extra.md"), `---\nname: Extra\ntarget: ${target}\nexecution: cloud\napp: app.${target === "ios" ? "ipa" : "apk"}\npaths: [extra.js]\n---\nAssert extra is 1. [fake-from:extra] [delay:1]\n`);
   }
   writeFileSync(join(dir, ".proofed/scenarios/counter.md"), `---\nname: Counter\ntarget: ${target}\n${target === "desktop" ? "execution: local\n" : `execution: cloud\napp: app.${target === "ios" ? "ipa" : "apk"}\n`}${extra}---\nAssert counter is 1. [fake-from:counter] [delay:1]\n`);
@@ -44,8 +47,8 @@ function fixture(target = "android", extra = "", build = "node build.cjs", final
     mkdirSync(join(dir, "dist"));
     writeFileSync(join(dir, "dist/index.html"), "committed output");
     writeFileSync(join(dir, "dist/old.html"), "committed old output");
-    if (options.agentBuildOutput) {
-      writeFileSync(join(dir, ".gitignore"), readFileSync(join(dir, ".gitignore"), "utf8") + "dist/\n");
+    if (options.agentBuildOutput || options.ignoredBuildOutput) {
+      writeFileSync(join(dir, ".gitignore"), readFileSync(join(dir, ".gitignore"), "utf8") + (options.agentBuildOutput ? "dist/\n" : "dist/*.html\n"));
       git("add", "-f", "--", "dist");
     }
   }
@@ -53,32 +56,52 @@ function fixture(target = "android", extra = "", build = "node build.cjs", final
     writeFileSync(join(dir, "dist/config.js"), "original config");
     const buildScript = join(dir, "build.cjs");
     writeFileSync(buildScript, readFileSync(buildScript, "utf8") + `
-fs.writeFileSync('dist/index.html', 'rebuilt output');
+fs.writeFileSync('dist/index.html', 'bundle: ' + fs.readFileSync('app.js', 'utf8'));
 fs.rmSync('dist/old.html', { force: true });
 fs.writeFileSync('build-output.js', 'untracked output');
-fs.writeFileSync('modes/counter', fs.readFileSync('dist/config.js', 'utf8') === 'fixed config' ? 'pass' : 'fail');`);
+const bundle = fs.readFileSync('dist/index.html', 'utf8');
+fs.writeFileSync('app.apk', bundle);
+fs.writeFileSync('modes/counter', bundle === 'bundle: fixed\\n' && fs.readFileSync('dist/config.js', 'utf8') === 'fixed config' ? 'pass' : 'fail');`);
   }
   git("add", "-A"); git("commit", "-qm", "Initial fixture");
   const base = git("rev-parse", "HEAD");
-  if (options.extraScenario || finalFails) writeFileSync(join(dir, "extra.js"), "PR changed it\n");
+  if (options.extraScenario || options.partialFix || finalFails) writeFileSync(join(dir, "extra.js"), "PR changed it\n");
   writeFileSync(join(dir, "app.js"), "PR broke it\n"); git("commit", "-qam", "Break counter");
   const original = git("rev-parse", "HEAD");
   const failures: FailureData[] = [{ id: "counter", name: "Counter", file: ".proofed/scenarios/counter.md", objective: "Assert counter is 1.", reason: "Counter is 0.", diagnosis: "", steps: [] }];
+  if (options.partialFix) failures.push({ id: "extra", name: "Extra", file: ".proofed/scenarios/extra.md", objective: "Assert extra is 1.", reason: "Extra is 0.", diagnosis: "", steps: [] });
   if (options.description) failures.push({
     ...description, reason: "The counter reset.", diagnosis: "", steps: [],
     ...(options.description === "doubted" && { failedCheck: "scenario_doubted" }),
   });
   const asked = options.description && options.description !== "missing" ? [description] : undefined;
-  const body = `<!-- proofed -->\n### Proofed\n\nCounter broke.\n\n- [ ] **Fix with Claude**\n${dataComment({ sha: original, failures, asked })}`;
+  const body = options.partialFix
+    ? `<!-- proofed -->\n### Proofed\n\n**2 of 3** scenarios broke on this PR.\n\n#### ✗ Counter\n\n> Counter is 0.\n\n#### ✗ Extra\n\n> Extra is 0.\n\n- [ ] **Fix with Claude**\n\n<details><summary>✓ Passed: Home</summary></details>\n${dataComment({
+      sha: original, failures, open: ["counter", "extra"], history: [{ sha: original, state: "failed" }],
+    })}\n<!-- proofed:run pr-1/original -->`
+    : `<!-- proofed -->\n### Proofed\n\nCounter broke.\n\n- [ ] **Fix with Claude**\n${dataComment({ sha: original, failures, asked })}`;
+  const originalRun: RunFile = {
+    sha: original,
+    scenarios: [
+      { id: "counter", name: "Counter", outcome: "failed", reason: "Counter is 0.", clip: { jpg: "https://github.com/fixture/original.jpg" } },
+      { id: "extra", name: "Extra", outcome: "failed", reason: "Extra is 0." },
+      { id: "home", name: "Home", outcome: "passed" },
+    ],
+    skipped: ["Settings"],
+  };
   // All API functions fix.ts/pipeline.ts can call are local spies, and push never invokes git push.
   const github = `export * from ${JSON.stringify(new URL("./github.ts", import.meta.url).href)};
 const record = (type, value) => { globalThis.fixtureLog(type,value); };
-export const findReport=async()=>({id:1,body:${JSON.stringify(body)}});
-export const listReports=async()=>({current:{id:1,body:${JSON.stringify(body)}},older:[]});
+export const findReport=async()=>({id:1,body:process.env.FIXTURE_REPORT??${JSON.stringify(body)}});
+export const listReports=async()=>({current:await findReport(),older:[]});
 export const editComment=async(_repo,_id,body)=>{record('report',body);return {html_url:'https://example.test/report'};};
 export const postComment=async(_repo,_pr,body)=>{record('report',body);return {html_url:'https://example.test/report'};};
 export const setStatus=async(_repo,sha,state,description)=>globalThis.fixtureLog('status',{state,description},sha);
-export const publishClips=async()=>new Map();
+export const readFile=async(_repo,path)=>{record('read-run',path);return ${JSON.stringify(JSON.stringify(originalRun))};};
+export const publishClips=async(_repo,files)=>{
+  if(${options.partialFix === true}) for(const file of files) record('run-file',globalThis.fixtureFs.readFileSync(file.local,'utf8'));
+  return new Map();
+};
 export const minimize=async()=>{};`;
   const agent = `export * from ${JSON.stringify(new URL("./agent.ts", import.meta.url).href)};
 import { execFileSync } from 'node:child_process';
@@ -118,15 +141,14 @@ const mocks=new Map(${JSON.stringify([...mocks])});
 registerHooks({resolve(specifier,context,next){const url=specifier.startsWith('.')&&context.parentURL?.startsWith('file:')?new URL(specifier,context.parentURL).href:specifier;
 // A mock's re-export loads the original implementation, without remapping it again.
 if(mocks.has(url)&&!context.parentURL?.startsWith('data:'))return {url:mocks.get(url),shortCircuit:true};return next(specifier,context);}});
-globalThis.fetch=async()=>{throw new Error('Network forbidden in fixer fixture');};
-await import(process.argv[2]);`;
+globalThis.fetch=async()=>{throw new Error('Network forbidden in fixer fixture');};`;
   const env = { ...process.env, TMPDIR: dir, TEMP: dir, TMP: dir, GITHUB_TOKEN: "fixture-token", GITHUB_REPOSITORY: "fixture/repo", PROOFED_AUTO: "true", PROOFED_NUMBER: "1", PROOFED_BUILD: build, PROOFED_BASE_SHA: base, PROOFED_HEAD_REF: "main", PROOFED_OUT: join(dir, "out"), PROOFED_FIX: "true", PROOFED_DIR: ".", KANE_CLI: fakeKane, FAKE_KANE_LOG: join(dir, "kane.log"), FAKE_KANE_MODES: join(dir, "modes"), RUNNER_TEMP: dir };
   for (const key of ["PROOFED_TARGET", "PROOFED_EXECUTION", "PROOFED_APP", "PROOFED_URL", "PROOFED_SERVE", "PROOFED_BASE_REF", "GITHUB_EVENT_PATH", "GITHUB_RUN_ID", "PROOFED_MODEL", "PROOFED_PROVIDER", "PROOFED_CLAUDE_MODEL", "PROOFED_SCENARIOS", "ACTIONS_ID_TOKEN_REQUEST_URL", "ACTIONS_ID_TOKEN_REQUEST_TOKEN"]) delete env[key as keyof typeof env];
   if (options.description) Object.assign(env, { PROOFED_TARGET: "android", PROOFED_EXECUTION: "cloud", PROOFED_APP: "app.apk" });
   // Hooks and generated scripts sit outside the tested checkout so they can never be committed.
   const preload = join(tmpdir(), `proofed-fix-preload-${process.pid}-${Date.now()}.mjs`);
   writeFileSync(preload, script);
-  const run = (entry = "./fix.ts", overrides: NodeJS.ProcessEnv = {}) => spawnSync(process.execPath, [preload, new URL(entry, import.meta.url).href], {
+  const run = (entry = "./fix.ts", overrides: NodeJS.ProcessEnv = {}) => spawnSync(process.execPath, ["--import", preload, fileURLToPath(new URL(entry, import.meta.url))], {
     cwd: dir, env: { ...env, ...overrides }, encoding: "utf8", timeout: 30_000,
   });
   const check = (request: string, counter: "pass" | "fail") => {
@@ -145,7 +167,7 @@ await import(process.argv[2]);`;
   const runs = () => readFileSync(join(dir, "kane.log"), "utf8").trim().split("\n")
     .map((s) => JSON.parse(s) as { args?: string[] }).filter((c) => c.args?.[0] === "run");
   const events = () => readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((s) => JSON.parse(s) as { type: string; value?: string | { description: string; state: string }; code?: string; sha?: string });
-  return { dir, original, body, git, run, check, runs, events, cleanup: () => { rmSync(dir, { recursive: true, force: true }); rmSync(preload, { force: true }); } };
+  return { dir, original, originalRun, body, git, run, check, runs, events, cleanup: () => { rmSync(dir, { recursive: true, force: true }); rmSync(preload, { force: true }); } };
 }
 
 for (const target of ["android", "ios"]) test(`the ${target} fixer reuses its last attempt without another build or Kane run`, () => {
@@ -279,17 +301,54 @@ for (const [descriptionVerdict, counter, expectedStatus, failures, summary] of [
   } finally { f.cleanup(); }
 });
 
-test("a retried fix commits agent edits and restores tracked build output", () => {
-  const f = fixture("android", "", "node build.cjs", false, { buildOutput: true });
+for (const ignoredBuildOutput of [false, true]) test(`a retried fix commits the ${ignoredBuildOutput ? "ignored " : ""}tracked output Kane checked`, () => {
+  const f = fixture("android", "", "node build.cjs", false, { buildOutput: true, ignoredBuildOutput });
   try {
     const ran = f.run();
     assert.equal(ran.status, 0, ran.stdout + ran.stderr);
     assert.deepEqual(f.events().filter((e) => ["ask", "build", "push"].includes(e.type)).map((e) => e.type), ["ask", "build", "ask", "build", "push"]);
-    assert.equal(f.git("diff", "--name-only", f.original, "HEAD"), "app.js\ndist/config.js\nnew-helper.js");
+    assert.equal(f.git("diff", "--name-only", f.original, "HEAD"), "app.js\ndist/config.js\ndist/index.html\ndist/old.html\nnew-helper.js");
     assert.equal(f.git("show", "HEAD:dist/config.js"), "fixed config");
-    assert.equal(readFileSync(join(f.dir, "dist/index.html"), "utf8"), "committed output");
-    assert.equal(readFileSync(join(f.dir, "dist/old.html"), "utf8"), "committed old output");
+    assert.equal(f.git("show", "HEAD:dist/index.html"), "bundle: fixed");
+    assert.equal(f.git("rev-parse", "HEAD:dist/index.html"), f.git("hash-object", "--no-filters", "app.apk"));
+    assert.equal(f.git("ls-tree", "--name-only", "HEAD", "dist/old.html"), "");
     assert.equal(f.git("status", "--porcelain"), "?? build-output.js");
+  } finally { f.cleanup(); }
+});
+
+test("a partial fix leaves the original check and both failures in the report for the next fix", () => {
+  const f = fixture("android", "", "node build.cjs", false, { partialFix: true });
+  try {
+    const ran = f.run();
+    assert.equal(ran.status, 1, ran.stdout + ran.stderr);
+    assert.equal(f.git("rev-parse", "HEAD"), f.original);
+    const events = f.events();
+    assert.equal(events.some((e) => e.type === "push"), false);
+    const body = events.find((e) => e.type === "report" && String(e.value).includes("Nothing was pushed"))?.value as string;
+    assert.deepEqual(readReportData(body), readReportData(f.body));
+    assert.match(body, /\*\*2 of 3\*\* scenarios broke/);
+    assert.match(body, /#### ✗ Counter[\s\S]*#### ✗ Extra/);
+    assert.match(body, /Passed: Home/);
+    assert.match(body, /Kane saw "Counter" pass on the attempted fix/);
+    assert.match(body, /"Extra" still fails/);
+    assert.match(body, /<!-- proofed:run pr-1\/[\da-f]{7}-local-1-fix -->$/);
+    assert.equal(events.find((e) => e.type === "read-run")?.value, "pr-1/original/run.json");
+    const runFile = JSON.parse(events.find((e) => e.type === "run-file")!.value as string) as RunFile;
+    assert.deepEqual(runFile.scenarios, f.originalRun.scenarios);
+    assert.deepEqual(runFile.skipped, f.originalRun.skipped);
+    assert.equal(runFile.sha, f.original);
+    assert.equal(runFile.fix?.status, "gave-up");
+    assert.match(runFile.fix?.summary ?? "", /"Counter" pass on the attempted fix/);
+    assert.match(runFile.fix?.attempts?.at(-1)?.result ?? "", /"Extra" still fails/);
+    assert.equal(events.findLast((e) => e.type === "status")?.sha, f.original);
+    assert.deepEqual(events.findLast((e) => e.type === "status")?.value, {
+      state: "failure", description: "The original failures stand. Nothing was pushed.",
+    });
+
+    const next = f.run("./fix.ts", { FIXTURE_REPORT: body });
+    assert.equal(next.status, 1, next.stdout + next.stderr);
+    const firstPrompt = f.events().slice(events.length).find((e) => e.type === "ask")?.value as string;
+    assert.match(firstPrompt, /Scenario "Counter"[\s\S]*Scenario "Extra"/);
   } finally { f.cleanup(); }
 });
 
