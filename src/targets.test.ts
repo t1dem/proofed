@@ -182,7 +182,7 @@ test("desktop app paths and launch commands relaunch the rebuilt renderer for ea
   const launches = join(dir, "launches.txt");
   writeFileSync(app, `const fs=require('node:fs'); const {spawn}=require('node:child_process');
 fs.appendFileSync(${JSON.stringify(launches)}, fs.readFileSync(${JSON.stringify(built)},'utf8')+'\\n');
-const child=spawn(${JSON.stringify(chrome)}, ['--headless=new','--no-sandbox','--no-first-run','--no-default-browser-check',${JSON.stringify(`--user-data-dir=${join(dir, "profile")}`)},...process.argv.slice(2),'data:text/html,<h1>Counter</h1>'], {stdio:'ignore'});
+const child=spawn(${JSON.stringify(chrome)}, ['--headless=new','--no-sandbox','--no-first-run','--no-default-browser-check','--use-mock-keychain',${JSON.stringify(`--user-data-dir=${join(dir, "profile")}`)},...process.argv.slice(2),'data:text/html,<h1>Counter</h1>'], {stdio:'ignore'});
 child.on('exit',code=>process.exit(code??0));`);
   try {
     const server = createServer();

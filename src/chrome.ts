@@ -48,6 +48,8 @@ async function startChrome(headless: boolean) {
       "--no-first-run",
       "--no-default-browser-check",
       "--mute-audio",
+      // A throwaway profile has nothing to protect; without this, macOS shows a keychain dialog when HOME has no login keychain.
+      "--use-mock-keychain",
       ...(headless ? ["--headless=new"] : []),
       ...(process.env.CI ? ["--no-sandbox"] : []),
       "about:blank",
