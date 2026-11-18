@@ -1,6 +1,6 @@
 import { executableCommand, killTree } from "./process.ts";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { adopt } from "./children.ts";
@@ -90,7 +90,19 @@ async function nativeRecorder(target: Extract<Target, { kind: "ios" | "android" 
         const list = join(dir, "segments.txt");
         writeFileSync(list, segments.map((f) => `file '${f.replaceAll("\\", "/").replaceAll("'", "'\\''")}'`).join("\n"));
         const mp4 = join(dir, "clip.mp4"), jpg = join(dir, "clip.jpg"), gif = join(dir, "clip.gif");
-        await required("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", list, "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-pix_fmt", "yuv420p", mp4]);
+        const untrimmed = join(dir, "clip-untrimmed.mp4");
+        try {
+          // Use a constant frame rate so the thumbnail seek finds a frame even when the Android screen stops changing.
+          await required("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", list, "-vf", "fps=10,scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-bf", "0", "-pix_fmt", "yuv420p", untrimmed]);
+          const { text } = await command("ffmpeg", ["-hide_banner", "-i", untrimmed]);
+          const duration = /^\s*Duration: (\d+):(\d{2}):(\d{2}\.\d+),/m.exec(text);
+          const seconds = duration ? Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3]) : 0;
+          // Kane closes the app at the end, so cut away the launcher frames.
+          if (seconds > 3) await required("ffmpeg", ["-y", "-i", untrimmed, "-t", (seconds - 1.5).toFixed(2), "-c", "copy", mp4]);
+          else renameSync(untrimmed, mp4);
+        } finally {
+          rmSync(untrimmed, { force: true });
+        }
         await required("ffmpeg", ["-y", "-sseof", "-0.1", "-i", mp4, "-frames:v", "1", jpg]);
         await required("ffmpeg", ["-y", "-i", mp4, "-vf", "fps=6,scale=480:-1", gif]);
         return { mp4, jpg, gif };

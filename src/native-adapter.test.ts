@@ -1,4 +1,4 @@
-import { delimiter } from "node:path";
+import { delimiter, dirname } from "node:path";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,7 +32,10 @@ else if(a.some((x)=>x.startsWith('screenrecord '))) { console.log(process.pid); 
 else if(a.includes('kill')) process.kill(Number(a.at(-1)),'SIGINT');
 else if(a.includes('pull')) fs.copyFileSync(${JSON.stringify(remote)},a.at(-1));
 else if(a.includes('rm')) fs.unlinkSync(${JSON.stringify(remote)});`);
-    tool("ffmpeg", "fs.writeFileSync(a.at(-1), 'fake-media');");
+    tool("ffmpeg", `if (a[0] === '-hide_banner') {
+  console.error('  Duration: 00:00:${kind === "android" ? "05.80" : "03.00"}, start: 0.000000');
+  process.exit(1);
+} else fs.writeFileSync(a.at(-1), 'fake-media');`);
     process.env.KANE_CLI = tool("kane", `if(a[0]==='doctor') console.log('managed dependencies ready'); else { const app=a[a.indexOf('--app')+1]; fs.appendFileSync(${JSON.stringify(log)}, 'installed '+fs.readFileSync(app).toString('base64')+'\\n'); setTimeout(()=>{console.log(JSON.stringify({step:1,status:'done',remark:'assert: counter is 1',ts:new Date().toISOString()})); console.log(JSON.stringify({type:'run_end',status:'passed',credits_consumed:2}));},200); }`);
     const app = join(dir, kind === "ios" ? "Counter.app" : "test.apk");
     if (kind === "ios") { mkdirSync(app); writeFileSync(join(app, "Info.plist"), "fixture"); } else writeFileSync(app, "apk-fixture");
@@ -42,6 +45,7 @@ else if(a.includes('rm')) fs.unlinkSync(${JSON.stringify(remote)});`);
     assert.equal(result.outcome, "passed", result.error ?? "unexpected result");
     assert.ok(result.clip?.mp4, result.recordingNote ?? "missing native recording");
     for (const file of [result.clip.mp4, result.clip.jpg, result.clip.gif]) assert.ok(file && existsSync(file));
+    assert.ok(!existsSync(join(dirname(result.clip.mp4), "clip-untrimmed.mp4")));
     const firstInstall = readFileSync(log, "utf8").split("\n").find((l) => l.startsWith("installed "));
     if (kind === "ios") writeFileSync(join(app, "Info.plist"), "rebuilt fixture"); else writeFileSync(app, "rebuilt apk");
     const [rechecked] = await runAll([scenario], join(dir, "final"), 1, { noRetry: true });
@@ -52,6 +56,8 @@ else if(a.includes('rm')) fs.unlinkSync(${JSON.stringify(remote)});`);
     assert.notEqual(installs[1], firstInstall, "the rebuilt artifact reached the second Kane process");
     assert.doesNotMatch(calls, /--url|--cdp-endpoint|shutdown|uninstall|--install/);
     assert.match(calls, /scale=trunc\(iw\/2\)\*2:trunc\(ih\/2\)\*2/);
+    if (kind === "android") assert.match(calls, /-t 4\.30 -c copy .*clip\.mp4/);
+    else assert.doesNotMatch(calls, /ffmpeg .* -t /);
     if (kind === "android") { assert.match(calls, /--time-limit 175/); assert.match(calls, /pull.*native-0.mp4/); assert.ok(calls.indexOf('pull ') < calls.lastIndexOf('shell rm ')); }
     if (kind === "ios") assert.match(calls, /--target simulator --app .*simulator.zip/);
     assert.ok(existsSync(app));
