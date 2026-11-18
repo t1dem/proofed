@@ -65,13 +65,21 @@ The [dashboard demo](https://proofed.neptunescodm.workers.dev/app?demo) needs no
 
 ### Bugs from real projects
 
-Three merged pull requests from open-source projects, replayed with Proofed. Each scenario failed on the commit that shipped the bug and passed, unchanged, on the commit that fixed it:
+Nine merged pull requests from open-source projects, each of which shipped a bug that was fixed upstream later. Each one is replayed in a copy of its repository with Proofed added. On every replay Kane caught the bug, Codex GPT-6.2 Sol at medium effort fixed it, and Kane checked the fix before it was pushed to the PR.
 
-| Shipped with the bug | What broke | Fixed |
-|---|---|---|
-| [Excalidraw #11974](https://github.com/excalidraw/excalidraw/pull/11974) | The main menu stays open after a click on the canvas | [#12053](https://github.com/excalidraw/excalidraw/pull/12053), 12 days later |
-| [frontend-mini-challenges #264](https://github.com/sadanandpai/frontend-mini-challenges/pull/264) | Delete leaves the todo item in the list | [#338](https://github.com/sadanandpai/frontend-mini-challenges/pull/338), 28 days later |
-| [omni-tools #32](https://github.com/iib0011/omni-tools/pull/32) | The numbers 1, 2 and 4 on separate lines add up to 0 instead of 7 | [#428](https://github.com/iib0011/omni-tools/pull/428), 567 days later |
+| Pull request | Target | What broke | Replay with Proofed | Fixed upstream |
+|---|---|---|---|---|
+| [omni-tools #32](https://github.com/iib0011/omni-tools/pull/32) | Web | The numbers 1, 2 and 4 on separate lines add up to 0 instead of 7 | [Caught, fixed on the first attempt](https://github.com/t1dem/omni-tools/pull/1) | [#428](https://github.com/iib0011/omni-tools/pull/428), 567 days later |
+| [frontend-mini-challenges #264](https://github.com/sadanandpai/frontend-mini-challenges/pull/264) | Web | Delete leaves the todo item in the list | [Caught, fixed on the first attempt](https://github.com/t1dem/frontend-mini-challenges/pull/1) | [#338](https://github.com/sadanandpai/frontend-mini-challenges/pull/338), 28 days later |
+| [Excalidraw #11974](https://github.com/excalidraw/excalidraw/pull/11974) | Web | The main menu stays open after a click on the canvas | [Caught, fixed on the first attempt](https://github.com/t1dem/excalidraw/pull/1) | [#12053](https://github.com/excalidraw/excalidraw/pull/12053), 12 days later |
+| [OpenCalc #520](https://github.com/Darkempire78/OpenCalc/pull/520) | Android emulator | A decimal point typed into the first number of 2×0.5 is ignored | [Caught, fixed on the second attempt](https://github.com/t1dem/OpenCalc/pull/1) | [#538](https://github.com/Darkempire78/OpenCalc/pull/538), 81 days later |
+| [Quillpad #396](https://github.com/quillpad/quillpad/pull/396) | Android emulator | Back in a note sends the app to the background instead of the notes list | [Caught, fixed on the first attempt](https://github.com/t1dem/quillpad/pull/1) | [#406](https://github.com/quillpad/quillpad/pull/406), 24 days later |
+| [AnkiDroid #20889](https://github.com/ankidroid/Anki-Android/pull/20889) | Android emulator | A deck picked in the card browser search doesn't change the deck filter | [Caught, fixed on the first attempt](https://github.com/t1dem/Anki-Android/pull/1) | [#23110](https://github.com/ankidroid/Anki-Android/pull/23110), 180 days later |
+| [Zettlr #6001](https://github.com/Zettlr/Zettlr/pull/6001) | Electron | A blank line between paragraphs loses its ¶ mark | [Caught, fixed on the first attempt](https://github.com/t1dem/Zettlr/pull/1) | [#6024](https://github.com/Zettlr/Zettlr/pull/6024), 7 days later |
+| [Zettlr #6031](https://github.com/Zettlr/Zettlr/pull/6031) | Electron | Typing an empty Pandoc span turns off the highlighting in the note | [Caught, fixed on the first attempt](https://github.com/t1dem/zettlr-pandoc/pull/1) | [#6448](https://github.com/Zettlr/Zettlr/pull/6448), 211 days later |
+| [MarkText #5276](https://github.com/marktext/marktext/pull/5276) | Electron | A folded heading unfolds after switching tabs | [Caught, fixed on the first attempt](https://github.com/t1dem/marktext/pull/1) | [#6060](https://github.com/marktext/marktext/pull/6060), 24 days later |
+
+The web replays ran on GitHub's Ubuntu runners. The Android and Electron replays ran on a self-hosted Apple Silicon Mac, Android on an Android 14 emulator.
 
 ## How it works
 
