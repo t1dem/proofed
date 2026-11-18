@@ -53,7 +53,8 @@ async function nativeRecorder(target: Extract<Target, { kind: "ios" | "android" 
       const remote = `/sdcard/${prefix}-${segments.length}.mp4`;
       current = target.kind === "ios"
         ? owned("xcrun", ["simctl", "io", id, "recordVideo", file])
-        : owned("adb", ["-s", id, "shell", "sh", "-c", `screenrecord --time-limit 175 ${remote} & p=$!; echo $p; wait $p`]);
+        // One argument: adb joins shell arguments with spaces, so `sh -c <script>` would lose the script's arguments.
+        : owned("adb", ["-s", id, "shell", `screenrecord --time-limit 175 ${remote} & p=$!; echo $p; wait $p`]);
       remotePid = undefined;
       if (target.kind === "android") {
         for (let i = 0; i < 50 && !current.done(); i++) {

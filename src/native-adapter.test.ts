@@ -28,7 +28,7 @@ for (const kind of ["ios", "android"] as const) test(`${kind} records with fake 
     tool("adb", `if(a[0]==='devices') console.log('List of devices attached\\nemulator-test-'+process.ppid+'\\tdevice');
 else if(a.includes('name') || a.includes('ro.product.model')) console.log('Pixel');
 else if(a.includes('ro.build.version.release')) console.log('15');
-else if(a.includes('sh')) { console.log(process.pid); process.on('SIGINT',()=>{fs.writeFileSync(${JSON.stringify(remote)},'portrait-video');process.exit(0)}); setInterval(()=>{},100); }
+else if(a.some((x)=>x.startsWith('screenrecord '))) { console.log(process.pid); process.on('SIGINT',()=>{fs.writeFileSync(${JSON.stringify(remote)},'portrait-video');process.exit(0)}); setInterval(()=>{},100); }
 else if(a.includes('kill')) process.kill(Number(a.at(-1)),'SIGINT');
 else if(a.includes('pull')) fs.copyFileSync(${JSON.stringify(remote)},a.at(-1));
 else if(a.includes('rm')) fs.unlinkSync(${JSON.stringify(remote)});`);
