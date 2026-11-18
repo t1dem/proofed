@@ -61,6 +61,14 @@ function Hero() {
           For web apps, Proofed runs the user flows your diff touches in Chrome, posts the recording on the PR, and lets Claude or Codex fix what
           broke. A fix is pushed only after Proofed has watched it pass.
         </p>
+        <p className="mt-4 max-w-md text-base leading-relaxed text-ink/80">
+          Android apps on TestMu cloud devices get the same one-click setup, not tested yet. Emulators and Electron apps
+          take a workflow you set up yourself:{" "}
+          <a href={`${REPO}/blob/main/docs/cli.md#github-actions-examples`} className="underline underline-offset-2 hover:text-ink">
+            how
+          </a>
+          .
+        </p>
         <div className="mt-9 flex flex-wrap gap-3">
           <a
             href="/try"
