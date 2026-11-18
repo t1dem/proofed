@@ -6,7 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { dataComment } from "./report.ts";
+import { dataComment, readReportData } from "./report.ts";
+import { askedScenario } from "./requests.ts";
+import { kaneObjective } from "./run.ts";
+import { resolveScenarioTarget } from "./target.ts";
+
+const description = askedScenario("description", "Check that the counter survives a restart.\n\n[delay:1]",
+  resolveScenarioTarget({ target: "android", execution: "cloud", app: "app.apk" }, {}, {}, process.cwd()));
 
 const fixUrl = new URL("./fix.ts", import.meta.url).href;
 const fakeKane = fileURLToPath(new URL("./testing/fake-kane.ts", import.meta.url));
@@ -16,6 +22,7 @@ function fixture(target = "android", extra = "", build = "node build.cjs", final
   changeAfterAttempt?: boolean;
   buildOutput?: boolean;
   agentBuildOutput?: "with-source" | "only";
+  description?: "stored" | "missing";
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "proofed-fix-runtime-"));
   const log = join(dir, "events.jsonl");
@@ -56,7 +63,9 @@ fs.writeFileSync('modes/counter', fs.readFileSync('dist/config.js', 'utf8') === 
   if (options.extraScenario || finalFails) writeFileSync(join(dir, "extra.js"), "PR changed it\n");
   writeFileSync(join(dir, "app.js"), "PR broke it\n"); git("commit", "-qam", "Break counter");
   const original = git("rev-parse", "HEAD");
-  const body = `<!-- proofed -->\n### Proofed\n\nCounter broke.\n\n- [ ] **Fix with Claude**\n${dataComment({ sha: original, failures: [{ id: "counter", name: "Counter", file: ".proofed/scenarios/counter.md", objective: "Assert counter is 1.", reason: "Counter is 0.", diagnosis: "", steps: [] }] })}`;
+  const failures = [{ id: "counter", name: "Counter", file: ".proofed/scenarios/counter.md", objective: "Assert counter is 1.", reason: "Counter is 0.", diagnosis: "", steps: [] }];
+  if (options.description) failures.push({ ...description, reason: "The counter reset.", diagnosis: "", steps: [] });
+  const body = `<!-- proofed -->\n### Proofed\n\nCounter broke.\n\n- [ ] **Fix with Claude**\n${dataComment({ sha: original, failures, asked: options.description === "stored" ? [description] : undefined })}`;
   // All API functions fix.ts/pipeline.ts can call are local spies, and push never invokes git push.
   const github = `export * from ${JSON.stringify(new URL("./github.ts", import.meta.url).href)};
 const record = (type, value) => { globalThis.fixtureLog(type,value); };
@@ -106,6 +115,7 @@ globalThis.fetch=async()=>{throw new Error('Network forbidden in fixer fixture')
 await import(${JSON.stringify(fixUrl)});`;
   const env = { ...process.env, TMPDIR: dir, TEMP: dir, TMP: dir, GITHUB_TOKEN: "fixture-token", GITHUB_REPOSITORY: "fixture/repo", PROOFED_AUTO: "true", PROOFED_NUMBER: "1", PROOFED_BUILD: build, PROOFED_BASE_SHA: base, PROOFED_HEAD_REF: "main", PROOFED_OUT: join(dir, "out"), PROOFED_FIX: "true", PROOFED_DIR: ".", KANE_CLI: fakeKane, FAKE_KANE_LOG: join(dir, "kane.log"), FAKE_KANE_MODES: join(dir, "modes"), RUNNER_TEMP: dir };
   for (const key of ["PROOFED_TARGET", "PROOFED_EXECUTION", "PROOFED_APP", "PROOFED_URL", "PROOFED_SERVE", "PROOFED_BASE_REF", "GITHUB_EVENT_PATH", "GITHUB_RUN_ID", "PROOFED_MODEL", "PROOFED_PROVIDER", "PROOFED_CLAUDE_MODEL", "PROOFED_SCENARIOS", "ACTIONS_ID_TOKEN_REQUEST_URL", "ACTIONS_ID_TOKEN_REQUEST_TOKEN"]) delete env[key as keyof typeof env];
+  if (options.description) Object.assign(env, { PROOFED_TARGET: "android", PROOFED_EXECUTION: "cloud", PROOFED_APP: "app.apk" });
   // Hooks and generated scripts sit outside the tested checkout so they can never be committed.
   const preload = join(tmpdir(), `proofed-fix-preload-${process.pid}-${Date.now()}.mjs`);
   writeFileSync(preload, script);
@@ -132,6 +142,39 @@ for (const target of ["android", "ios"]) test(`the ${target} fixer reuses its la
     assert.match(f.git("log", "-1", "--format=%B"), new RegExp(`Kane re-ran the scenarios on an ${target === "ios" ? "iOS" : "Android"} device`));
     assert.equal(f.git("show", "HEAD:new-helper.js"), "verified new file");
     assert.equal(f.git("status", "--porcelain"), "");
+  } finally { f.cleanup(); }
+});
+
+test("the fixer replays the stored PR description alongside a failed file scenario", () => {
+  const f = fixture("android", "", "node build.cjs", false, { description: "stored" });
+  try {
+    const ran = f.run();
+    assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+    assert.deepEqual(f.runs().map((c) => c.args![1]), [
+      kaneObjective("Assert counter is 1. [fake-from:counter] [delay:1]"),
+      kaneObjective(description.objective),
+    ]);
+    const events = f.events();
+    assert.match(events.find((e) => e.type === "ask")!.value as string, /What the PR description asks/);
+    const body = events.find((e) => e.type === "report" && (e.value as string).includes("**Fixed in "))!.value as string;
+    assert.match(body, /#### ✓ What the PR description asks/);
+    assert.deepEqual(readReportData(body)?.failures, []);
+  } finally { f.cleanup(); }
+});
+
+test("a missing PR request leaves its result unverified and lets the file fix proceed", () => {
+  const f = fixture("android", "", "node build.cjs", false, { description: "missing" });
+  try {
+    const ran = f.run();
+    assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+    assert.equal(f.runs().length, 1);
+    const events = f.events();
+    assert.ok(events.some((e) => e.type === "push"));
+    assert.doesNotMatch(events.find((e) => e.type === "ask")!.value as string, /What the PR description asks/);
+    const body = events.find((e) => e.type === "report" && (e.value as string).includes("**Fixed in "))!.value as string;
+    assert.match(body, /Proofed couldn't re-run this request during the fix\. The previous check failed: The counter reset\./);
+    assert.deepEqual(readReportData(body)?.open, ["asked-in-description"]);
+    assert.deepEqual(events.findLast((e) => e.type === "status")?.value, { state: "success", description: "1 passed, 1 not checked" });
   } finally { f.cleanup(); }
 });
 

@@ -47,7 +47,8 @@ const MAY_ASK_NOTHING =
   "without clicking anything: there is nothing to check. Never sign in, and never leave the app's own pages to get there.";
 
 // The description asked for nothing Kane could check: not a result of the PR, only a line under the report.
-export const nothingAsked = (r: ScenarioResult) => r.scenario.id === "asked-in-description" && r.outcome === "unsure";
+export const nothingAsked = (r: ScenarioResult) =>
+  r.scenario.id === "asked-in-description" && r.outcome === "unsure" && !r.requestUnavailable;
 
 const NAMES = {
   description: "What the PR description asks",
@@ -74,4 +75,18 @@ export function askedScenario(where: keyof typeof NAMES, text: string, target: T
     `asked about actually works; the ${target.kind === "web" ? "page" : "app"} loading is not enough.` +
     (where === "description" ? ` ${MAY_ASK_NOTHING}` : "");
   return scenario;
+}
+
+// Reports store the generated objective. Recover the original request only if the check's
+// generator can reproduce that objective with the current target settings.
+export function replayAskedScenario(stored: Scenario): Scenario | undefined {
+  const where = stored.id === "asked-in-description" ? "description" : stored.id === "asked-in-comment" ? "comment" : undefined;
+  if (!where || stored.file !== "" || stored.url !== "/" || typeof stored.objective !== "string") return;
+  const template = askedScenario(where, "").objective;
+  const boundary = template.indexOf("\n\n") + 2;
+  const prefix = template.slice(0, boundary);
+  const suffix = template.slice(boundary);
+  if (!stored.objective.startsWith(prefix) || !stored.objective.endsWith(suffix)) return;
+  const request = stored.objective.slice(prefix.length, -suffix.length);
+  if (request.trim()) return askedScenario(where, request);
 }

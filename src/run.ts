@@ -40,6 +40,8 @@ export type ScenarioResult = {
   recordingNote?: string;
   accountBalance?: { before: number; after: number; debit: number };
   notChecked?: "runs_disagreed" | "text_contradicted";
+  // The fixer had a previous failure but could not reconstruct or run the request.
+  requestUnavailable?: true;
   // The uncaught exception that left the page blank, when Proofed failed the scenario before Kane ran (precheck.ts).
   pageError?: string;
   // Wall time of the run, retries included.

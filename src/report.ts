@@ -409,7 +409,7 @@ function compose(
     sections.push(
       (unchecked(r)
         ? `#### ⚠ ${r.scenario.name}: not checked\n\n${quote(r.end?.reason)}\n\nKane called it a pass, but none of its steps checked the page, so this says nothing about the code either way.`
-        : `#### ⚠ ${r.scenario.name}: not checked\n\n${quote(r.end?.reason)}` +
+        : `#### ⚠ ${r.scenario.name}: not checked\n\n${quote(r.end?.reason ?? r.error)}` +
           (r.end?.verdict?.suggestion ? `\n\n**Kane suggests:** ${r.end.verdict.suggestion}` : "")) +
         clip(clips.get(r.scenario.id), 560),
     );

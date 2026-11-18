@@ -17,6 +17,7 @@ import { changedFiles, ctx, env, pickScenarios, publish, putReport, readEvent, r
 import { pushHead } from "./push.ts";
 import { fixLoop, settled } from "./fixloop.ts";
 import { fixRequested, readReportData, WORKING, type FailureData } from "./report.ts";
+import { replayAskedScenario } from "./requests.ts";
 import type { ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
 import { targetChecks } from "./targetchecks.ts";
@@ -59,36 +60,61 @@ const base = env("PROOFED_BASE_SHA");
 const branch = env("PROOFED_HEAD_REF");
 // Where scenarios come from when the PR's branch has none (opened before Proofed was added).
 const rev = process.env.PROOFED_BASE_REF ? `origin/${process.env.PROOFED_BASE_REF}` : base;
-const asked = data.asked ?? [];
-const scenariosFor = (ids: string[]) => targetScenarios([
-  ...pickScenarios({ only: ids, rev }).selected,
-  ...asked.filter((s) => ids.includes(s.id)),
-]);
-
 const BOX = /- \[[ x]\] \*\*Fix with (?:Claude|Codex)\*\*.*/;
 // Puts a line where the checkbox is, or under the headline when there's none (the fixer gave up last time).
 const withLine = (text: string, line: string) =>
   BOX.test(text) ? text.replace(BOX, line) : text.replace(/(### Proofed\n\n[^\n]*\n)/, `$1\n${line}\n`);
 
-const initial = [...new Map(targetScenarios([...pickScenarios({ changed: changedFiles(base), rev }).selected, ...scenariosFor(data.failures.map((f) => f.id)), ...asked]).map((s) => [s.id, s])).values()];
-const refusal = fixRefusal(initial, process.env.PROOFED_BUILD)
-  ?? (!process.env.PROOFED_BUILD?.trim() ? "Fix didn't run: set PROOFED_BUILD (the action's build input) so Kane can check the rebuild." : undefined)
-  ?? (needsWeb(initial) && (!process.env.PROOFED_URL?.trim() || !process.env.PROOFED_SERVE?.trim()) ? "Fix didn't run: web scenarios need url and serve to check the rebuild." : undefined);
+async function checkSetup(scenarios: Scenario[]) {
+  const refusal = fixRefusal(scenarios, process.env.PROOFED_BUILD)
+    ?? (!process.env.PROOFED_BUILD?.trim() ? "Fix didn't run: set PROOFED_BUILD (the action's build input) so Kane can check the rebuild." : undefined)
+    ?? (needsWeb(scenarios) && (!process.env.PROOFED_URL?.trim() || !process.env.PROOFED_SERVE?.trim()) ? "Fix didn't run: web scenarios need url and serve to check the rebuild." : undefined);
+  if (refusal) return refusal;
+  for (const scenario of scenarios) {
+    const checks = await targetChecks(scenario.resolvedTarget!, { pendingBuild: true, launchPending: true });
+    const failed = checks.filter((c) => c.status === "fail");
+    if (failed.length) return `Fix didn't run: "${scenario.name}" cannot be checked. ${failed.map((c) => `${c.detail}. ${c.fix}`).join(" ")}`;
+  }
+}
+
+const checkedFiles = pickScenarios({ changed: changedFiles(base), rev }).selected;
+const fileIds = data.failures.filter((f) => f.file).map((f) => f.id);
+const failedFiles = fileIds.length ? pickScenarios({ only: fileIds, rev }).selected : [];
+const uniqueScenarios = (scenarios: Scenario[]) => [...new Map(scenarios.map((s) => [s.id, s])).values()];
+const refusal = await checkSetup(targetScenarios(uniqueScenarios([...checkedFiles, ...failedFiles])));
 if (refusal) {
   console.log(refusal);
   await restoreReport(refusal, false, refusal);
   process.exit(1);
 }
-for (const scenario of initial) {
-  const checks = await targetChecks(scenario.resolvedTarget!, { pendingBuild: true, launchPending: true });
-  const failed = checks.filter((c) => c.status === "fail");
-  if (failed.length) {
-    const note = `Fix didn't run: "${scenario.name}" cannot be checked. ${failed.map((c) => `${c.detail}. ${c.fix}`).join(" ")}`;
-    console.log(note);
-    await restoreReport(note, false, note);
-    process.exit(1);
-  }
+const asked: Scenario[] = [];
+for (const stored of data.asked ?? []) {
+  const rebuilt = replayAskedScenario(stored);
+  const failure = data.failures.find((f) => !f.file && f.id === stored.id);
+  if (!rebuilt || (failure && failure.objective !== rebuilt.objective)) continue;
+  const targeted = targetScenarios([rebuilt]);
+  if (!targeted.length) continue;
+  const reason = await checkSetup(targeted);
+  if (reason) console.log(reason);
+  else asked.push(rebuilt);
 }
+const failures = data.failures.filter((f) => f.file || asked.some((s) => s.id === f.id));
+const unverified: ScenarioResult[] = data.failures.filter((f) => !failures.includes(f)).map((f) => ({
+  scenario: { id: f.id, name: f.name, file: "", paths: [], url: "/", objective: f.objective },
+  outcome: "unsure",
+  requestUnavailable: true,
+  error: `Proofed couldn't re-run this request during the fix. The previous check failed: ${f.reason}`,
+  steps: [],
+  end: undefined,
+  clip: undefined,
+}));
+if (!failures.length) {
+  const note = "Fix didn't run: Proofed couldn't re-run the failed request.";
+  console.log(note);
+  await restoreReport(note, false, note);
+  process.exit(1);
+}
+const scenariosFor = (ids: string[]) => targetScenarios([...failedFiles, ...asked].filter((s) => ids.includes(s.id)));
 writeFileSync(buildScript, `set -e -o pipefail\ncd ${sh(resolve(appDir).replaceAll("\\", "/"))}\n${env("PROOFED_BUILD")}\n`);
 
 if (repo && report) {
@@ -97,7 +123,7 @@ if (repo && report) {
 }
 // The dashboard follows along: which attempt it is, what's being done, and Kane's re-check.
 live.start({ kind: "fix", pr: prNumber, sha: git("rev-parse", "HEAD"), runUrl });
-live.track(scenariosFor(data.failures.map((f) => f.id)));
+live.track(scenariosFor(failures.map((f) => f.id)));
 
 function prompt(failures: FailureData[], feedback: string) {
   const diff = git("diff", `${base}...HEAD`).slice(0, 40_000);
@@ -207,9 +233,9 @@ function build() {
 
 const loop = await fixLoop({
   fixer,
-  failures: data.failures,
+  failures,
   open: data.open ?? data.failures.map((f) => f.id),
-  checked: pickScenarios({ changed: changedFiles(base), rev }).selected.map((s) => s.id),
+  checked: checkedFiles.map((s) => s.id),
   ask: (failures, feedback) => {
     beforeAnswer = fileStates();
     const answer = askFixer(prompt(failures, feedback));
@@ -269,7 +295,7 @@ if (loop.status === "gave-up") {
   await live.end();
   // Only the scenarios the report had broken: the others ran on the fixer's change, which isn't on the branch.
   await publish({
-    repo, pr: prNumber, sha: git("rev-parse", "HEAD"), results: loop.fixing, skipped: [], runUrl, outDir, asked, previous: data,
+    repo, pr: prNumber, sha: git("rev-parse", "HEAD"), results: [...loop.fixing, ...unverified], skipped: [], runUrl, outDir, asked, previous: data,
     fix: { status: "gave-up", attempts: attempt, summary, ...fixer, tries },
   });
   process.exit(1);
@@ -279,7 +305,7 @@ if (loop.status === "gave-up") {
 // only missing scenarios; if the tree changed since that attempt or during the build, re-check all.
 // Verification and the tree guards still finish before anything is committed or pushed.
 const picked = pickScenarios({ changed: [...new Set([...changedFiles(base), ...fixChanges()])], rev });
-const final: Scenario[] = targetScenarios([...new Map([...picked.selected, ...scenariosFor(data.failures.map((f) => f.id)), ...asked].map((s) => [s.id, s])).values()]);
+const final = targetScenarios(uniqueScenarios([...picked.selected, ...failedFiles, ...asked]));
 let verifiedFiles = treeBeforeCheck();
 const known = new Map(lastAttemptTree === verifiedFiles ? lastResults.map((r) => [r.scenario.id, r]) : []);
 let missing = final.filter((s) => !known.has(s.id));
@@ -309,7 +335,7 @@ try {
   await restoreReport(`The final check couldn't run: ${String(e)}. Nothing was pushed.`, true, "The final check couldn't run; nothing was pushed");
   process.exit(1);
 }
-const fixedIds = new Set(data.failures.map((f) => f.id));
+const fixedIds = new Set(failures.map((f) => f.id));
 const finalFixed = results.filter((r) => fixedIds.has(r.scenario.id));
 const regressed = results.filter((r) => !fixedIds.has(r.scenario.id) && r.outcome === "failed" && !(data.open ?? []).includes(r.scenario.id));
 if (finalFixed.length !== fixedIds.size || !finalFixed.every(settled) || regressed.length) {
@@ -351,7 +377,7 @@ const changes = git("diff", "--cached", "--numstat").split("\n").filter(Boolean)
   const [added = "", removed = "", file = ""] = line.split("\t");
   return { file, added: Number(added) || 0, removed: Number(removed) || 0 };
 });
-const names = data.failures.map((f) => f.name).join(", ");
+const names = failures.map((f) => f.name).join(", ");
 live.fix({ doing: "pushing", tries: [...tries] });
 const checkedTree = git("write-tree");
 const brokenSha = git("rev-parse", "HEAD");
@@ -366,7 +392,10 @@ const asApp = await pushHead(branch);
 const sha = git("rev-parse", "HEAD");
 console.log(`Pushed ${sha} to ${branch}${asApp ? " as the Proofed app" : ""}`);
 // The broken commit was set to "fixing" above; without this it would stay pending for good.
-if (repo && report) await setStatus(repo, brokenSha, "failure", `${names} broke here; fixed in ${sha.slice(0, 7)}`, runUrl).catch(() => {});
+if (repo && report) {
+  const status = unverified.length ? `${names} fixed in ${sha.slice(0, 7)}; a request wasn't re-checked` : `${names} broke here; fixed in ${sha.slice(0, 7)}`;
+  await setStatus(repo, brokenSha, "failure", status, runUrl).catch(() => {});
+}
 const skipped = picked.skipped;
 const repoUrl = repo && `https://github.com/${repo.owner}/${repo.name}`;
 // The app's push has started a check of this commit, which skips Kane when the report is already
@@ -374,7 +403,7 @@ const repoUrl = repo && `https://github.com/${repo.owner}/${repo.name}`;
 // push cancel a run, so the report published here is there by the time it looks.
 await live.end();
 const broken = await publish({
-  repo, pr: prNumber, sha, results, skipped, runUrl, outDir, asked, previous: data,
+  repo, pr: prNumber, sha, results: [...results, ...unverified], skipped, runUrl, outDir, asked, previous: data,
   fix: {
     status: "fixed", attempts: attempt, summary, ...fixer, tries, changes,
     commit: sha, commitUrl: repoUrl ? `${repoUrl}/commit/${sha}` : undefined,
