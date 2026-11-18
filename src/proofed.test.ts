@@ -132,7 +132,7 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.deepEqual(doc.counts, { passed: 1, failed: 1, not_checked: 2, error: 1, skipped: 0 });
       const by = Object.fromEntries(doc.scenarios.map((s) => [s.id, s]));
       assert.equal(by.pass!.outcome, "passed");
-      assert.ok(by.pass!.clip?.mp4 && existsSync(by.pass!.clip.mp4), "a clip of the real page");
+      assert.ok(by.pass!.clip?.mp4 && existsSync(by.pass!.clip.mp4), `a clip of the real page: ${JSON.stringify(by.pass!.clip)}\n${ran.stderr}`);
       assert.equal(by.fail!.outcome, "failed");
       assert.equal(by.fail!.diagnosis, "The free shipping threshold is €40, not €50.");
       assert.equal(by.fail!.failedStep, "assert: shipping is €4.90");
@@ -182,8 +182,11 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(bin, "git"));
     // Linux's google-chrome is a shell script that needs coreutils on PATH.
     if (process.platform === "linux") {
+      const linked = new Set(["node", "git"]);
       for (const dir of ["/usr/bin", "/bin"]) for (const name of readdirSync(dir)) {
-        if (!name.startsWith("ff") && !existsSync(join(bin, name))) symlinkSync(join(dir, name), join(bin, name));
+        if (name.startsWith("ff") || linked.has(name)) continue;
+        linked.add(name);
+        symlinkSync(join(dir, name), join(bin, name));
       }
     }
     try {
