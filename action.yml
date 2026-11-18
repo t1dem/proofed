@@ -105,6 +105,8 @@ runs:
         PROOFED_FIX: ${{ inputs.fix }}
         PROOFED_VARS: ${{ inputs.vars }}
         PROOFED_SCENARIOS: ${{ inputs.scenarios }}
+        PROOFED_TARGET: ${{ inputs.target }}
+        PROOFED_EXECUTION: ${{ inputs.execution }}
         # Whether there is a provider credential, not the token: this step needs no more.
         PROOFED_CLAUDE: ${{ inputs.claude-code-oauth-token != '' }}
         PROOFED_CODEX: ${{ inputs.codex-api-key != '' || inputs.codex-auth-json != '' }}

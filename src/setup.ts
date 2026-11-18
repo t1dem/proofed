@@ -13,6 +13,14 @@ url: /
 Open the home page. Check that the main heading is visible and that the page shows no error message.
 `;
 
+export const FIRST_ANDROID_SCENARIO = `---
+name: App opens
+target: android
+execution: cloud
+---
+Check that the app opens to a screen with at least one visible label and shows no startup error or crash dialog.
+`;
+
 // The scenarios folder holds the stock scenario and nothing else: no one has written one yet.
-export const onlyFirstScenario = (files: { name: string; text?: string }[]) =>
-  files.length === 1 && files[0]!.name === "home.md" && files[0]!.text === FIRST_SCENARIO;
+export const onlyFirstScenario = (files: { name: string; text?: string }[], first = FIRST_SCENARIO) =>
+  files.length === 1 && files[0]!.name === "home.md" && files[0]!.text === first;

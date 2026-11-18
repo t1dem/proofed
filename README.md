@@ -187,6 +187,8 @@ Checks spend Kane credits; planning does not. Use `--no-retry` when another atte
 2. Install the GitHub App on a repo. Proofed opens a PR with the workflow and puts the keys into the repo's secrets.
 3. On that PR, the selected provider writes up to five scenarios for the app's main flows. Only the ones Kane saw pass are committed.
 
+One-click setup detects Gradle Android apps and configures checks on real cloud devices. This setup is not yet verified on a real device plan.
+
 A web scenario takes 1 to 4 minutes and is estimated at 30 Kane credits the first time. Mobile and desktop costs are unknown without history. A fix attempt re-runs the broken scenarios and affected neighboring scenarios before pushing.
 
 <details>

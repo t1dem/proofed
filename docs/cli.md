@@ -317,6 +317,8 @@ steps:
 Fake Kane tests check the build, install/upload arguments, process cleanup, cache and
 fix ordering. They do not prove device automation, cloud uploads or runner setup.
 
+One-click setup detects Gradle Android apps and configures checks on real cloud devices. This setup is not yet verified on a real device plan.
+
 | Target / host | Verified with real Kane runs |
 |---|---|
 | Web, GitHub-hosted Linux/macOS/Windows | Linux/macOS: verified; Windows: not yet verified |

@@ -1,6 +1,6 @@
 import { gitPath } from "./paths.ts";
 // The setup PR's check, when mode.ts finds only the stock scenario there: The agent reads the app and
-// writes scenarios for its main flows, Kane runs each of them in Chrome next to the stock one, and the
+// writes scenarios for its main flows, Kane runs each of them next to the stock one, and the
 // ones Kane saw pass are committed to the setup branch. The rest are deleted, so the PR carries no guess.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
@@ -34,6 +34,8 @@ const provider = providerLabel(providerOf(writer.model));
 const agentName = provider === "Codex" ? "Codex" : "Claude Code";
 const headSha = git("rev-parse", "HEAD");
 const stock = loadScenarios(dir);
+const android = stock[0]?.target === "android";
+const where = android ? "on an Android cloud device" : "in Chrome";
 
 const example = `---
 name: Promo code total
@@ -45,7 +47,7 @@ Open the bag, type the promo code welcome10 and apply it.
 Check that the discount is "−€9.10" and shipping is "Free".
 Check that the total is "€81.90".`;
 
-const prompt = () => `Proofed checks every pull request of this repository in a real Chrome. It runs scenarios: Markdown files with plain-English steps that Kane CLI, an AI browser agent, follows on the running app. Kane sees only the page, never the code. This repository has one scenario so far, ${dir}/home.md:
+const webPrompt = () => `Proofed checks every pull request of this repository in a real Chrome. It runs scenarios: Markdown files with plain-English steps that Kane CLI, an AI browser agent, follows on the running app. Kane sees only the page, never the code. This repository has one scenario so far, ${dir}/home.md:
 
 ${readFileSync(`${dir}/home.md`, "utf8").trim()}
 
@@ -80,6 +82,28 @@ Write only new files in ${dir}/. Don't change home.md. Do not run builds or othe
 End your answer with one line per scenario you wrote, most valuable first, in English:
 SCENARIO: <file name> - <what it checks, in one short sentence a person reads in the report>`;
 
+const androidPrompt = () => `Proofed uses Kane CLI to check pull requests on a real Android cloud device. The workflow builds the app with \`${env("PROOFED_BUILD", "")}\` and installs \`${env("PROOFED_APP", "")}\` on the device before each scenario. Kane can interact with the screens but cannot read the code. The stock scenario in ${dir}/home.md already checks that the app opens.
+
+Read the README, Android screens, navigation, and string resources. Write up to ${MAX_SCENARIOS} scenarios for distinct flows that users would notice if they broke. Use flows that work on a fresh installation and need no sign-in, payment, email, or external services. Avoid flows that leave changes on a server. Refer to controls and screens by their visible labels. End each scenario with one or two specific checks of what is visible, using double quotes around expected text. Use labels and behavior confirmed by the source. If the source does not show a flow you can test this way, write fewer scenarios or none.
+
+Write one Markdown file per scenario in ${dir}/ with a kebab-case name. Use this example for the format:
+
+---
+name: Counter increments
+target: android
+execution: cloud
+paths: [app/src/main/**]
+---
+Tap "Add" once.
+Check that the counter reads "1".
+
+Use repository-relative paths or globs that could break that flow. Set target and execution as shown and leave app, device, and OS version to the workflow. Write short steps, one action or check per line.
+
+Write only new files in ${dir}/. Don't change home.md. Do not run builds or other commands except reading the app code. Do not access the network or external services. Do not commit.
+
+End your answer with one line per scenario you wrote, most valuable first, in English:
+SCENARIO: <file name> - <what it checks, in one short sentence a person reads in the report>`;
+
 // Undoes whatever the fixer changed besides new files in the scenarios folder: home.md, or anything else
 // a tool let through. Files that were already changed or untracked (the build's) stay as they are.
 const changedBefore = new Set(lines(git("diff", "--name-only")));
@@ -95,14 +119,14 @@ const why = (r: ScenarioResult) =>
   r.outcome === "error"
     ? `Kane couldn't finish the run: ${r.error ?? "no reason given"}`
     : unchecked(r)
-      ? "Kane finished without checking anything on the page."
+      ? `Kane finished without checking anything on the ${android ? "screen" : "page"}.`
       : r.outcome === "unsure"
         ? `Kane thinks the test is wrong: ${r.end?.reason ?? ""}`
         : (r.end?.reason ?? "It failed.");
 
 async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Written; sha: string }> {
   console.log(`Asking ${writer.model} (${writer.effort}) to write scenarios in ${dir}/`);
-  const answer = askAgent(prompt(), {
+  const answer = askAgent(android ? androidPrompt() : webPrompt(), {
     ...writer,
     permissionMode: "default",
     tools: ["Read", "Glob", "Grep", "Write", "Edit"],
@@ -133,7 +157,10 @@ async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Wr
   for (const file of files.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))) {
     try {
       const scenario = parseScenario(file, readFileSync(file, "utf8"));
-      if (candidates.length < MAX_SCENARIOS) candidates.push(scenario);
+      // The action filters Android scenarios by their declared target, so a missing target never runs.
+      if (android && (scenario.target !== "android" || scenario.execution !== "cloud"))
+        dropped.push({ name: scenario.name, why: "Set target: android and execution: cloud in the scenario frontmatter." });
+      else if (candidates.length < MAX_SCENARIOS) candidates.push(scenario);
       else dropped.push({ name: scenario.name, why: `${provider} wrote more than ${MAX_SCENARIOS}; this one ranked lower.` });
     } catch (e) {
       dropped.push({ name: basename(file), why: `Not a scenario file: ${e instanceof Error ? e.message : e}` });
@@ -154,7 +181,7 @@ async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Wr
 
   git("add", "--", ...kept.map((r) => r.scenario.file));
   git("-c", `user.name=${provider}`, "-c", `user.email=${provider === "Codex" ? "codex@openai.com" : "noreply@anthropic.com"}`, "commit", "--no-verify", "-m",
-    `Add scenarios: ${kept.map((r) => r.scenario.name).join(", ")}\n\nWritten by ${agentName} for the Proofed setup; Kane ran each one in Chrome and saw it pass.\n\nWritten-by: ${writer.model} (${writer.effort} effort)`);
+    `Add scenarios: ${kept.map((r) => r.scenario.name).join(", ")}\n\nWritten by ${agentName} for the Proofed setup; Kane ran each one ${where} and saw it pass.\n\nWritten-by: ${writer.model} (${writer.effort} effort)`);
   try {
     // The app's push starts a check of the new commit. It waits for this job (the workflow's
     // concurrency doesn't let that push cancel a run) and then skips Kane, since the report
@@ -174,7 +201,7 @@ async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Wr
   };
 }
 
-if (repo && pr) await setStatus(repo, headSha, "pending", `${provider} is writing scenarios; Kane will run them in Chrome`, runUrl);
+if (repo && pr) await setStatus(repo, headSha, "pending", `${provider} is writing scenarios; Kane will run them ${where}`, runUrl);
 try {
   const { results, written, sha } = await writeAndProve();
   written.provider = providerOf(writer.model);

@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { SETUP_BRANCH } from "./setup.ts";
+import { FIRST_ANDROID_SCENARIO, FIRST_SCENARIO, SETUP_BRANCH } from "./setup.ts";
 
 const repository = { full_name: "owner/repo" };
 const pr = {
@@ -21,7 +21,7 @@ const comment = (action = "created", body = "/proofed") => ({
   comment: action === "edited" ? report : { id: 13, body, user: { type: "User" }, author_association: "MEMBER" },
 });
 
-function run(event: object, permission: string | number, replyFails = false, env: Record<string, string> = {}, fetchedPr: object = pr) {
+function run(event: object, permission: string | number, replyFails = false, env: Record<string, string> = {}, fetchedPr: object = pr, stock?: string) {
   const dir = mkdtempSync(join(tmpdir(), "proofed-mode-"));
   try {
     const path = join(dir, "event.json");
@@ -31,6 +31,7 @@ function run(event: object, permission: string | number, replyFails = false, env
     const script = `
       import assert from "node:assert/strict";
       const calls = [];
+      const stock = ${JSON.stringify(stock)};
       process.on("exit", () => console.log("api=" + JSON.stringify(calls)));
       globalThis.fetch = async (url, options) => {
         const path = new URL(url).pathname;
@@ -44,6 +45,8 @@ function run(event: object, permission: string | number, replyFails = false, env
         }
         if (path.endsWith("/comments")) return Response.json([${JSON.stringify(report)}]);
         if (path.endsWith("/pulls/7")) return Response.json(${JSON.stringify(fetchedPr)});
+        if (stock !== undefined && path.endsWith("/contents/.proofed/scenarios")) return Response.json([{ name: "home.md", type: "file" }]);
+        if (stock !== undefined && path.endsWith("/contents/.proofed/scenarios/home.md")) return Response.json({ content: Buffer.from(stock).toString("base64") });
         throw new Error("Unexpected request: " + path);
       };
       await import(${JSON.stringify(new URL("./mode.ts", import.meta.url).href)});
@@ -93,6 +96,17 @@ test("pull request events and unrelated comments need no permission lookup", () 
   const unrelated = run(comment("created", "Looks good"), "write");
   assert.match(unrelated, /^mode=none$/m);
   assert.doesNotMatch(unrelated, /\/permission/);
+});
+
+test("setup PRs generate scenarios for the matching stock web or cloud Android scenario", () => {
+  const event = { action: "opened", pull_request: { ...pr, head: { ...pr.head, ref: SETUP_BRANCH } } };
+  const web = { PROOFED_CLAUDE: "true", PROOFED_TARGET: "", PROOFED_EXECUTION: "", PROOFED_SCENARIOS: "" };
+  const android = { ...web, PROOFED_TARGET: "android", PROOFED_EXECUTION: "cloud" };
+  assert.match(run(event, "write", false, web, pr, FIRST_SCENARIO), /^generate=true$/m);
+  assert.match(run(event, "write", false, android, pr, FIRST_ANDROID_SCENARIO), /^generate=true$/m);
+  assert.match(run(event, "write", false, android, pr, FIRST_SCENARIO), /^generate=false$/m);
+  assert.match(run(event, "write", false, android, pr, FIRST_ANDROID_SCENARIO.trimEnd()), /^generate=false$/m);
+  assert.match(run(event, "write", false, { ...android, PROOFED_EXECUTION: "local" }, pr, FIRST_ANDROID_SCENARIO), /^generate=false$/m);
 });
 
 test("fork and deleted-head PR comments get one refusal and no checkout ref", () => {

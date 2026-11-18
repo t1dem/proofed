@@ -1,5 +1,5 @@
 // The one Proofed workflow runs on PR events and on comments; this decides what to do for this one:
-// check the PR in Chrome, or have the selected agent fix what the last check found. It also settles the fix model,
+// check the PR, or have the selected agent fix what the last check found. It also settles the fix model,
 // so a "/proofed fix" that can't run gets an answer before anything is installed, and whether the
 // setup PR's check starts by writing scenarios.
 import { appendFileSync } from "node:fs";
@@ -8,7 +8,7 @@ import { DEFAULT_FIXER, resolveFixer } from "./models.ts";
 import { ctx, readEvent } from "./pipeline.ts";
 import { alreadyReported, fixRequested, readReportData } from "./report.ts";
 import { parseCommand, parseFix, type FixCommand } from "./requests.ts";
-import { APP_LOGIN, onlyFirstScenario, SETUP_BRANCH } from "./setup.ts";
+import { APP_LOGIN, FIRST_ANDROID_SCENARIO, FIRST_SCENARIO, onlyFirstScenario, SETUP_BRANCH } from "./setup.ts";
 
 type Event = {
   action: string;
@@ -150,12 +150,16 @@ const credential = fixer.provider === "codex" ? process.env.PROOFED_CODEX === "t
 // only while the branch holds just the stock scenario, so a person's scenarios are never touched,
 // and only with a credential for the selected provider. Otherwise its CLI is not installed.
 let generate = false;
-if (mode === "check" && event.pull_request && pr.head.ref === SETUP_BRANCH && credential && !badSetting) {
+const target = process.env.PROOFED_TARGET || "web";
+const first = target === "web" ? FIRST_SCENARIO
+  : target === "android" && process.env.PROOFED_EXECUTION === "cloud" ? FIRST_ANDROID_SCENARIO
+  : undefined;
+if (mode === "check" && event.pull_request && pr.head.ref === SETUP_BRANCH && credential && !badSetting && first) {
   const dir = (process.env.PROOFED_SCENARIOS || ".proofed/scenarios").replace(/\/+$/, "");
   try {
     const [only, ...more] = (await listFolder(repo, dir, pr.head.sha)) ?? [];
     generate = !!only && more.length === 0 && only.type === "file" &&
-      onlyFirstScenario([{ name: only.name, text: await readFile(repo, `${dir}/${only.name}`, pr.head.sha) }]);
+      onlyFirstScenario([{ name: only.name, text: await readFile(repo, `${dir}/${only.name}`, pr.head.sha) }], first);
   } catch (e) {
     console.log(`Couldn't read ${dir} on the setup branch, so no scenarios are written: ${e instanceof Error ? e.message : e}`);
   }
