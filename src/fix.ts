@@ -42,6 +42,21 @@ if (!prNumber || !(auto || event.issue?.pull_request) || !data || data.failures.
   console.log("No fix requested.");
   process.exit(0);
 }
+const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trimEnd();
+const brokenSha = git("rev-parse", "HEAD");
+const fixer = configuredFixer();
+const provider = providerLabel(providerOf(fixer.model));
+const BOX = /- \[[ x]\] \*\*Fix with (?:Claude|Codex)\*\*.*/;
+// Puts a line where the checkbox is, or under the headline when there's none (the fixer gave up last time).
+const withLine = (text: string, line: string) =>
+  BOX.test(text) ? text.replace(BOX, line) : text.replace(/(### Proofed\n\n[^\n]*\n)/, `$1\n${line}\n`);
+
+if (data.sha !== brokenSha) {
+  const note = "This report is for a different commit. Comment `/proofed` to run a fresh check.";
+  console.log(note);
+  await restoreReport(note, false, null);
+  process.exit(0);
+}
 // Reports written before description checks became best effort may still list one as a failure.
 const reportedFailures = data.failures.filter((f) => !(isDescriptionScenario(f) && f.failedCheck === "scenario_doubted"));
 const doubtedDescription = reportedFailures.length !== data.failures.length;
@@ -56,21 +71,14 @@ const sh = (word: string) => (/^[\w./-]+$/.test(word) ? word : `'${word.replaceA
 // `cd site && pnpm build`. Wrapped in a script, any build is one simple command, allowed exactly as is.
 const buildScript = join(process.env.RUNNER_TEMP || tmpdir(), "proofed-build.sh");
 const buildCommand = `bash ${sh(buildScript.replaceAll("\\", "/"))}`;
-const fixer = configuredFixer();
-const provider = providerLabel(providerOf(fixer.model));
 const agentName = provider === "Codex" ? "Codex" : "Claude Code";
 
 mkdirSync(outDir, { recursive: true });
 if (!existsSync(join(outDir, ".gitignore"))) writeFileSync(join(outDir, ".gitignore"), "*\n");
-const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trimEnd();
 const base = env("PROOFED_BASE_SHA");
 const branch = env("PROOFED_HEAD_REF");
 // Where scenarios come from when the PR's branch has none (opened before Proofed was added).
 const rev = process.env.PROOFED_BASE_REF ? `origin/${process.env.PROOFED_BASE_REF}` : base;
-const BOX = /- \[[ x]\] \*\*Fix with (?:Claude|Codex)\*\*.*/;
-// Puts a line where the checkbox is, or under the headline when there's none (the fixer gave up last time).
-const withLine = (text: string, line: string) =>
-  BOX.test(text) ? text.replace(BOX, line) : text.replace(/(### Proofed\n\n[^\n]*\n)/, `$1\n${line}\n`);
 
 async function checkSetup(scenarios: Scenario[]) {
   const refusal = fixRefusal(scenarios, process.env.PROOFED_BUILD)
@@ -127,10 +135,10 @@ writeFileSync(buildScript, `set -e -o pipefail\ncd ${sh(resolve(appDir).replaceA
 
 if (repo && report) {
   await editComment(repo, report.id, withLine(body, `${WORKING.replace("Claude", provider)} with ${describeFixer(fixer)}. [Follow along](${runUrl})`));
-  await setStatus(repo, git("rev-parse", "HEAD"), "pending", `${provider} is fixing, Kane will re-check`, runUrl);
+  await setStatus(repo, brokenSha, "pending", `${provider} is fixing, Kane will re-check`, runUrl);
 }
 // The dashboard follows along: which attempt it is, what's being done, and Kane's re-check.
-live.start({ kind: "fix", pr: prNumber, sha: git("rev-parse", "HEAD"), runUrl });
+live.start({ kind: "fix", pr: prNumber, sha: brokenSha, runUrl });
 live.track(scenariosFor(failures.map((f) => f.id)));
 
 function prompt(failures: FailureData[], feedback: string) {
@@ -167,15 +175,19 @@ function askFixer(text: string) {
 
 // Put the original report back, untick the box, and say why. Claude not running at all is an edit;
 // Claude giving up (`ended`) is the end of the fix, so the report is posted again for the notification.
-async function restoreReport(note: string, ended = false, status = "Fix didn't run; the original failure stands") {
+async function restoreReport(note: string, ended = false, status: string | null = "Fix didn't run; the original failure stands") {
   await live.end();
   if (!repo || !prNumber || !report) return;
   const box = `- [ ] **Fix with ${provider}**`;
   const original = body.replace(/- \[x\] \*\*Fix with (?:Claude|Codex)\*\*/, box);
   const quoted = `> ${note}`;
   const restored = original.includes(box) ? original.replace(box, `${quoted}\n\n${box}`) : withLine(original, quoted);
-  await (ended ? putReport(repo, prNumber, restored, true) : editComment(repo, report.id, restored));
-  await setStatus(repo, git("rev-parse", "HEAD"), "failure", status, runUrl);
+  try {
+    await (ended ? putReport(repo, prNumber, restored, true) : editComment(repo, report.id, restored));
+  } finally {
+    // The fix may already be committed locally while the broken commit's status is still pending.
+    if (status !== null) await setStatus(repo, brokenSha, "failure", status, runUrl);
+  }
 }
 
 async function serve() {
@@ -389,7 +401,6 @@ const changes = git("diff", "--cached", "--numstat").split("\n").filter(Boolean)
 const names = verified.map((r) => r.scenario.name).join(", ");
 live.fix({ doing: "pushing", tries: [...tries] });
 const checkedTree = git("write-tree");
-const brokenSha = git("rev-parse", "HEAD");
 // --no-verify: the project's commit hooks (AnkiDroid's runs ktlint through Gradle) can fail or rewrite
 // files after Kane checked this exact tree.
 git("-c", `user.name=${provider}`, "-c", `user.email=${provider === "Codex" ? "codex@openai.com" : "noreply@anthropic.com"}`, "commit", "--no-verify", "-m",
@@ -399,7 +410,16 @@ if (git("rev-parse", "HEAD^{tree}") !== checkedTree || git("status", "--porcelai
   await restoreReport("The commit changed after Kane checked it. Nothing was pushed.", true, "The committed tree wasn't checked; nothing was pushed");
   process.exit(1);
 }
-const asApp = await pushHead(branch);
+let asApp: boolean;
+try {
+  asApp = await pushHead(branch);
+} catch {
+  // Git errors can include remote URLs or output. Keep them out of the report and status.
+  const note = "Proofed couldn't push the fix to the branch.";
+  console.log(note);
+  await restoreReport(note, false, note);
+  process.exit(1);
+}
 const sha = git("rev-parse", "HEAD");
 console.log(`Pushed ${sha} to ${branch}${asApp ? " as the Proofed app" : ""}`);
 // The broken commit was set to "fixing" above; without this it would stay pending for good.

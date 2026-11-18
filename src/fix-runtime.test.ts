@@ -22,6 +22,7 @@ function fixture(target = "android", extra = "", build = "node build.cjs", final
   buildOutput?: boolean;
   agentBuildOutput?: "with-source" | "only";
   description?: "stored" | "missing" | "doubted";
+  rejectPush?: boolean;
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "proofed-fix-runtime-"));
   const log = join(dir, "events.jsonl");
@@ -76,7 +77,7 @@ export const findReport=async()=>({id:1,body:${JSON.stringify(body)}});
 export const listReports=async()=>({current:{id:1,body:${JSON.stringify(body)}},older:[]});
 export const editComment=async(_repo,_id,body)=>{record('report',body);return {html_url:'https://example.test/report'};};
 export const postComment=async(_repo,_pr,body)=>{record('report',body);return {html_url:'https://example.test/report'};};
-export const setStatus=async(_repo,_sha,state,description)=>record('status',{state,description});
+export const setStatus=async(_repo,sha,state,description)=>globalThis.fixtureLog('status',{state,description},sha);
 export const publishClips=async()=>new Map();
 export const minimize=async()=>{};`;
   const agent = `export * from ${JSON.stringify(new URL("./agent.ts", import.meta.url).href)};
@@ -90,7 +91,10 @@ export function askAgent(prompt){
   ${options.buildOutput ? "if (fs.existsSync('build-output.js')) fs.writeFileSync('dist/config.js','fixed config');" : ""}
   return {ok:true,text:'SUMMARY: Fix counter'};
 }`;
-  const push = `export async function pushHead(){globalThis.fixtureLog('push');return false;}`;
+  const push = `export async function pushHead(){
+  globalThis.fixtureLog('push');
+  ${options.rejectPush ? "throw new Error('Push rejected with fixture-token');" : "return false;"}
+}`;
   const mocks = new Map([
     [new URL("./github.ts", import.meta.url).href, `data:text/javascript,${encodeURIComponent(github)}`],
     [new URL("./agent.ts", import.meta.url).href, `data:text/javascript,${encodeURIComponent(agent)}`],
@@ -109,7 +113,7 @@ export async function runAll(scenarios,out,...rest){
   }
   const script = `import * as fs from 'node:fs'; import {registerHooks} from 'node:module';
 globalThis.fixtureFs=fs;
-globalThis.fixtureLog=(type,value)=>fs.appendFileSync(${JSON.stringify(log)},JSON.stringify({type,value})+'\\n');
+globalThis.fixtureLog=(type,value,sha)=>fs.appendFileSync(${JSON.stringify(log)},JSON.stringify({type,value,sha})+'\\n');
 const mocks=new Map(${JSON.stringify([...mocks])});
 registerHooks({resolve(specifier,context,next){const url=specifier.startsWith('.')&&context.parentURL?.startsWith('file:')?new URL(specifier,context.parentURL).href:specifier;
 // A mock's re-export loads the original implementation, without remapping it again.
@@ -140,8 +144,8 @@ await import(process.argv[2]);`;
   };
   const runs = () => readFileSync(join(dir, "kane.log"), "utf8").trim().split("\n")
     .map((s) => JSON.parse(s) as { args?: string[] }).filter((c) => c.args?.[0] === "run");
-  const events = () => readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((s) => JSON.parse(s) as { type: string; value?: string | { description: string; state: string }; code?: string });
-  return { dir, original, git, run, check, runs, events, cleanup: () => { rmSync(dir, { recursive: true, force: true }); rmSync(preload, { force: true }); } };
+  const events = () => readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((s) => JSON.parse(s) as { type: string; value?: string | { description: string; state: string }; code?: string; sha?: string });
+  return { dir, original, body, git, run, check, runs, events, cleanup: () => { rmSync(dir, { recursive: true, force: true }); rmSync(preload, { force: true }); } };
 }
 
 for (const target of ["android", "ios"]) test(`the ${target} fixer reuses its last attempt without another build or Kane run`, () => {
@@ -160,6 +164,46 @@ for (const target of ["android", "ios"]) test(`the ${target} fixer reuses its la
     assert.match(f.git("log", "-1", "--format=%B"), new RegExp(`Kane re-ran the scenarios on an ${target === "ios" ? "iOS" : "Android"} device`));
     assert.equal(f.git("show", "HEAD:new-helper.js"), "verified new file");
     assert.equal(f.git("status", "--porcelain"), "");
+  } finally { f.cleanup(); }
+});
+
+test("a rejected push restores the report and fails the original commit's pending status", () => {
+  const f = fixture("android", "", "node build.cjs", false, { rejectPush: true });
+  try {
+    const ran = f.run();
+    assert.equal(ran.status, 1, ran.stdout + ran.stderr);
+    assert.notEqual(f.git("rev-parse", "HEAD"), f.original);
+    const events = f.events();
+    assert.deepEqual(events.map((e) => e.type), ["report", "status", "ask", "build", "push", "report", "status"]);
+    const reports = events.filter((e) => e.type === "report").map((e) => e.value as string);
+    assert.match(reports[0]!, /is working on a fix/);
+    assert.match(reports[1]!, /Proofed couldn't push the fix to the branch/);
+    assert.match(reports[1]!, /- \[ \] \*\*Fix with Claude\*\*/);
+    assert.deepEqual(readReportData(reports[1]!), readReportData(f.body));
+    const statuses = events.filter((e) => e.type === "status");
+    assert.deepEqual(statuses.map((e) => e.sha), [f.original, f.original]);
+    assert.match(JSON.stringify(statuses[0]?.value), /"state":"pending"/);
+    assert.deepEqual(statuses[1]?.value, { state: "failure", description: "Proofed couldn't push the fix to the branch." });
+    assert.doesNotMatch(ran.stdout + ran.stderr + JSON.stringify(events), /fixture-token/);
+  } finally { f.cleanup(); }
+});
+
+test("a stale report asks for a fresh check without starting the fix or updating status", () => {
+  const f = fixture();
+  try {
+    f.git("commit", "--allow-empty", "-qm", "New PR commit");
+    const head = f.git("rev-parse", "HEAD");
+    const event = join(f.dir, "event.json");
+    writeFileSync(event, JSON.stringify({ action: "edited", comment: { id: 1, body: f.body.replace("[ ]", "[x]") }, issue: { number: 1, pull_request: {} } }));
+    const ran = f.run("./fix.ts", { GITHUB_EVENT_PATH: event, PROOFED_AUTO: "false" });
+    assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+    assert.equal(f.git("rev-parse", "HEAD"), head);
+    const events = f.events();
+    assert.deepEqual(events.map((e) => e.type), ["report"]);
+    const body = events[0]!.value as string;
+    assert.match(body, /This report is for a different commit\. Comment `\/proofed` to run a fresh check\./);
+    assert.match(body, /- \[ \] \*\*Fix with Claude\*\*/);
+    assert.deepEqual(readReportData(body), readReportData(f.body));
   } finally { f.cleanup(); }
 });
 
