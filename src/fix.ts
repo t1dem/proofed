@@ -21,7 +21,7 @@ import { descriptionCheckNote, isDescriptionScenario, replayAskedScenario } from
 import type { ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
 import { targetChecks } from "./targetchecks.ts";
-import { fileWithSecret } from "./secrets.ts";
+import { fileWithSecret, maskSecrets } from "./secrets.ts";
 
 type CommentEvent = { action: string; comment: { id: number; body: string }; issue: { number: number; pull_request?: object } };
 const event = readEvent<CommentEvent>();
@@ -413,10 +413,11 @@ if (git("rev-parse", "HEAD^{tree}") !== checkedTree || git("status", "--porcelai
 let asApp: boolean;
 try {
   asApp = await pushHead(branch);
-} catch {
-  // Git errors can include remote URLs or output. Keep them out of the report and status.
+} catch (e) {
+  // Git errors can include remote URLs or output. Keep them out of the report and status; the log
+  // keeps a masked copy so a maintainer can see why (a protected branch, a token without access).
   const note = "Proofed couldn't push the fix to the branch.";
-  console.log(note);
+  console.log(`${note} ${maskSecrets(e instanceof Error ? e.message : String(e))}`);
   await restoreReport(note, false, note);
   process.exit(1);
 }
