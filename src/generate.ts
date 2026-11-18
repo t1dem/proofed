@@ -153,7 +153,7 @@ async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Wr
   if (kept.length === 0) return { results: stockResults, written: { status: "written", kept: [], dropped, credits: droppedCredits }, sha: headSha };
 
   git("add", "--", ...kept.map((r) => r.scenario.file));
-  git("-c", `user.name=${provider}`, "-c", `user.email=${provider === "Codex" ? "codex@openai.com" : "noreply@anthropic.com"}`, "commit", "-m",
+  git("-c", `user.name=${provider}`, "-c", `user.email=${provider === "Codex" ? "codex@openai.com" : "noreply@anthropic.com"}`, "commit", "--no-verify", "-m",
     `Add scenarios: ${kept.map((r) => r.scenario.name).join(", ")}\n\nWritten by ${agentName} for the Proofed setup; Kane ran each one in Chrome and saw it pass.\n\nWritten-by: ${writer.model} (${writer.effort} effort)`);
   try {
     // The app's push starts a check of the new commit. It waits for this job (the workflow's

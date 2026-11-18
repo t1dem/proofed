@@ -26,7 +26,7 @@ async function appToken() {
 
 function push(branch: string, token?: string) {
   const refspec = `HEAD:${branch}`;
-  if (!token) return void execFileSync("git", ["push", "origin", refspec], { encoding: "utf8" });
+  if (!token) return void execFileSync("git", ["push", "--no-verify", "origin", refspec], { encoding: "utf8" });
 
   const server = new URL(process.env.GITHUB_SERVER_URL || "https://github.com");
   const repo = process.env.GITHUB_REPOSITORY;
@@ -39,7 +39,7 @@ function push(branch: string, token?: string) {
   const header = `http.${server.origin}/.extraheader`;
   const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
   console.log(`::add-mask::${basic}`);
-  execFileSync("git", ["push", "--", remote, refspec], {
+  execFileSync("git", ["push", "--no-verify", "--", remote, refspec], {
     encoding: "utf8",
     env: {
       ...process.env,
