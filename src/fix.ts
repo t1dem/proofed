@@ -4,7 +4,7 @@ import { findGitBash, killTree } from "./process.ts";
 // The agent gets the failure, Kane's steps and the PR diff; we rebuild, re-run the broken scenarios
 // on their targets, and only push a fix that Kane has seen pass. Up to three attempts, each one told why the last one failed.
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { askAgent, configuredFixer } from "./agent.ts";
@@ -54,7 +54,7 @@ const agentName = provider === "Codex" ? "Codex" : "Claude Code";
 
 mkdirSync(outDir, { recursive: true });
 if (!existsSync(join(outDir, ".gitignore"))) writeFileSync(join(outDir, ".gitignore"), "*\n");
-const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
+const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trimEnd();
 const base = env("PROOFED_BASE_SHA");
 const branch = env("PROOFED_HEAD_REF");
 // Where scenarios come from when the PR's branch has none (opened before Proofed was added).
@@ -166,20 +166,27 @@ async function serve() {
 }
 
 // What the fix has changed so far, new files included. -z: names as they are.
-const fixChanges = () => [
-  ...git("diff", "--name-only", "--no-renames", "-z", "HEAD").split("\0"),
-  ...git("ls-files", "--others", "--exclude-standard", "-z").split("\0"),
-].filter(Boolean);
+const diffPaths = (...args: string[]) => git("diff", "--name-only", "--no-renames", "-z", ...args).split("\0").filter(Boolean);
+const untrackedPaths = () => git("ls-files", "--others", "--exclude-standard", "-z").split("\0").filter(Boolean);
+const fixChanges = () => [...diffPaths("HEAD"), ...untrackedPaths()];
 
 // Include new files and their contents when deciding whether an in-job result still applies.
-const treeBeforeCheck = () => fixChanges().map((file) => `${file}\0${existsSync(file) ? git("hash-object", "--", file) : "deleted"}`).join("\0");
+const fileStates = () => new Map(fixChanges().map((file) => {
+  const stat = lstatSync(file, { throwIfNoEntry: false });
+  if (!stat) return [file, "deleted"] as const;
+  const content = stat.isSymbolicLink() ? readlinkSync(file) : stat.isFile() ? git("hash-object", "--", file) : "";
+  return [file, `${stat.mode}:${content}`] as const;
+}));
+const treeBeforeCheck = () => [...fileStates()].map(([file, state]) => `${file}\0${state}`).join("\0");
+const agentTouched = new Set<string>();
+let beforeAnswer = new Map<string, string>();
 let lastAttemptTree: string | undefined;
 
 // Checked before the change is built, served to Kane and recorded, since clips and reports are public.
 function discardLeak() {
   const leaked = fileWithSecret(fixChanges());
   if (!leaked) return undefined;
-  const untracked = new Set(git("ls-files", "--others", "--exclude-standard", "-z").split("\0").filter(Boolean));
+  const untracked = untrackedPaths();
   git("checkout", "--", ".");
   for (const file of untracked) rmSync(file, { force: true });
   return `${agentName}'s change put a credential of this job into ${leaked}. Proofed discarded the change`;
@@ -200,12 +207,20 @@ const loop = await fixLoop({
   open: data.open ?? data.failures.map((f) => f.id),
   checked: pickScenarios({ changed: changedFiles(base), rev }).selected.map((s) => s.id),
   ask: (failures, feedback) => {
+    beforeAnswer = fileStates();
     const answer = askFixer(prompt(failures, feedback));
     const leak = discardLeak();
     return leak ? { ok: false, message: leak } : answer;
   },
-  putBack: () => putBack(env("PROOFED_SCENARIOS", ".proofed/scenarios")),
-  hasChanges: () => !!git("status", "--porcelain"),
+  putBack: () => {
+    const undone = putBack(env("PROOFED_SCENARIOS", ".proofed/scenarios"));
+    // Projects can commit their build output. A retry starts with files left by the previous build.
+    for (const [file, state] of fileStates()) {
+      if (state !== beforeAnswer.get(file)) agentTouched.add(file);
+    }
+    return undone;
+  },
+  hasChanges: () => fixChanges().some((file) => agentTouched.has(file)),
   build,
   changedFiles: fixChanges,
   allScenarios: () => targetScenarios(pickScenarios({ rev }).selected),
@@ -306,9 +321,23 @@ if (leak) {
   await restoreReport(`${leak}; nothing was pushed.`, true, "The fix contained a credential; nothing was pushed");
   process.exit(1);
 }
-// Include new application files Kane checked, as well as tracked edits.
-const files = fixChanges();
-if (files.length) git("add", "--", ...files);
+const buildOnlyTracked = [...new Set([
+  ...diffPaths("--diff-filter=a", "HEAD"),
+  ...diffPaths("--cached", "--diff-filter=a", "HEAD"),
+])].filter((file) => !agentTouched.has(file));
+if (buildOnlyTracked.length) git("--literal-pathspecs", "checkout", "HEAD", "--", ...buildOnlyTracked);
+const buildOnlyAdded = diffPaths("--cached", "--diff-filter=A", "HEAD").filter((file) => !agentTouched.has(file));
+if (buildOnlyAdded.length) git("--literal-pathspecs", "reset", "HEAD", "--", ...buildOnlyAdded);
+const trackedEdits = diffPaths().filter((file) => agentTouched.has(file));
+const untracked = untrackedPaths();
+const newFiles = untracked.filter((file) => agentTouched.has(file));
+const buildOnlyUntracked = new Set(untracked.filter((file) => !agentTouched.has(file)));
+if (trackedEdits.length) git("--literal-pathspecs", "add", "-u", "--", ...trackedEdits);
+if (newFiles.length) git("--literal-pathspecs", "add", "--", ...newFiles);
+if (!diffPaths("--cached").length) {
+  await restoreReport(`${provider} tried ${attempt} times without a change that builds. Last note: You made no changes to the code.`, true);
+  process.exit(1);
+}
 const changes = git("diff", "--cached", "--numstat").split("\n").filter(Boolean).map((line) => {
   const [added = "", removed = "", file = ""] = line.split("\t");
   return { file, added: Number(added) || 0, removed: Number(removed) || 0 };
@@ -318,7 +347,8 @@ live.fix({ doing: "pushing", tries: [...tries] });
 const checkedTree = git("write-tree");
 git("-c", `user.name=${provider}`, "-c", `user.email=${provider === "Codex" ? "codex@openai.com" : "noreply@anthropic.com"}`, "commit", "-m",
   `Fix ${names}\n\n${summary}\n\nWritten by ${agentName} from a Proofed report; Kane re-ran the scenarios ${checkedWhere(final)} and the fix passes.\n\nFixed-by: ${fixer.model} (${fixer.effort} effort)`);
-if (git("rev-parse", "HEAD^{tree}") !== checkedTree || git("status", "--porcelain")) {
+if (git("rev-parse", "HEAD^{tree}") !== checkedTree || git("status", "--porcelain", "--untracked-files=no")
+  || untrackedPaths().some((file) => !buildOnlyUntracked.has(file))) {
   await restoreReport("The commit changed after Kane checked it. Nothing was pushed.", true, "The committed tree wasn't checked; nothing was pushed");
   process.exit(1);
 }

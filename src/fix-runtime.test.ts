@@ -11,7 +11,11 @@ import { dataComment } from "./report.ts";
 const fixUrl = new URL("./fix.ts", import.meta.url).href;
 const fakeKane = fileURLToPath(new URL("./testing/fake-kane.ts", import.meta.url));
 
-function fixture(target = "android", extra = "", build = "node build.cjs", finalFails = false, options: { extraScenario?: boolean; changeAfterAttempt?: boolean } = {}) {
+function fixture(target = "android", extra = "", build = "node build.cjs", finalFails = false, options: {
+  extraScenario?: boolean;
+  changeAfterAttempt?: boolean;
+  buildOutput?: boolean;
+} = {}) {
   const dir = mkdtempSync(join(tmpdir(), "proofed-fix-runtime-"));
   const log = join(dir, "events.jsonl");
   const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8" }).trim();
@@ -27,7 +31,22 @@ function fixture(target = "android", extra = "", build = "node build.cjs", final
   }
   writeFileSync(join(dir, ".proofed/scenarios/counter.md"), `---\nname: Counter\ntarget: ${target}\n${target === "desktop" ? "execution: local\n" : `execution: cloud\napp: app.${target === "ios" ? "ipa" : "apk"}\n`}${extra}---\nAssert counter is 1. [fake-from:counter] [delay:1]\n`);
   writeFileSync(join(dir, "build.cjs"), `const fs=require('node:fs'); fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({type:'build',code:fs.readFileSync('app.js','utf8')})+'\\n'); fs.writeFileSync('app.${target === "ios" ? "ipa" : "apk"}',fs.readFileSync('app.js')); ${finalFails ? `const rounds=fs.readFileSync(${JSON.stringify(log)},'utf8').split('"type":"build"').length-1;if(rounds===2)fs.writeFileSync('modes/extra','fail');` : ""}`);
-  git("init", "-q", "-b", "main"); git("add", "-A"); git("commit", "-qm", "Initial fixture");
+  git("init", "-q", "-b", "main");
+  if (options.buildOutput) {
+    mkdirSync(join(dir, "dist"));
+    writeFileSync(join(dir, "dist/index.html"), "committed output");
+    writeFileSync(join(dir, "dist/old.html"), "committed old output");
+    writeFileSync(join(dir, "dist/config.js"), "original config");
+    git("add", "-f", "--", "dist");
+    writeFileSync(join(dir, ".gitignore"), readFileSync(join(dir, ".gitignore"), "utf8") + "dist/\n");
+    const buildScript = join(dir, "build.cjs");
+    writeFileSync(buildScript, readFileSync(buildScript, "utf8") + `
+fs.writeFileSync('dist/index.html', 'rebuilt output');
+fs.rmSync('dist/old.html', { force: true });
+fs.writeFileSync('build-output.js', 'untracked output');
+fs.writeFileSync('modes/counter', fs.readFileSync('dist/config.js', 'utf8') === 'fixed config' ? 'pass' : 'fail');`);
+  }
+  git("add", "-A"); git("commit", "-qm", "Initial fixture");
   const base = git("rev-parse", "HEAD");
   if (options.extraScenario || finalFails) writeFileSync(join(dir, "extra.js"), "PR changed it\n");
   writeFileSync(join(dir, "app.js"), "PR broke it\n"); git("commit", "-qam", "Break counter");
@@ -44,7 +63,14 @@ export const setStatus=async(_repo,_sha,state,description)=>record('status',{sta
 export const publishClips=async()=>new Map();
 export const minimize=async()=>{};`;
   const agent = `export * from ${JSON.stringify(new URL("./agent.ts", import.meta.url).href)};
-export function askAgent(prompt){ globalThis.fixtureLog('ask',prompt); const fs=globalThis.fixtureFs; fs.writeFileSync('app.js','fixed\\n'); fs.writeFileSync('new-helper.js','verified new file\\n'); return {ok:true,text:'SUMMARY: Fix counter'}; }`;
+export function askAgent(prompt){
+  globalThis.fixtureLog('ask',prompt);
+  const fs=globalThis.fixtureFs;
+  fs.writeFileSync('app.js','fixed\\n');
+  fs.writeFileSync('new-helper.js','verified new file\\n');
+  ${options.buildOutput ? "if (fs.existsSync('build-output.js')) fs.writeFileSync('dist/config.js','fixed config');" : ""}
+  return {ok:true,text:'SUMMARY: Fix counter'};
+}`;
   const push = `export async function pushHead(){globalThis.fixtureLog('push');return false;}`;
   const mocks = new Map([
     [new URL("./github.ts", import.meta.url).href, `data:text/javascript,${encodeURIComponent(github)}`],
@@ -99,6 +125,20 @@ for (const target of ["android", "ios"]) test(`the ${target} fixer reuses its la
     assert.match(f.git("log", "-1", "--format=%B"), new RegExp(`Kane re-ran the scenarios on an ${target === "ios" ? "iOS" : "Android"} device`));
     assert.equal(f.git("show", "HEAD:new-helper.js"), "verified new file");
     assert.equal(f.git("status", "--porcelain"), "");
+  } finally { f.cleanup(); }
+});
+
+test("a retried fix commits agent edits and restores tracked build output", () => {
+  const f = fixture("android", "", "node build.cjs", false, { buildOutput: true });
+  try {
+    const ran = f.run();
+    assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+    assert.deepEqual(f.events().filter((e) => ["ask", "build", "push"].includes(e.type)).map((e) => e.type), ["ask", "build", "ask", "build", "push"]);
+    assert.equal(f.git("diff", "--name-only", f.original, "HEAD"), "app.js\ndist/config.js\nnew-helper.js");
+    assert.equal(f.git("show", "HEAD:dist/config.js"), "fixed config");
+    assert.equal(readFileSync(join(f.dir, "dist/index.html"), "utf8"), "committed output");
+    assert.equal(readFileSync(join(f.dir, "dist/old.html"), "utf8"), "committed old output");
+    assert.equal(f.git("status", "--porcelain"), "?? build-output.js");
   } finally { f.cleanup(); }
 });
 
