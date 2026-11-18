@@ -236,8 +236,6 @@ Pass `vars: ${{ toJSON(vars) }}` to carry the dashboard's **Fix automatically** 
 Set the matching `target` in the scenario frontmatter; the action's `target` input
 filters scenario files. Prepare SDKs and devices before the action; Proofed installs
 none of them.
-To use a ChatGPT plan, save the contents of `~/.codex/auth.json` after `codex login` as
-`CODEX_AUTH_JSON` and pass `codex-auth-json: ${{ secrets.CODEX_AUTH_JSON }}` with `codex-api-key` empty.
 
 Android cloud on Ubuntu builds an APK locally and gives Kane its path for each check. This
 needs a TestMu plan with real-device automation; an Ubuntu emulator is not a supported
