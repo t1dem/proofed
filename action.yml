@@ -59,6 +59,9 @@ inputs:
   codex-api-key:
     description: OpenAI API key for Codex (secrets.CODEX_API_KEY)
     default: ""
+  codex-auth-json:
+    description: Contents of ~/.codex/auth.json after `codex login` with a ChatGPT plan (secrets.CODEX_AUTH_JSON), used when codex-api-key is empty
+    default: ""
   vars:
     description: The repo's Actions variables as JSON (pass toJSON(vars) in an expression). Carries settings from the Proofed dashboard, such as PROOFED_MODEL.
     default: "{}"
@@ -104,7 +107,7 @@ runs:
         PROOFED_SCENARIOS: ${{ inputs.scenarios }}
         # Whether there is a provider credential, not the token: this step needs no more.
         PROOFED_CLAUDE: ${{ inputs.claude-code-oauth-token != '' }}
-        PROOFED_CODEX: ${{ inputs.codex-api-key != '' }}
+        PROOFED_CODEX: ${{ inputs.codex-api-key != '' || inputs.codex-auth-json != '' }}
       run: node "$GITHUB_ACTION_PATH/src/mode.ts"
 
     # The fixer pushes to the PR's branch, so it needs the branch; the check needs the exact commit.
@@ -303,9 +306,9 @@ runs:
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         PROOFED_SERVER: ${{ inputs.proofed-url }}
-        # Whether each key was passed, so the report offers only a fix this workflow can start.
+        # Whether each provider has a credential, so the report offers only a fix this workflow can start.
         PROOFED_CLAUDE: ${{ inputs.claude-code-oauth-token != '' }}
-        PROOFED_CODEX: ${{ inputs.codex-api-key != '' }}
+        PROOFED_CODEX: ${{ inputs.codex-api-key != '' || inputs.codex-auth-json != '' }}
         # Same cold-Chrome defaults TestMu's own action uses on runners.
         KANE_CLI_CDP_TIMEOUT_MS: "60000"
         KANE_CLI_CDP_RETRIES: "2"
@@ -314,11 +317,31 @@ runs:
         echo "report=$PROOFED_OUT/report.md" >> "$GITHUB_OUTPUT"
         node "$GITHUB_ACTION_PATH/src/cli.ts"
 
+    - name: Prepare Codex subscription credentials
+      id: codex-auth
+      if: >-
+        !cancelled() && steps.mode.outputs.provider == 'codex' &&
+        inputs.codex-api-key == '' && inputs.codex-auth-json != '' &&
+        ((success() && (steps.mode.outputs.mode == 'fix' || steps.mode.outputs.generate == 'true')) ||
+        (steps.mode.outputs.autofix == 'true' && steps.run.outputs.fixable == 'true'))
+      shell: bash
+      env:
+        CODEX_AUTH_JSON: ${{ inputs.codex-auth-json }}
+      run: |
+        dir=$(mktemp -d "$RUNNER_TEMP/proofed-codex-auth.XXXXXX")
+        trap 'rm -rf -- "$dir"' EXIT
+        chmod 700 "$dir"
+        umask 077
+        printf '%s' "$CODEX_AUTH_JSON" > "$dir/auth.json"
+        chmod 600 "$dir/auth.json"
+        printf 'dir=%s\n' "$dir" >> "$GITHUB_OUTPUT"
+        trap - EXIT
+
     # "Fix automatically" in the dashboard: a check that saw a scenario fail goes on to fix it in this job,
     # as a ticked "Fix with Claude" would (src/mode.ts decides when). The check's app server is stopped
     # first, so Kane re-checks the fixer's own build rather than the old one still on the port.
     - name: Fix automatically
-      if: ${{ !cancelled() && steps.mode.outputs.autofix == 'true' && steps.run.outputs.fixable == 'true' }}
+      if: ${{ !cancelled() && steps.mode.outputs.autofix == 'true' && steps.run.outputs.fixable == 'true' && steps.codex-auth.outcome != 'failure' }}
       shell: bash
       env:
         PROOFED_AUTO: "true"
@@ -346,6 +369,7 @@ runs:
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
         CODEX_API_KEY: ${{ inputs.codex-api-key }}
+        PROOFED_CODEX_HOME: ${{ steps.codex-auth.outputs.dir }}
         KANE_CLI_CDP_TIMEOUT_MS: "60000"
         KANE_CLI_CDP_RETRIES: "2"
         KANE_CLI_USER_AGENT: github-action
@@ -363,6 +387,10 @@ runs:
           for i in $(seq 1 20); do curl -s -o /dev/null "$PROOFED_URL" || break; sleep 0.5; done
         fi
         if [ "$PROOFED_PROVIDER" = codex ]; then npm install -g @openai/codex@0.169.0 >/dev/null; else npm install -g @anthropic-ai/claude-code >/dev/null; fi
+        if [ -n "$PROOFED_CODEX_HOME" ]; then
+          export CODEX_HOME="$PROOFED_CODEX_HOME"
+          unset CODEX_API_KEY
+        fi
         node "$GITHUB_ACTION_PATH/src/fix.ts"
 
     # The setup PR's check, while it holds only the stock scenario (src/mode.ts): the selected agent writes the first
@@ -394,6 +422,7 @@ runs:
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
         CODEX_API_KEY: ${{ inputs.codex-api-key }}
+        PROOFED_CODEX_HOME: ${{ steps.codex-auth.outputs.dir }}
         KANE_CLI_CDP_TIMEOUT_MS: "60000"
         KANE_CLI_CDP_RETRIES: "2"
         KANE_CLI_USER_AGENT: github-action
@@ -401,6 +430,10 @@ runs:
         PROOFED_SERVER: ${{ inputs.proofed-url }}
       run: |
         echo "report=$PROOFED_OUT/report.md" >> "$GITHUB_OUTPUT"
+        if [ -n "$PROOFED_CODEX_HOME" ]; then
+          export CODEX_HOME="$PROOFED_CODEX_HOME"
+          unset CODEX_API_KEY
+        fi
         node "$GITHUB_ACTION_PATH/src/generate.ts"
 
     - name: Fix, verify with Kane
@@ -430,12 +463,18 @@ runs:
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
         CODEX_API_KEY: ${{ inputs.codex-api-key }}
+        PROOFED_CODEX_HOME: ${{ steps.codex-auth.outputs.dir }}
         KANE_CLI_CDP_TIMEOUT_MS: "60000"
         KANE_CLI_CDP_RETRIES: "2"
         KANE_CLI_USER_AGENT: github-action
         GITHUB_TOKEN: ${{ inputs.github-token }}
         PROOFED_SERVER: ${{ inputs.proofed-url }}
-      run: node "$GITHUB_ACTION_PATH/src/fix.ts"
+      run: |
+        if [ -n "$PROOFED_CODEX_HOME" ]; then
+          export CODEX_HOME="$PROOFED_CODEX_HOME"
+          unset CODEX_API_KEY
+        fi
+        node "$GITHUB_ACTION_PATH/src/fix.ts"
 
     - name: Keep the recordings
       if: always() && steps.mode.outputs.mode != 'none'
@@ -450,3 +489,10 @@ runs:
           ${{ runner.temp }}/proofed/*.json
           ${{ runner.temp }}/proofed/*.md
         if-no-files-found: ignore
+
+    - name: Remove Codex subscription credentials
+      if: always() && steps.codex-auth.outputs.dir != ''
+      shell: bash
+      env:
+        PROOFED_CODEX_HOME: ${{ steps.codex-auth.outputs.dir }}
+      run: rm -rf -- "$PROOFED_CODEX_HOME"

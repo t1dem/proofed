@@ -18,7 +18,7 @@ test("an old workflow gets a note instead of a fix box that would do nothing", (
     workflow("contains(github.event.comment.body, '- [x] **Fix with Claude**')\n");
     const noKey = fixSetup("codex", { ...env, PROOFED_CODEX: "false" });
     assert.equal(noKey?.comment, false);
-    assert.match(noKey!.note, /gives the action no `codex-api-key`\. Add `codex-api-key: \$\{\{ secrets\.CODEX_API_KEY \}\}`/);
+    assert.match(noKey!.note, /To fix with Codex, add `codex-api-key: \$\{\{ secrets\.CODEX_API_KEY \}\}` or `codex-auth-json: \$\{\{ secrets\.CODEX_AUTH_JSON \}\}`/);
     const onlyClaude = fixSetup("codex", { ...env, PROOFED_CODEX: "true" });
     assert.equal(onlyClaude?.comment, true);
     assert.match(onlyClaude!.note, /only when \*\*Fix with Claude\*\* is ticked/);

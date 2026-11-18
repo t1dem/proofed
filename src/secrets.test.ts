@@ -11,6 +11,8 @@ import { dataComment } from "./report.ts";
 import { fileWithSecret, maskSecrets, secretValues } from "./secrets.ts";
 
 const TOKEN = "ghs_proofedTestTokenNotReal0123456789";
+const CODEX_TOKEN = "proofed-codex-test-token";
+const CODEX_AUTH = JSON.stringify({ tokens: { access_token: CODEX_TOKEN } }, null, 2);
 const header = Buffer.from(`x-access-token:${TOKEN}`).toString("base64");
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -36,7 +38,7 @@ test("both action checkouts leave no token in .git/config", () => {
 test("job credentials are found in written files and masked in text, raw and as a git auth header", () => {
   const dir = mkdtempSync(join(tmpdir(), "proofed-secrets-"));
   try {
-    const values = secretValues({ GITHUB_TOKEN: TOKEN, LT_USERNAME: "someone" });
+    const values = secretValues({ GITHUB_TOKEN: TOKEN, LT_USERNAME: "someone", CODEX_AUTH_JSON: CODEX_AUTH });
     writeFileSync(join(dir, "clean.js"), "export const a = 1;\n");
     writeFileSync(join(dir, "header.txt"), `AUTHORIZATION: basic ${header}\n`);
     writeFileSync(join(dir, "raw.js"), `fetch(x, { headers: { t: "${TOKEN}" } })`);
@@ -45,6 +47,12 @@ test("job credentials are found in written files and masked in text, raw and as 
     assert.equal(fileWithSecret(files, values), files[2]);
     assert.equal(fileWithSecret([files[3]!], values), files[3]);
     assert.equal(maskSecrets(`SUMMARY: used ${TOKEN} and ${header}`, values), "SUMMARY: used *** and ***");
+    assert.equal(maskSecrets(CODEX_AUTH, values), "***");
+    assert.equal(maskSecrets(CODEX_TOKEN, values), "***");
+    writeFileSync(join(dir, "auth.json"), CODEX_AUTH);
+    assert.equal(maskSecrets(CODEX_AUTH, secretValues({ PROOFED_CODEX_HOME: dir })), "***");
+    assert.equal(maskSecrets(CODEX_TOKEN, secretValues({ PROOFED_CODEX_HOME: dir })), "***");
+    assert.deepEqual(secretValues({ CODEX_HOME: dir }), []);
     assert.deepEqual(secretValues({}), []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -62,12 +70,12 @@ test("Claude runs without the job's tokens, keeps its own and the build's enviro
     withEnv({
       PATH: `${dir}${delimiter}${process.env.PATH}`, GITHUB_TOKEN: TOKEN, GH_TOKEN: TOKEN, LT_ACCESS_KEY: "lt-key-not-real-123",
       ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-request-not-real", ACTIONS_ID_TOKEN_REQUEST_URL: "https://example.invalid",
-      CLAUDE_CODE_OAUTH_TOKEN: "claude-oauth-not-real", NPM_CONFIG_REGISTRY: "https://registry.example",
+      CODEX_AUTH_JSON: CODEX_AUTH, CLAUDE_CODE_OAUTH_TOKEN: "claude-oauth-not-real", NPM_CONFIG_REGISTRY: "https://registry.example",
     }, () => {
       const answer = askAgent("fix", { model: "opus", effort: "low", allowedTools: [] });
       assert.deepEqual(answer, { ok: true, text: "SUMMARY: fixed, token ***" });
       const env = JSON.parse(readFileSync(capture, "utf8")) as Record<string, string>;
-      for (const name of ["GITHUB_TOKEN", "GH_TOKEN", "LT_ACCESS_KEY", "ACTIONS_ID_TOKEN_REQUEST_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_URL"]) assert.equal(env[name], undefined, name);
+      for (const name of ["GITHUB_TOKEN", "GH_TOKEN", "LT_ACCESS_KEY", "ACTIONS_ID_TOKEN_REQUEST_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_URL", "CODEX_AUTH_JSON"]) assert.equal(env[name], undefined, name);
       assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, "claude-oauth-not-real");
       assert.equal(env.NPM_CONFIG_REGISTRY, "https://registry.example");
     });

@@ -81,8 +81,8 @@ test("PR requests resolve the target from the environment", () => {
 });
 
 test("fix accepts a Codex provider, aliases and full IDs with per-model efforts", () => {
-  assert.deepEqual(parseFix("fix sol high"), {model:"gpt-6.1-sol",effort:"high"});
-  assert.deepEqual(parseFix("fix codex"), {model:"gpt-6.1-sol",effort:undefined});
+  assert.deepEqual(parseFix("fix sol high"), {model:"gpt-6.2-sol",effort:"high"});
+  assert.deepEqual(parseFix("fix codex"), {model:"gpt-6.2-sol",effort:undefined});
   assert.deepEqual(parseFix("fix gpt-6-astra ultra"), {model:"gpt-6-astra",effort:"ultra"});
   assert.ok("error" in parseFix("fix luna ultra")!);
   assert.ok("error" in parseFix("fix opus ultra")!);

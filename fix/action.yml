@@ -48,6 +48,9 @@ inputs:
   codex-api-key:
     description: OpenAI API key for Codex (secrets.CODEX_API_KEY)
     default: ""
+  codex-auth-json:
+    description: Contents of ~/.codex/auth.json after `codex login` with a ChatGPT plan (secrets.CODEX_AUTH_JSON), used when codex-api-key is empty
+    default: ""
   provider:
     description: Fixer provider (claude or codex); inferred from model when empty
     default: ""
@@ -89,12 +92,14 @@ runs:
         node-version: 24
 
     - name: Install Kane CLI, fixer and ffmpeg
+      id: tools
       shell: bash
       env:
         PROOFED_PROVIDER: ${{ inputs.provider }}
         PROOFED_MODEL: ${{ inputs.model }}
       run: |
         provider=$(node --input-type=module -e 'const { pathToFileURL } = await import("node:url"); const { configuredFixer } = await import(pathToFileURL(`${process.env.GITHUB_ACTION_PATH}/../src/agent.ts`).href); console.log(configuredFixer().provider);')
+        printf 'provider=%s\n' "$provider" >> "$GITHUB_OUTPUT"
         npm install -g "@testmuai/kane-cli@${{ inputs.kane-version }}" >/dev/null
         if [ "$provider" = codex ]; then npm install -g @openai/codex@0.169.0 >/dev/null; else npm install -g @anthropic-ai/claude-code >/dev/null; fi
         if ! command -v ffmpeg >/dev/null; then
@@ -121,6 +126,22 @@ runs:
       # otherwise the first runs race to create them and fail.
       run: kane-cli login --username "$LT_USERNAME" --access-key "$LT_ACCESS_KEY" </dev/null
 
+    - name: Prepare Codex subscription credentials
+      id: codex-auth
+      if: steps.tools.outputs.provider == 'codex' && inputs.codex-api-key == '' && inputs.codex-auth-json != ''
+      shell: bash
+      env:
+        CODEX_AUTH_JSON: ${{ inputs.codex-auth-json }}
+      run: |
+        dir=$(mktemp -d "$RUNNER_TEMP/proofed-codex-auth.XXXXXX")
+        trap 'rm -rf -- "$dir"' EXIT
+        chmod 700 "$dir"
+        umask 077
+        printf '%s' "$CODEX_AUTH_JSON" > "$dir/auth.json"
+        chmod 600 "$dir/auth.json"
+        printf 'dir=%s\n' "$dir" >> "$GITHUB_OUTPUT"
+        trap - EXIT
+
     - name: Fix, verify with Kane
       shell: bash
       env:
@@ -144,6 +165,7 @@ runs:
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
         CODEX_API_KEY: ${{ inputs.codex-api-key }}
+        PROOFED_CODEX_HOME: ${{ steps.codex-auth.outputs.dir }}
         PROOFED_PROVIDER: ${{ inputs.provider }}
         PROOFED_MODEL: ${{ inputs.model }}
         PROOFED_EFFORT: ${{ inputs.effort }}
@@ -151,4 +173,16 @@ runs:
         KANE_CLI_CDP_RETRIES: "2"
         KANE_CLI_USER_AGENT: github-action
         GITHUB_TOKEN: ${{ inputs.github-token }}
-      run: node "$GITHUB_ACTION_PATH/../src/fix.ts"
+      run: |
+        if [ -n "$PROOFED_CODEX_HOME" ]; then
+          export CODEX_HOME="$PROOFED_CODEX_HOME"
+          unset CODEX_API_KEY
+        fi
+        node "$GITHUB_ACTION_PATH/../src/fix.ts"
+
+    - name: Remove Codex subscription credentials
+      if: always() && steps.codex-auth.outputs.dir != ''
+      shell: bash
+      env:
+        PROOFED_CODEX_HOME: ${{ steps.codex-auth.outputs.dir }}
+      run: rm -rf -- "$PROOFED_CODEX_HOME"

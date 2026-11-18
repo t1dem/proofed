@@ -100,10 +100,10 @@ test("mode resolves Codex aliases, provider variables and effort before installi
   const command = run(comment("created","/proofed fix sol high"),"write",false,{});
   assert.match(command, /^mode=fix$/m);
   assert.match(command, /^provider=codex$/m);
-  assert.match(command, /^model=gpt-6.1-sol$/m);
+  assert.match(command, /^model=gpt-6\.2-sol$/m);
   assert.match(command, /^effort=high$/m);
   const provider = run(comment("created","/proofed fix codex"),"write",false,{});
-  assert.match(provider, /^model=gpt-6.1-sol$/m);
+  assert.match(provider, /^model=gpt-6\.2-sol$/m);
   const invalid = run(comment("created","/proofed fix ultra"),"write",false,{});
   assert.match(invalid, /^mode=none$/m);
   assert.match(invalid, /doesn't support/);
@@ -175,7 +175,7 @@ test("provider variables accept case and whitespace and infer from the model whe
       assert.match(check, /^mode=check$/m);
       if (provider?.trim() || model) {
         assert.match(check, /^provider=codex$/m);
-        assert.match(check, /^model=gpt-6.1-sol$/m);
+        assert.match(check, model ? /^model=gpt-6\.1-sol$/m : /^model=gpt-6\.2-sol$/m);
       } else {
         assert.match(check, /^provider=claude$/m);
         assert.match(check, /^model=claude-haiku-5-5$/m);

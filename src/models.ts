@@ -12,6 +12,7 @@ export const MODELS = [
   { provider: "claude", name: "sonnet", id: "claude-sonnet-5-5", efforts: CLAUDE_EFFORTS },
   { provider: "claude", name: "opus", id: "claude-opus-5-5", efforts: CLAUDE_EFFORTS },
   { provider: "claude", name: "fable", id: "claude-fable-5-2", efforts: CLAUDE_EFFORTS },
+  { provider: "codex", name: "sol", id: "gpt-6.2-sol", efforts: EFFORTS },
   { provider: "codex", name: "sol", id: "gpt-6.1-sol", efforts: EFFORTS },
   { provider: "codex", name: "terra", id: "gpt-6.1-terra", efforts: EFFORTS },
   { provider: "codex", name: "astra", id: "gpt-6-astra", efforts: EFFORTS },
@@ -52,7 +53,7 @@ export function parseModel(words: string[]): ModelChoice {
     return { model: `claude-${family.name}-${version.replace(".", "-")}` };
   }
   if (words.length === 1 && isModelId(first)) return { model: first };
-  return { error: `Proofed doesn't know the model \`${words.join(" ")}\`. Use ${MODELS.map((m) => `\`${m.name}\``).join(", ")}, ` +
+  return { error: `Proofed doesn't know the model \`${words.join(" ")}\`. Use ${[...new Set(MODELS.map((m) => `\`${m.name}\``))].join(", ")}, ` +
     "a provider (`claude` or `codex`), a Claude version (`opus 5.5`), or a full model ID. Effort goes last and must be supported by that model." };
 }
 
