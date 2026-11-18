@@ -1,9 +1,9 @@
 // What the dashboard knows about a pull request beyond the comment's headline: the run file the
-// action commits next to its clips (see src/runfile.ts at the repo root). The webhook reads it
+// action commits next to its clips (see src/report/runfile.ts at the repo root). The webhook reads it
 // when the comment that names it arrives.
 import type { Fixer } from "./models";
-import { summarize, type Live, type LiveSummary } from "../../../src/livefile";
-import { readRunKey, RUN_FILE, type RunFile, type RunFix, type RunScenario } from "../../../src/runfile";
+import { summarize, type Live, type LiveSummary } from "../../../src/report/livefile";
+import { readRunKey, RUN_FILE, type RunFile, type RunFix, type RunScenario } from "../../../src/report/runfile";
 import { gh } from "./github";
 import type { Env } from "./index";
 
@@ -30,7 +30,7 @@ export type PullView = {
   paused?: boolean;
   // The signed-in user can't push to the repo, so the workflow wouldn't answer their /proofed. Set by the API.
   readOnly?: boolean;
-  // Where the run is now, while Kane or Claude is at work and the action reports it (src/live.ts).
+  // Where the run is now, while Kane or Claude is at work and the action reports it (src/report/live.ts).
   live?: LiveSummary;
   // The commit Kane or Claude is at work on, before its run reports.
   checking?: { sha: string; at: number };

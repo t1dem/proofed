@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { test, type TestContext } from "node:test";
-import { FIRST_ANDROID_SCENARIO, FIRST_SCENARIO } from "../../src/setup.ts";
+import { FIRST_ANDROID_SCENARIO, FIRST_SCENARIO } from "../../src/action/setup.ts";
 
 const hook = registerHooks({
   resolve(specifier, context, next) {

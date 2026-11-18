@@ -1,5 +1,5 @@
 import { gitPath, matchesPath } from "./paths.ts";
-import type { Target, TargetFields } from "./target.ts";
+import type { Target, TargetFields } from "./targets/target.ts";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { posix, join } from "node:path";

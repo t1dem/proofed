@@ -66,7 +66,7 @@ export function Recording({ clip, steps, seek, onTime }: { clip: NonNullable<Run
     return () => cancelAnimationFrame(frame);
   }, [playing]);
 
-  // A page that crashed on load has no recording, only a screenshot of it (src/precheck.ts).
+  // A page that crashed on load has no recording, only a screenshot of it (src/targets/precheck.ts).
   if (!clip.mp4) {
     const screenshot = !clip.gif;
     return still ? (

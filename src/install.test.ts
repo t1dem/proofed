@@ -64,7 +64,7 @@ test("the launcher uses source over a stale build, and dist when installed", () 
 });
 
 test("the package file check rejects source, tests, extra files, missing entries and oversized archives", () => {
-  const modules = ["proofed.js", "help.js"];
+  const modules = ["proofed.js", "check/help.js"];
   const files = ["README.md", "package.json", "bin/proofed.cjs", "bin/node-version.cjs", ...modules.map((file) => `dist/${file}`)].map((path) => ({ path, size: 100, mode: 0o755 }));
   const packed: Packed = { filename: "proofed-cli-0.1.0.tgz", size: 200, unpackedSize: 600, files };
   checkContents(packed, modules);
@@ -75,7 +75,7 @@ test("the package file check rejects source, tests, extra files, missing entries
   assert.throws(() => checkContents({ ...packed, files: files.slice(1) }, modules));
   assert.throws(() => checkContents({ ...packed, size: 128 * 1024 }, modules));
   assert.throws(() => checkContents({ ...packed, unpackedSize: 1024 * 1024 }, modules));
-  assert.throws(() => checkContents(packed, [...modules, "install.test.js"]));
+  assert.throws(() => checkContents(packed, [...modules, "check/install.test.js"]));
 });
 
 test("the packed CLI installs and runs without consumer scripts", { timeout: 120_000, skip: process.platform === "win32" ? "scripts/check-package.ts assumes POSIX npm/global-bin paths; source and dist launchers are tested above" : false }, () => {

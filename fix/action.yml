@@ -87,7 +87,7 @@ runs:
         ref: ${{ steps.pr.outputs.head_ref }}
         fetch-depth: 0
         token: ${{ inputs.github-token }}
-        # The agent can read the checkout. src/push.ts passes the token to git push itself.
+        # The agent can read the checkout. src/fix/push.ts passes the token to git push itself.
         persist-credentials: false
 
     - name: Select tools and cache keys

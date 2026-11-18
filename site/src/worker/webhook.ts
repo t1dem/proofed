@@ -22,7 +22,7 @@ type Payload = {
 // (src/github.ts), so the edit that retires it doesn't take the row back to its old state.
 const MARKER = "<!-- proofed -->";
 
-// Reads the state out of the comment Proofed itself posts on the PR (see src/report.ts in the action).
+// Reads the state out of the comment Proofed itself posts on the PR (see src/report/report.ts in the action).
 function readReport(body: string) {
   const headline =
     body

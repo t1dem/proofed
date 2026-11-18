@@ -9,8 +9,8 @@ import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { findChrome } from "./chrome.ts";
-import type { Doc, ErrorDoc } from "./result.ts";
+import { findChrome } from "./targets/chrome.ts";
+import type { Doc, ErrorDoc } from "./report/result.ts";
 
 const CLI = fileURLToPath(new URL("./proofed.ts", import.meta.url));
 const FAKE_KANE = fileURLToPath(new URL("./testing/fake-kane.ts", import.meta.url));

@@ -9,8 +9,8 @@
 // it isn't stated. Everything in sample/… is made up, to show the states no real pull request is
 // in right now, and has no GitHub links. The sample clips (public/clips) are the demo store's own
 // recordings of PR #2, standing in for a sample run.
-import { summarize, type Live, type LiveFix, type LiveStatus } from "../../../src/livefile";
-import { BLANK_PAGE } from "../../../src/runfile";
+import { summarize, type Live, type LiveFix, type LiveStatus } from "../../../src/report/livefile";
+import { BLANK_PAGE } from "../../../src/report/runfile";
 import type { FixerView, MeView, RepoView } from "../worker/api";
 import type { LiveView } from "../worker/live";
 import type { PullDetail, PullView, Run } from "../worker/runs";
@@ -644,7 +644,7 @@ let fixed = new URLSearchParams(location.search).get("demo") === "fixed";
 const keyOf = (pull: { repo: string; pr: number }) => `${pull.repo}/${pull.pr}`;
 const historyOf = (pull: PullView) => (keyOf(pull) === FIXABLE ? (fixed ? sampleShipping : sampleShipping.slice(1)) : (runsOf[`${pull.repo}#${pull.pr}`] ?? []));
 
-// A run as the action reports it while it goes (src/live.ts), played out on the sample data after
+// A run as the action reports it while it goes (src/report/live.ts), played out on the sample data after
 // "Run again", "Fix with Claude" or a question to Kane, so the live view shows without a real run.
 // The pull request is busy for as long as its run plays, then shows how it ended.
 const STEP_MS = 3000;

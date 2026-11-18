@@ -35,7 +35,7 @@ export default {
         return Response.json({ error: "Something went wrong talking to GitHub. Try again." }, { status: 502 });
       });
     }
-    // The action reporting a run as it goes (src/live.ts at the repo root), with the same kind of token.
+    // The action reporting a run as it goes (src/report/live.ts at the repo root), with the same kind of token.
     if ((pathname === "/api/actions/live" || pathname === "/api/actions/live/frame") && request.method === "POST") {
       return handleLivePost(request, env).catch((e: unknown) => {
         console.error(pathname, e);

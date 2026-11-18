@@ -1,4 +1,4 @@
-import type { RunEnd, Step } from "./kane.ts";
+import type { RunEnd, Step } from "./kane/kane.ts";
 import type { Scenario } from "./scenarios.ts";
 
 // "unsure": the run says nothing about the code. Either Kane decided the test itself looks wrong

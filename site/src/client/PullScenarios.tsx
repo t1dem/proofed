@@ -1,6 +1,6 @@
 import { Play } from "lucide-react";
 import { useCallback, useRef, useState, type ReactNode } from "react";
-import { BLANK_PAGE } from "../../../src/runfile";
+import { BLANK_PAGE } from "../../../src/report/runfile";
 import { defaultScenario, latestScenarios, scenarioStory as story } from "../run-summary";
 import { modelLabel, providerLabel, providerOf } from "../worker/models";
 import type { Run, RunScenario } from "../worker/runs";

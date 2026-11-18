@@ -11,7 +11,7 @@ import { openSetupPr } from "./setup";
 
 export const SECRET_NAMES = ["LT_USERNAME", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "CODEX_API_KEY"] as const;
 
-// `auto`: "Fix automatically", a check that saw a scenario fail goes on to fix it (src/mode.ts).
+// `auto`: "Fix automatically", a check that saw a scenario fail goes on to fix it (src/action/mode.ts).
 export type FixerView = Fixer & { auto: boolean };
 
 export type RepoView = {

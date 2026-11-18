@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { askAgent } from "./agent.ts";
-import { dataComment } from "./report.ts";
+import { askAgent } from "./fix/agent.ts";
+import { dataComment } from "./report/report.ts";
 import { fileWithSecret, maskSecrets, secretValues } from "./secrets.ts";
 
 const TOKEN = "ghs_proofedTestTokenNotReal0123456789";
@@ -119,7 +119,7 @@ test("a fixer push uses the job token over HTTPS even when the runner rewrites G
     assert.equal(git("remote", "get-url", "--push", "origin"), "git@github.com:fixture/repo");
 
     const script = `
-      import { pushHead } from ${JSON.stringify(new URL("./push.ts", import.meta.url).href)};
+      import { pushHead } from ${JSON.stringify(new URL("./fix/push.ts", import.meta.url).href)};
       if (await pushHead("feature")) throw new Error("Expected the job token");
     `;
     const run = spawnSync(process.execPath, ["--input-type=module", "-e", script], { cwd: dir, env, encoding: "utf8", timeout: 10_000 });
@@ -160,7 +160,7 @@ test("a fix that writes a job credential is discarded before it is built, checke
     const failure = { id: "home", name: "Home", file: ".proofed/scenarios/home.md", objective: "Check", reason: "missing", diagnosis: "", steps: [] };
     const body = `<!-- proofed -->\n### Proofed\n\n- [x] **Fix with Claude**\n${dataComment({ sha: base, failures: [failure] })}`;
     writeFileSync(join(dir, "event.json"), JSON.stringify({ action: "edited", comment: { id: 1, body }, issue: { number: 7, pull_request: {} } }));
-    const run = spawnSync(process.execPath, [join(root, "src/fix.ts")], {
+    const run = spawnSync(process.execPath, [join(root, "src/fix/fix.ts")], {
       cwd: repo, encoding: "utf8", timeout: 60_000,
       env: {
         SystemRoot: process.env.SystemRoot, TEMP: process.env.TEMP, TMP: process.env.TMP, USERPROFILE: process.env.USERPROFILE,

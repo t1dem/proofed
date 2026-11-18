@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import { configuredFixer } from "../agent.ts";
+import { configuredFixer } from "../fix/agent.ts";
 import { env } from "../env.ts";
 import { timedAsync } from "../timing.ts";
 import { findOnPath, pathValue } from "../which.ts";

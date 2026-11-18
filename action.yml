@@ -110,7 +110,7 @@ runs:
         # Whether there is a provider credential, not the token: this step needs no more.
         PROOFED_CLAUDE: ${{ inputs.claude-code-oauth-token != '' }}
         PROOFED_CODEX: ${{ inputs.codex-api-key != '' || inputs.codex-auth-json != '' }}
-      run: node "$GITHUB_ACTION_PATH/src/mode.ts"
+      run: node "$GITHUB_ACTION_PATH/src/action/mode.ts"
 
     # The fixer pushes to the PR's branch, so it needs the branch; the check needs the exact commit.
     - uses: actions/checkout@v4
@@ -119,7 +119,7 @@ runs:
         ref: ${{ steps.mode.outputs.mode == 'fix' && steps.mode.outputs.head_ref || steps.mode.outputs.head_sha }}
         fetch-depth: 0
         token: ${{ inputs.github-token }}
-        # The agent can read the checkout. src/push.ts passes the token to git push itself.
+        # The agent can read the checkout. src/fix/push.ts passes the token to git push itself.
         persist-credentials: false
 
     - name: Resolve scenario targets
@@ -134,7 +134,7 @@ runs:
         PROOFED_ONLY: ${{ inputs.only }}
         PROOFED_SHA: ${{ steps.mode.outputs.head_sha }}
         PROOFED_BASE_SHA: ${{ steps.mode.outputs.base_sha }}
-      run: node "$GITHUB_ACTION_PATH/src/actiontarget.ts"
+      run: node "$GITHUB_ACTION_PATH/src/action/actiontarget.ts"
 
     - name: Find package stores and cache keys
       id: stores
@@ -286,7 +286,7 @@ runs:
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
         CODEX_API_KEY: ${{ inputs.codex-api-key }}
-      run: node "$GITHUB_ACTION_PATH/src/blocked.ts"
+      run: node "$GITHUB_ACTION_PATH/src/action/blocked.ts"
 
     - name: Save Gradle caches and wrapper after the build
       if: ${{ !cancelled() && steps.mode.outputs.mode == 'check' && steps.deps.outcome == 'success' && steps.stores.outputs.gradle_key != '' && steps.gradle-cache.outputs.cache-hit != 'true' }}

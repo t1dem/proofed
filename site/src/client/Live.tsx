@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Live, LiveScenario } from "../../../src/livefile";
+import type { Live, LiveScenario } from "../../../src/report/livefile";
 import type { LiveView } from "../worker/live";
 import { modelLabel, providerLabel, providerOf } from "../worker/models";
 import { useLoad } from "./lib";
@@ -43,7 +43,7 @@ function headline(live: Live): [string, string] {
   return [`Kane is checking ${what}`, sub];
 }
 
-// The clip's cursor (src/clip.ts), its tip on the point where Kane clicked or typed. It glides from
+// The clip's cursor (src/targets/clip.ts), its tip on the point where Kane clicked or typed. It glides from
 // one point to the next as the clip's does; a cursor that wasn't on the last frame appears in place,
 // and one that isn't on this frame fades out where it was.
 function Cursor({ at, gone }: { at: NonNullable<Frame["cursor"]>; gone?: boolean }) {
@@ -154,7 +154,7 @@ function LiveSteps({ scenario }: { scenario: LiveScenario }) {
   );
 }
 
-// The run on this pull request as it goes (src/live.ts in the action): what Kane or Claude is doing
+// The run on this pull request as it goes (src/report/live.ts in the action): what Kane or Claude is doing
 // now, Kane's steps as they happen and a frame of its Chrome every couple of seconds.
 export function LiveRun({ repo, pr }: { repo: string; pr: number }) {
   const [load] = useLoad<LiveView>(`/api/pulls/${repo}/${pr}/live`, 1500);

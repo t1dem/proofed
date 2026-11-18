@@ -42,7 +42,7 @@ jobs:
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
-          import { findChrome } from './src/chrome.ts';
+          import { findChrome } from './src/targets/chrome.ts';
           import { findOnPath } from './src/which.ts';
           assert.ok(findChrome(), 'Chrome must be available; do not skip the browser tests');
           assert.ok(findOnPath('ffmpeg'), 'ffmpeg must be available for recordings');

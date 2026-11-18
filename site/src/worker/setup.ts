@@ -1,8 +1,8 @@
 // When Proofed is installed on a repo, open a pull request that wires it up: the one workflow that
 // checks and fixes, and a first scenario. Build commands are guessed from package.json or Gradle, and the PR
 // says what was guessed so a human can correct it before merging. The PR's own check then has
-// the selected agent write scenarios for the app's main flows and adds the ones Kane saw pass (src/generate.ts).
-import { FIRST_ANDROID_SCENARIO, FIRST_SCENARIO, SETUP_BRANCH } from "../../../src/setup";
+// the selected agent write scenarios for the app's main flows and adds the ones Kane saw pass (src/fix/generate.ts).
+import { FIRST_ANDROID_SCENARIO, FIRST_SCENARIO, SETUP_BRANCH } from "../../../src/action/setup";
 import { gh, GitHubError } from "./github";
 
 type Repo = { full_name: string; default_branch?: string };

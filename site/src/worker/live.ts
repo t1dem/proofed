@@ -1,6 +1,6 @@
 // A run as it goes. The action posts its state and a frame of each scenario's Chrome here while it
-// works (src/live.ts at the repo root); the dashboard reads them back while the pull request is busy.
-import { readCursor, readLive, type Live, type LiveCursor } from "../../../src/livefile";
+// works (src/report/live.ts at the repo root); the dashboard reads them back while the pull request is busy.
+import { readCursor, readLive, type Live, type LiveCursor } from "../../../src/report/livefile";
 import { jobRepo } from "./actions";
 import { readUpTo } from "./body";
 import type { Env } from "./index";

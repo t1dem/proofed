@@ -262,12 +262,12 @@ What went wrong in real runs, and what Proofed does about it.
 
 | What happened | What Proofed does | Where |
 |---|---|---|
-| Asked something vague, Kane waited and reported a pass | A pass with no `assert` step counts as "not checked" | `src/run.ts` |
-| Kane routed around a broken button and passed | Kane is told to do each step once, with no other way to the goal | `src/run.ts` |
-| A run was still going after 361 seconds | A 360-second wall-clock limit over Kane's own `--timeout 300`; `timeout_minutes` in a scenario raises both | `src/kane.ts` |
-| Kane's children outlived a plain kill and held the output open | Kane runs in its own process group, killed as a whole | `src/kane.ts` |
-| On a page that was fine, Kane reported a heading as not visible and blamed the scenario | A failed check Kane blames on the scenario is run a second time; two failures stay failed; a failure followed by a pass is not checked | `src/run.ts` |
-| In 13 of 36 parallel starts, a scenario exited within seconds | One `kane-cli login` before the scenarios, and one retry; the retry always reached a verdict | `action.yml`, `src/run.ts` |
+| Asked something vague, Kane waited and reported a pass | A pass with no `assert` step counts as "not checked" | `src/check/run.ts` |
+| Kane routed around a broken button and passed | Kane is told to do each step once, with no other way to the goal | `src/check/run.ts` |
+| A run was still going after 361 seconds | A 360-second wall-clock limit over Kane's own `--timeout 300`; `timeout_minutes` in a scenario raises both | `src/kane/kane.ts` |
+| Kane's children outlived a plain kill and held the output open | Kane runs in its own process group, killed as a whole | `src/kane/kane.ts` |
+| On a page that was fine, Kane reported a heading as not visible and blamed the scenario | A failed check Kane blames on the scenario is run a second time; two failures stay failed; a failure followed by a pass is not checked | `src/check/run.ts` |
+| In 13 of 36 parallel starts, a scenario exited within seconds | One `kane-cli login` before the scenarios, and one retry; the retry always reached a verdict | `action.yml`, `src/check/run.ts` |
 
 ### Text checks and uncertain passes
 
@@ -294,11 +294,11 @@ Releasing to npm is manual: [docs/release.md](https://github.com/t1dem/proofed/b
 
 | File | What it does |
 |---|---|
-| `src/cli.ts` | The PR check |
-| `src/fix.ts` | The fix loop |
-| `src/run.ts` | One scenario: target preparation, recording, Kane, clip |
-| `src/generate.ts` | The setup PR's first scenarios |
-| `src/mode.ts` | Decides what an event asks for |
+| `src/action/cli.ts` | The PR check |
+| `src/fix/fix.ts` | The fix loop |
+| `src/check/run.ts` | One scenario: target preparation, recording, Kane, clip |
+| `src/fix/generate.ts` | The setup PR's first scenarios |
+| `src/action/mode.ts` | Decides what an event asks for |
 | `site/` | The dashboard, `/try` and the Cloudflare Worker behind them |
 
 ## License

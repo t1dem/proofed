@@ -9,7 +9,7 @@ import { actionError, output, run, runBash, runnerFile } from "./command.ts";
 import { installClaude, installCodex, useCodex } from "./tools.ts";
 
 type Entry = "check" | "generate" | "fix";
-const scripts: Record<Entry, string> = { check: "../cli.ts", generate: "../generate.ts", fix: "../fix.ts" };
+const scripts: Record<Entry, string> = { check: "./cli.ts", generate: "../fix/generate.ts", fix: "../fix/fix.ts" };
 
 export function runtimeEnv(entry: Entry, source: NodeJS.ProcessEnv) {
   const env: NodeJS.ProcessEnv = {
