@@ -133,7 +133,7 @@ const askedNothing: ScenarioResult = {
 test("a PR description that asks for nothing is one quiet line, not a scenario", () => {
   const body = buildReport({ sha: "abc1234def", results: [askedNothing], skipped: [], clips: new Map(), fixEnabled: true, asked: [description] });
   assert.match(body, /### Proofed\n\nThis PR doesn't touch the files of any scenario, so there was nothing to run\./);
-  assert.match(body, /<sub>The PR description didn't name anything Kane could check in the browser\.<\/sub>/);
+  assert.match(body, /<sub>The PR description didn't name anything Kane could check\.<\/sub>/);
   assert.doesNotMatch(body, /⚠|may be wrong|Kane suggests|OAuth|not checked/);
   assert.match(body, /4 credits/);
   // Nothing for the fixer to re-run, and nothing broke.

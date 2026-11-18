@@ -148,7 +148,7 @@ const commitRef = (sha: string, url?: string) => (url ? `[\`${short(sha)}\`](${u
 function clip(links: ClipLinks | undefined, width = 720) {
   if (!links?.gif) return "";
   const video = links.mp4 ? `\n\n[Watch as video](${links.mp4})` : "";
-  return `\n\n<img src="${links.gif}" width="${width}" alt="Kane's run in the browser">${video}`;
+  return `\n\n<img src="${links.gif}" width="${width}" alt="Kane's run">${video}`;
 }
 
 // Only a still and no recording: the screenshot of a page that crashed on load (precheck.ts).
@@ -169,7 +169,7 @@ function storedClip(links: ClipLinks | undefined): ClipLinks | undefined {
 function still(links: ClipLinks | undefined) {
   const src = links?.jpg ?? links?.gif;
   if (!src) return "";
-  const img = `<img src="${src}" width="360" alt="${isScreenshot(links) ? SCREENSHOT_ALT : "Kane's run in the browser"}">`;
+  const img = `<img src="${src}" width="360" alt="${isScreenshot(links) ? SCREENSHOT_ALT : "Kane's run"}">`;
   return links?.mp4 ? `<a href="${links.mp4}">${img}</a>` : img;
 }
 
@@ -422,7 +422,7 @@ function compose(
   }
 
   if (skipped.length > 0) sections.push(`<sub>Not affected by this diff: ${skipped.join(", ")}</sub>`);
-  if (unasked.length > 0) sections.push("<sub>The PR description didn't name anything Kane could check in the browser.</sub>");
+  if (unasked.length > 0) sections.push("<sub>The PR description didn't name anything Kane could check.</sub>");
 
   const state: RunState = failed.length > 0 ? "failed" : errored.length > 0 ? "error" : fix?.status === "fixed" ? "fixed" : unsure.length > 0 ? "unsure" : "passed";
   const history = addRun(previous?.history, { sha, state });
