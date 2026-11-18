@@ -9,7 +9,6 @@ import { actionError, capture, output, quiet, runBash, runnerFile } from "./comm
 
 export const CODEX_VERSION = "0.169.0";
 const FFMPEG_RELEASE = "b6.1.1";
-const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/;
 
 const ffmpegSums = {
   x64: "bfe8a8fc511530457b528c48d77b5737527b504a3797a9bc4866aeca69c2dffa",
@@ -36,7 +35,9 @@ export function toolPlan(env: NodeJS.ProcessEnv, provider?: string) {
   const arch = env.RUNNER_ARCH ?? process.arch;
   const root = env.RUNNER_TEMP || "";
   const version = env.PROOFED_KANE_VERSION ?? "";
-  const kaneKey = EXACT_VERSION.test(version) ? `proofed-cli-v1-kane-${version}-${os}-${arch}` : undefined;
+  // Kane is installed fresh every time: a Kane restored from the Actions cache exited with code 2 on its
+  // first runs in real checks (5 times in 2 runs, never after a fresh install). The ~25 s is worth it.
+  const kaneKey: string | undefined = undefined;
   const codexKey = (syncProvider === "codex" || background) ? `proofed-cli-v1-codex-${CODEX_VERSION}-${os}-${arch}` : undefined;
   const ffmpeg = !legacyFix ? ffmpegBuild(os, arch, env.RUNNER_TOOL_CACHE || root) : undefined;
   return { syncProvider, background, kaneKey, codexKey, ffmpeg, root, version };

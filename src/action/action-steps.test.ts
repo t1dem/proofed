@@ -19,7 +19,7 @@ function fixture(t: TestContext) {
 test("tool keys pin exact versions and distinguish OS and architecture", () => {
   const env = { RUNNER_OS: "Linux", RUNNER_ARCH: "ARM64", RUNNER_TEMP: "/temp", PROOFED_KANE_VERSION: "0.10.4" };
   const check = toolPlan(env, "codex");
-  assert.equal(check.kaneKey, "proofed-cli-v1-kane-0.10.4-Linux-ARM64");
+  assert.equal(check.kaneKey, undefined);
   assert.equal(check.codexKey, undefined);
   assert.equal(check.background, false);
   assert.equal(toolPlan({ ...env, PROOFED_KANE_VERSION: "latest" }).kaneKey, undefined);
