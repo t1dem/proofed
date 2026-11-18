@@ -41,7 +41,7 @@ test("only a page that threw and stays blank counts as crashed, with a screensho
     assert.ok(crash.screenshot?.startsWith(dir));
     // A JPEG starts with FF D8 FF.
     assert.deepEqual([...readFileSync(crash.screenshot!).subarray(0, 3)], [0xff, 0xd8, 0xff]);
-    assert.ok(Date.now() - started < 30_000, "the check takes seconds, not minutes");
+    assert.ok(Date.now() - started < 60_000, "the check takes seconds, not minutes");
   } finally {
     server.close();
   }

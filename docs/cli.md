@@ -326,4 +326,4 @@ One-click setup detects Gradle Android apps and configures checks on real cloud 
 | Android local, Apple Silicon Mac / self-hosted runner | Verified on a self-hosted Apple Silicon runner with an Android 14 emulator |
 | Android/iOS cloud real devices, needs a TestMu plan with real devices | Not yet verified |
 | iOS local simulator, Apple Silicon Mac | Not yet verified |
-| Windows host | Not yet verified; web, cloud mobile and desktop paths have fake coverage; local mobile requires an Apple Silicon Mac |
+| Windows host | Not yet verified; local mobile requires an Apple Silicon Mac |

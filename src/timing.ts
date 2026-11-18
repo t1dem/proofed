@@ -1,7 +1,8 @@
 export function phase(label: string) {
   if (process.env.GITHUB_ACTIONS !== "true") return () => {};
   const start = performance.now();
-  return () => console.log(`Proofed timing ${label}: ${((performance.now() - start) / 1000).toFixed(2)}s`);
+  // stderr: the CLI also runs inside Actions, and its --json stdout must stay one JSON document.
+  return () => console.error(`Proofed timing ${label}: ${((performance.now() - start) / 1000).toFixed(2)}s`);
 }
 
 export function timed<T>(label: string, run: () => T): T {

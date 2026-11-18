@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 // app served by node:http, and a temp git repo for the app's code. Real Chrome, no credits.
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -180,6 +180,12 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     mkdirSync(bin);
     symlinkSync(process.execPath, join(bin, "node"));
     symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(bin, "git"));
+    // Linux's google-chrome is a shell script that needs coreutils on PATH.
+    if (process.platform === "linux") {
+      for (const dir of ["/usr/bin", "/bin"]) for (const name of readdirSync(dir)) {
+        if (!name.startsWith("ff") && !existsSync(join(bin, name))) symlinkSync(join(dir, name), join(bin, name));
+      }
+    }
     try {
       const ran = await cli(r, ["check", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`], { PATH: bin });
       assert.equal(ran.code, 0, ran.stdout + ran.stderr);

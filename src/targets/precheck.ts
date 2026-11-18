@@ -53,7 +53,8 @@ export async function findCrashes(urls: string[], dir: string) {
     const cdp = await connectCdp(chrome.endpoint);
     await Promise.all(
       urls.map(async (url, i) => {
-        const crash = await Promise.race([crashOf(cdp, url, join(dir, `crash-${i}.jpg`)), limit(LOAD_TIMEOUT + SETTLE + RECHECK + 5_000)]).catch(
+        // The slack covers a loaded machine: on a busy CI runner six pages took 37 s, not the usual 14.
+        const crash = await Promise.race([crashOf(cdp, url, join(dir, `crash-${i}.jpg`)), limit(LOAD_TIMEOUT + SETTLE + RECHECK + 20_000)]).catch(
           () => undefined,
         );
         if (crash) crashes.set(url, crash);
