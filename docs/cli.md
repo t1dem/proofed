@@ -311,8 +311,8 @@ fix ordering. They do not prove device automation, cloud uploads or runner setup
 | Target / host | Verified with real Kane runs |
 |---|---|
 | Web, GitHub-hosted Linux/macOS/Windows | Linux/macOS: verified; Windows: not yet verified |
-| Desktop Electron, macOS runner | Not yet verified |
-| Android local, Apple Silicon Mac / self-hosted runner | Not yet verified |
+| Desktop Electron, macOS runner | Verified on GitHub-hosted macOS |
+| Android local, Apple Silicon Mac / self-hosted runner | Verified on a self-hosted Apple Silicon runner with an Android 14 emulator |
 | Android/iOS cloud real devices, needs a TestMu plan with real devices | Not yet verified |
 | iOS local simulator, Apple Silicon Mac | Not yet verified |
 | Windows host | Not yet verified; web, cloud mobile and desktop paths have fake coverage; local mobile requires an Apple Silicon Mac |

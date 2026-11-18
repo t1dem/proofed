@@ -115,8 +115,8 @@ Comment on a PR. Only people with write access can run them.
 | `/proofed <what to check>` | Kane checks just that, e.g. `/proofed the kettle goes into the bag at €45.00` |
 | `/proofed fix` | Fix with the repository's selected provider and model |
 | `/proofed fix opus high` | This one fix with Claude Opus at high effort |
-| `/proofed fix sol high` | This one fix with Codex GPT-6.1 Sol at high effort |
-| `/proofed fix codex` | This one fix with Codex GPT-6.1 Sol |
+| `/proofed fix sol high` | This one fix with Codex GPT-6.2 Sol at high effort |
+| `/proofed fix codex` | This one fix with Codex GPT-6.2 Sol |
 
 The repo's provider, model and effort are set in the [dashboard](https://proofed.neptunescodm.workers.dev/app), under Settings in the repo's model menu. The two icons switch between Claude and Codex. Without a choice, fixes use Claude Haiku 5.5 at xhigh effort. The same choice writes scenarios on the setup PR.
 
