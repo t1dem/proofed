@@ -68,8 +68,9 @@ test("fake device tools select one booted device; doctor only discovers and reje
     const record = `require('node:fs').appendFileSync(${JSON.stringify(log)}, process.argv.slice(2).join(' ')+'\\n');`;
     executable(dir, "xcrun", record + `console.log(JSON.stringify({devices:{'com.apple.CoreSimulator.SimRuntime.iOS-26-4':[{name:'iPhone 17',udid:'OWNED',state:'Booted'}]}}));`);
     executable(dir, "xcodebuild", record + "console.log('Xcode 26');");
-    const bin = executable(dir, "kane", record + "console.log('all dependencies ready');");
-    executable(dir, "adb", record + `const a=process.argv.slice(2); console.log(a[0]==='devices'?'List of devices attached\\nemulator-5554\\tdevice':a.includes('name')?'Pixel\\nOK':a.includes('ro.build.version.release')?'15':'Pixel');`);
+    // Real kane-cli prints notices with "not installed" around its check lines.
+    const bin = executable(dir, "kane", record + "console.log('Skill update available: not installed → 0.1.4\\nAndroid toolchain\\n ✓ adb — platform-tools');");
+    executable(dir, "adb", record + `const a=process.argv.slice(2); console.log(a[0]==='devices'?'List of devices attached\\nemulator-5554\\tdevice':a.includes('name')?'Pixel\\r\\nOK\\r':a.includes('ro.build.version.release')?'15':'sdk_gphone64_arm64');`);
     const env = { ...process.env, PATH: `${dir}${delimiter}${process.env.PATH}`, KANE_CLI: bin };
     const ios = resolveScenarioTarget({ target: "ios", app: "bad.ipa", device: "iPhone 17", os_version: "26.4" }, {}, {}, dir);
     assert.ok(ios.kind === "ios");
@@ -80,6 +81,8 @@ test("fake device tools select one booted device; doctor only discovers and reje
     const android = resolveScenarioTarget({ target: "android", device: "Pixel", os_version: "15" }, {}, {}, dir);
     assert.ok(android.kind === "android");
     assert.equal(await localDevice(android, env), "emulator-5554");
+    const androidChecks = await targetChecks(android, { env, platform: "darwin", arch: "arm64" });
+    assert.equal(androidChecks.find((c) => c.name === "Kane managed mobile dependencies")?.status, "ok");
     assert.doesNotMatch(readFileSync(log, "utf8"), /install|boot|download|recordVideo|screenrecord/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

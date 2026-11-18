@@ -47,7 +47,8 @@ export async function localDevice(target: Extract<Target, { kind: "ios" | "andro
     const name = await command("adb", ["-s", serial, "emu", "avd", "name"], env);
     const model = await command("adb", ["-s", serial, "shell", "getprop", "ro.product.model"], env);
     const os = await command("adb", ["-s", serial, "shell", "getprop", "ro.build.version.release"], env);
-    if ((name.text.split("\n")[0] === target.device || model.text === target.device) && os.text === target.os_version) matches.push(serial);
+    // `adb emu avd name` answers "Pixel_8_API_34\r\nOK\r\n".
+    if ((name.text.split(/\r?\n/)[0]?.trim() === target.device || model.text === target.device) && os.text === target.os_version) matches.push(serial);
   }
   if (matches.length !== 1) throw new Error(`Expected one online ${target.device} Android ${target.os_version}, found ${matches.length}`);
   return matches[0]!;
@@ -92,7 +93,8 @@ export async function targetChecks(target: Target, options: { env?: NodeJS.Proce
     }
   }
   const deps = await command(env.KANE_CLI ?? "kane-cli", ["doctor", "--target", kaneTarget(target)], env);
-  add("Kane managed mobile dependencies", deps.ok && !/[✗✘]|not installed|not found/i.test(deps.text), deps.text, `Run kane-cli doctor --target ${kaneTarget(target)} and explicitly set up the listed managed dependencies before check.`);
+  // Only doctor's own check lines count: kane-cli also prints notices such as "Skill update available: not installed".
+  add("Kane managed mobile dependencies", deps.ok && !/^\s*[✗✘]/m.test(deps.text), deps.text, `Run kane-cli doctor --target ${kaneTarget(target)} and explicitly set up the listed managed dependencies before check.`);
   try { const id = await localDevice(target, env); add("Recording device", true, id, "Keep this device online and booted."); }
   catch (e) { add("Recording device", false, String(e), "Set --device and --os-version to exactly one booted simulator or online emulator; boot it yourself."); }
   return checks;
