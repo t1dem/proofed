@@ -8,7 +8,7 @@ export const repoFromEnv = (token: string): Repo => {
 };
 
 async function api<T>(repo: Repo, method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.name}${path}`, {
+  const send = () => fetch(`https://api.github.com/repos/${repo.owner}/${repo.name}${path}`, {
     method,
     headers: {
       authorization: `Bearer ${repo.token}`,
@@ -18,6 +18,17 @@ async function api<T>(repo: Repo, method: string, path: string, body?: unknown):
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+  // A dropped connection ("fetch failed") ended a whole run after Kane had finished. Requests that
+  // are safe to repeat get two more tries; a POST might already have landed, so it doesn't.
+  let res: Response | undefined;
+  for (let attempt = 1; !res; attempt++) {
+    try {
+      res = await send();
+    } catch (e) {
+      if (method === "POST" || attempt === 3 || !(e instanceof TypeError)) throw e;
+      await new Promise((r) => setTimeout(r, 2000 * attempt));
+    }
+  }
   if (!res.ok) throw new GitHubError(res.status, `${method} ${path}: ${res.status} ${await res.text()}`);
   return (res.status === 204 ? undefined : await res.json()) as T;
 }
