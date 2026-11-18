@@ -120,6 +120,10 @@ export async function runAll(scenarios: Scenario[], outDir: string, requestedCon
       log(`▶ ${scenario.name}`);
       emit({ type: "started", id: scenario.id });
       const started = Date.now();
+      const kind = scenario.resolvedTarget!.kind;
+      const mobile = kind === "ios" || kind === "android";
+      // Mobile runs have no browser recorder to publish their status and Kane steps.
+      if (mobile) live.scenario(scenario.id, { status: "running", steps: [], startedAt: started });
       const result = await runScenario(scenario, {
         baseUrl,
         outDir,
@@ -127,7 +131,11 @@ export async function runAll(scenarios: Scenario[], outDir: string, requestedCon
         accessKey: process.env.LT_ACCESS_KEY,
         headless: o.headless,
         noRetry: o.noRetry,
-        onEvent: o.onEvent,
+        onEvent: mobile ? (event) => {
+          if (event.type === "step") live.step(event.id, event.step);
+          if (event.type === "retry") live.scenario(event.id, { steps: [], startedAt: Date.now() });
+          emit(event);
+        } : o.onEvent,
       });
       const timed = { ...result, seconds: Math.round((Date.now() - started) / 1000) };
       results[i] = timed;

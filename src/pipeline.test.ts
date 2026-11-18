@@ -4,8 +4,10 @@ import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { live } from "./live.ts";
 import { changedFiles, pickScenarios, runAll } from "./pipeline.ts";
 import { loadScenariosOr } from "./scenarios.ts";
+import { resolveScenarioTarget } from "./target.ts";
 
 function inRepo(check: (git: (...args: string[]) => void) => void) {
   const cwd = process.cwd();
@@ -61,6 +63,29 @@ test("invalid concurrency cannot leave a batch of scenarios unchecked", async ()
     if (before === undefined) delete process.env.PROOFED_CONCURRENCY;
     else process.env.PROOFED_CONCURRENCY = before;
   }
+});
+
+test("a mobile check publishes its running state and Kane steps", { skip: process.platform === "win32" }, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "proofed-mobile-live-"));
+  const kane = join(dir, "kane");
+  const before = process.env.KANE_CLI;
+  t.after(() => {
+    if (before === undefined) delete process.env.KANE_CLI;
+    else process.env.KANE_CLI = before;
+    rmSync(dir, { recursive: true, force: true });
+  });
+  writeFileSync(kane, `#!${process.execPath}
+console.log(JSON.stringify({ step: 1, status: "done", remark: "assert: counter is 1", ts: new Date().toISOString() }));
+console.log(JSON.stringify({ type: "run_end", status: "passed" }));
+`, { mode: 0o755 });
+  process.env.KANE_CLI = kane;
+  const sent: string[] = [];
+  t.mock.method(live, "scenario", (id: string, patch: Parameters<typeof live.scenario>[1]) => sent.push(`${id}:${patch.status}`));
+  t.mock.method(live, "step", (id: string, step: Parameters<typeof live.step>[1]) => sent.push(`${id}:${step.remark}`));
+  const target = resolveScenarioTarget({ target: "ios", execution: "cloud", app: "APP123" }, {}, {}, dir);
+  const [result] = await runAll([{ id: "counter", name: "Counter", file: "", paths: [], url: "", objective: "Assert counter is 1.", resolvedTarget: target }], dir, 1, { noRetry: true });
+  assert.equal(result?.outcome, "passed");
+  assert.deepEqual(sent, ["counter:running", "counter:assert: counter is 1", "counter:passed"]);
 });
 
 test("an explicit scenario selection rejects missing IDs", () => inRepo(() => {

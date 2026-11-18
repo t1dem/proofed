@@ -29,6 +29,36 @@ test("failure data survives the round trip through the comment", () => {
   assert.match(body, /<code>\/proofed fix<\/code>/);
 });
 
+test("oversized reports keep valid metadata and omit stored objectives and steps", () => {
+  const input = { sha: "abc1234def", skipped: [], clips: new Map(), fixEnabled: true, runKey: "pr-1/abc" };
+  const long = { ...failed, scenario: { ...failed.scenario, objective: "step ".repeat(20_000) } };
+  const body = buildReport({ ...input, results: [long] });
+  const failure = readReportData(body)?.failures[0];
+  assert.ok(body.length <= 65_536);
+  assert.match(body, /Some report details were omitted/);
+  assert.match(body, /<!-- proofed:run pr-1\/abc -->$/);
+  assert.equal(failure?.objective, "");
+  assert.deepEqual(failure?.steps, []);
+  assert.match(describeFailure(failure!, failed.scenario), /Total is €81\.90/);
+
+  const results = Array.from({ length: 1_000 }, (_, i) => ({
+    ...failed, scenario: { ...failed.scenario, id: `scenario-${i}-${"x".repeat(64)}` },
+  }));
+  const huge = buildReport({ ...input, results });
+  assert.ok(huge.length <= 65_536);
+  assert.match(huge, /1000 of 1000/);
+  assert.equal(readReportData(huge)?.history?.at(-1)?.state, "failed");
+});
+
+test("cloud reports describe screenshot-only evidence once", () => {
+  const recordingNote = "Cloud run, screenshot-only: no local MP4. Kane's report with the device screenshots is at kaneReport.";
+  const target = { kind: "ios", execution: "cloud", sources: {}, dir: "." } as const;
+  const results = [failed, passed].map((r) => ({ ...r, scenario: { ...r.scenario, resolvedTarget: target }, recordingNote }));
+  const body = buildReport({ sha: "abc", results, skipped: [], clips: new Map(), fixEnabled: true });
+  assert.equal(body.match(/screenshot-only/g)?.length, 1);
+  assert.match(body, /device screenshots is available in TestMu/);
+});
+
 test("the report names the model that fixed it once", () => {
   const body = buildReport({ sha: "abc1234def", results: [passed], skipped: [], clips: new Map(), fixEnabled: true, fix });
   assert.match(body, /\*\*Fixed in `9f8e7d6`\*\* by Claude Haiku 5\.5, high effort, after 1 attempt\.\n\n\*\*What changed:\*\* Prices are in cents\./);

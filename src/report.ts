@@ -339,6 +339,11 @@ function compose(
               : `All ${results.length} affected scenarios pass ${where}.`;
 
   const sections: string[] = [`${MARKER}\n### Proofed\n\n${headline}`];
+  const recordingNote = all.find((r) => r.scenario.resolvedTarget?.execution === "cloud" && r.recordingNote)?.recordingNote;
+  if (recordingNote) {
+    sections.push(`<sub>${html(oneLine(recordingNote.replace(" is at kaneReport.", " is available in TestMu.")))}</sub>`);
+  }
+  const summary = [...sections];
 
   if (results.length >= 4) {
     const tag = (r: ScenarioResult) =>
@@ -352,7 +357,9 @@ function compose(
               ? ": fixed"
               : "";
     const mark = (r: ScenarioResult) => (r.outcome === "failed" ? "✗" : r.outcome === "passed" ? "✓" : "⚠");
-    sections.push([...failed, ...errored, ...unsure, ...passed].map((r) => `- ${mark(r)} ${r.scenario.name}${tag(r)}`).join("\n"));
+    const list = [...failed, ...errored, ...unsure, ...passed].map((r) => `- ${mark(r)} ${r.scenario.name}${tag(r)}`).join("\n");
+    sections.push(list);
+    summary.push(list);
   }
 
   if (written) sections.push(writtenSection(written, passed, clips));
@@ -460,5 +467,34 @@ function compose(
     ? `Comment <code>/proofed</code> to check again or <code>/proofed fix</code> to have ${provider} fix it.`
     : "Comment <code>/proofed</code> to check again.";
   const lines = [footer, history.length > 1 && historyLine(history, repoUrl), hint].filter(Boolean).join("<br>");
-  return `${sections.join("\n\n")}\n\n<sub>${lines}</sub>\n${dataComment(data)}${runKey ? `\n${runMarker(runKey)}` : ""}`;
+  const marker = runKey ? `\n${runMarker(runKey)}` : "";
+  const body = `${sections.join("\n\n")}\n\n<sub>${lines}</sub>\n${dataComment(data)}${marker}`;
+  if (storedSteps > 0 || body.length <= COMMENT_LIMIT) return body;
+
+  const note = "_Some report details were omitted to fit GitHub's comment limit._";
+  const { asked: _asked, failures, ...outcome } = data;
+  // The fixer can re-read file-backed objectives. Ad hoc objectives aren't stored anywhere else.
+  const compact = failures.map((f) => ({ ...f, objective: "", steps: [] }));
+  const { open: _open, ...historyOnly } = outcome;
+  // Keep valid metadata for the whole report even when the failure records won't fit.
+  for (const compactData of [
+    { ...outcome, failures: compact },
+    { ...outcome, failures: compact.filter((f) => f.file).map(({ id, name, file, failedCheck }) => ({
+      id, name, file, failedCheck, objective: "", steps: [], reason: "", diagnosis: "",
+    })) },
+    { ...outcome, failures: [] },
+    { ...historyOnly, failures: [] },
+  ]) {
+    const hint = canFix && compactData.failures.some((f) => f.file)
+      ? "\n\nComment `/proofed fix` to fix the file-backed scenarios."
+      : "";
+    const tail = `\n\n${note}${hint}\n${dataComment(compactData)}${marker}`;
+    const remaining = COMMENT_LIMIT - tail.length;
+    if (remaining >= summary[0]!.length) {
+      const visible = summary.join("\n\n");
+      const cut = visible.length <= remaining ? visible.length : visible.lastIndexOf("\n", remaining);
+      return visible.slice(0, Math.max(cut, summary[0]!.length)).trimEnd() + tail;
+    }
+  }
+  return `${summary[0]}\n\n${note}`;
 }

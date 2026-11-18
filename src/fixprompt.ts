@@ -7,7 +7,7 @@ import { FAILED_CHECK_ACTION, FAILED_CHECK_REASON } from "./runfile.ts";
 export function describeFailure(f: FailureData, scenario?: Scenario) {
   return `### Scenario "${f.name}" (${f.file || "asked for on the PR"})
 Objective checked ${scenario ? checkedAt(scenario) : f.checkedAt ?? "in Chrome"}:
-${f.objective}
+${f.objective || scenario?.objective || ""}
 
 What went wrong: ${f.reason}
 ${f.failedCheck ? `${FAILED_CHECK_REASON}\n${FAILED_CHECK_ACTION}\n` : ""}${f.diagnosis ? `${f.failedCheck ? "Kane's opinion" : "Diagnosis"}: ${f.diagnosis}\n` : ""}${f.steps.length ? `\nKane's steps:\n${f.steps.join("\n")}` : ""}`;
