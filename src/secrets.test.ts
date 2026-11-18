@@ -84,28 +84,53 @@ test("Claude runs without the job's tokens, keeps its own and the build's enviro
   }
 });
 
-test("without credentials in .git/config, the push sends the job token as a header and never on the command line", { skip: process.platform === "win32" ? "The git interception fixture is a POSIX shebang executable" : false }, async () => {
-  const dir = mkdtempSync(join(tmpdir(), "proofed-fake-git-"));
+test("a fixer push uses the job token over HTTPS even when the runner rewrites GitHub URLs to SSH", { skip: process.platform === "win32" ? "The Git remote helper fixture uses a POSIX shebang" : false }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "proofed-push-"));
   const capture = join(dir, "git.json");
-  writeFileSync(join(dir, "git"), `#!/usr/bin/env node
-    const keys = Object.keys(process.env).filter((k) => k.startsWith('GIT_CONFIG_'));
-    require('node:fs').writeFileSync(${JSON.stringify(capture)}, JSON.stringify({ args: process.argv.slice(2), config: Object.fromEntries(keys.map((k) => [k, process.env[k]])) }));
-  `, { mode: 0o755 });
-  const { pushHead } = await import("./push.ts");
-  const path = process.env.PATH;
-  const saved = { GITHUB_TOKEN: process.env.GITHUB_TOKEN, ACTIONS_ID_TOKEN_REQUEST_URL: process.env.ACTIONS_ID_TOKEN_REQUEST_URL };
-  process.env.PATH = `${dir}${delimiter}${path}`;
-  process.env.GITHUB_TOKEN = TOKEN;
-  delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+  const config = join(dir, "gitconfig");
+  const url = "https://github.com/fixture/repo";
+  const env = {
+    ...process.env, GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_COUNT: "0",
+    GIT_EXEC_PATH: dir, GITHUB_SERVER_URL: "https://github.com", GITHUB_REPOSITORY: "fixture/repo",
+    GITHUB_TOKEN: TOKEN, PROOFED_SERVER: "", ACTIONS_ID_TOKEN_REQUEST_URL: "",
+  };
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, env, encoding: "utf8" }).trim();
   try {
-    assert.equal(await pushHead("feature"), false);
+    writeFileSync(config, '[url "git@github.com:"]\n\tinsteadOf = https://github.com/\n');
+    writeFileSync(join(dir, "git-remote-https"), `#!/usr/bin/env node
+      const config = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("GIT_CONFIG_")));
+      require("node:fs").writeFileSync(${JSON.stringify(capture)}, JSON.stringify({ args: process.argv.slice(2), config }));
+      const lines = require("node:readline").createInterface({ input: process.stdin });
+      let ref;
+      lines.on("line", (line) => {
+        if (line === "capabilities") process.stdout.write("push\\n\\n");
+        else if (line === "list for-push") process.stdout.write("\\n");
+        else if (line.startsWith("push HEAD:")) ref = line.split(":")[1];
+        else if (line === "" && ref) {
+          process.stdout.write("ok " + ref + "\\n\\n");
+          ref = undefined;
+        } else if (line === "") lines.close();
+        else process.exit(1);
+      });
+    `, { mode: 0o755 });
+    git("init", "-q", "-b", "feature");
+    git("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "base");
+    git("remote", "add", "origin", url);
+    assert.equal(git("remote", "get-url", "--push", "origin"), "git@github.com:fixture/repo");
+
+    const script = `
+      import { pushHead } from ${JSON.stringify(new URL("./push.ts", import.meta.url).href)};
+      if (await pushHead("feature")) throw new Error("Expected the job token");
+    `;
+    const run = spawnSync(process.execPath, ["--input-type=module", "-e", script], { cwd: dir, env, encoding: "utf8", timeout: 10_000 });
+    assert.equal(run.status, 0, run.stderr);
     const called = JSON.parse(readFileSync(capture, "utf8")) as { args: string[]; config: Record<string, string> };
-    assert.deepEqual(called.args, ["push", "origin", "HEAD:feature"]);
+    assert.deepEqual(called.args, [`https::${url}`, url]);
+    assert.equal(called.config.GIT_CONFIG_KEY_0, "http.https://github.com/.extraheader");
+    assert.equal(called.config.GIT_CONFIG_VALUE_0, "");
     assert.equal(called.config.GIT_CONFIG_KEY_1, "http.https://github.com/.extraheader");
     assert.equal(called.config.GIT_CONFIG_VALUE_1, `AUTHORIZATION: basic ${header}`);
   } finally {
-    process.env.PATH = path;
-    for (const [k, v] of Object.entries(saved)) v === undefined ? delete process.env[k] : (process.env[k] = v);
     rmSync(dir, { recursive: true, force: true });
   }
 });

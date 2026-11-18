@@ -1,15 +1,14 @@
-// Pushing a commit Proofed made (Claude's fix, the setup PR's scenarios) to the PR's branch.
+// Pushing a commit Proofed made (the agent's fix or the setup PR's scenarios) to the PR branch.
 import { execFileSync } from "node:child_process";
 import { oidcToken } from "./server.ts";
 
-// Pushed with the job's GITHUB_TOKEN, a commit leaves every workflow on it (the repo's own CI too)
-// waiting for someone to approve it; an app's push doesn't. Proofed's server trades this job's OIDC
-// token for a token of the Proofed app that can only push to this repository. A workflow without
-// `id-token: write` gets no OIDC token, and the commit is pushed as it always was.
+// GitHub suppresses push workflows from the job's GITHUB_TOKEN and requires approval for PR
+// workflows it triggers. Proofed's server trades the job's OIDC token for a repository-scoped
+// app token so those workflows can start automatically. Without it, use the job's token.
 async function appToken() {
   const { ACTIONS_ID_TOKEN_REQUEST_URL: url, ACTIONS_ID_TOKEN_REQUEST_TOKEN: bearer, PROOFED_SERVER: server } = process.env;
   if (!url || !bearer || !server) {
-    console.log(`${url && bearer ? "No Proofed server set" : "The workflow has no `id-token: write`"}: pushing with the job's token, so GitHub holds the workflows on the commit for approval.`);
+    console.log(`${url && bearer ? "No Proofed server set" : "The workflow has no `id-token: write`"}: pushing with the job's token.`);
     return undefined;
   }
   try {
@@ -25,20 +24,26 @@ async function appToken() {
   }
 }
 
-// The action checks out with persist-credentials: false, so the agent finds no token in .git/config;
-// each push brings its own. A checkout that did persist one leaves an auth header for github.com that
-// git would send instead. Config from the environment is read last: the empty value clears that header
-// and the next one replaces it. The token stays out of the command line, so a failed push can't print it.
 function push(branch: string, token?: string) {
-  const args = ["push", "origin", `HEAD:${branch}`];
-  if (!token) return void execFileSync("git", args, { encoding: "utf8" });
+  const refspec = `HEAD:${branch}`;
+  if (!token) return void execFileSync("git", ["push", "origin", refspec], { encoding: "utf8" });
+
+  const server = new URL(process.env.GITHUB_SERVER_URL || "https://github.com");
+  const repo = process.env.GITHUB_REPOSITORY;
+  if (server.protocol !== "https:" || !repo) throw new Error("A token-authenticated push needs an HTTPS GitHub repository.");
+  // Force the HTTPS helper so a runner's HTTPS-to-SSH rewrite can't silently use a human's SSH key.
+  const remote = `https::${server.origin}/${repo}`;
+  // A checkout that persisted a token left an auth header that git would send instead. Config from the
+  // environment is read last: the empty value clears it and the next one replaces it. The token stays
+  // out of the command line, so a failed push can't print it.
+  const header = `http.${server.origin}/.extraheader`;
   const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
   console.log(`::add-mask::${basic}`);
-  const header = "http.https://github.com/.extraheader";
-  execFileSync("git", args, {
+  execFileSync("git", ["push", "--", remote, refspec], {
     encoding: "utf8",
     env: {
       ...process.env,
+      GIT_ALLOW_PROTOCOL: "https",
       GIT_CONFIG_COUNT: "2",
       GIT_CONFIG_KEY_0: header,
       GIT_CONFIG_VALUE_0: "",
