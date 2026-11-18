@@ -172,7 +172,7 @@ async function pausedRepos(env: Env, repos: (InstallationRepo & { installationId
 }
 
 // Puts the user's keys into one repo's Actions secrets, sealed with that repo's public key.
-export async function pushSecrets(env: Env, user: UserRow, repoName: string, installationId: number) {
+export async function pushSecrets(env: Env, user: Pick<UserRow, "lt_username" | "lt_key" | "claude_token" | "codex_key">, repoName: string, installationId: number) {
   const values: Record<(typeof SECRET_NAMES)[number], string | undefined> = {
     LT_USERNAME: user.lt_username ?? undefined,
     LT_ACCESS_KEY: await decrypt(env.SECRETS_KEY, user.lt_key),
@@ -187,7 +187,27 @@ export async function pushSecrets(env: Env, user: UserRow, repoName: string, ins
   ));
   const failed = results.find((r) => r.status === "rejected");
   if (failed?.status === "rejected") throw failed.reason;
+  if (values.CODEX_API_KEY && !values.CLAUDE_CODE_OAUTH_TOKEN) await selectCodex(token, repoName);
   return names;
+}
+
+async function selectCodex(token: string, repoName: string) {
+  const actions = `/repos/${repoName}/actions`;
+  const hasClaude = await gh(token, "GET", `${actions}/secrets/CLAUDE_CODE_OAUTH_TOKEN`).then(
+    () => true,
+    (e: unknown) => {
+      if (e instanceof GitHubError && e.status === 404) return false;
+      throw e;
+    },
+  );
+  if (hasClaude) return;
+
+  // Keep an explicit fixer choice. A new setup with only a Codex key otherwise defaults to Claude.
+  const path = `${actions}/variables`;
+  const { variables } = await gh<{ variables: { name: string }[] }>(token, "GET", `${path}?per_page=100`);
+  if (variables.some(({ name }) => name === "PROOFED_PROVIDER" || name === "PROOFED_MODEL")) return;
+  await gh(token, "POST", path, { name: "PROOFED_PROVIDER", value: "codex" });
+  forget(`fixer:${repoName}`);
 }
 
 // The workflow reads vars.PROOFED_MODEL / PROOFED_EFFORT / PROOFED_AUTOFIX; a default is stored as no variable at all.
