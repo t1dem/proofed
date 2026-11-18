@@ -354,6 +354,7 @@ const changes = git("diff", "--cached", "--numstat").split("\n").filter(Boolean)
 const names = data.failures.map((f) => f.name).join(", ");
 live.fix({ doing: "pushing", tries: [...tries] });
 const checkedTree = git("write-tree");
+const brokenSha = git("rev-parse", "HEAD");
 git("-c", `user.name=${provider}`, "-c", `user.email=${provider === "Codex" ? "codex@openai.com" : "noreply@anthropic.com"}`, "commit", "-m",
   `Fix ${names}\n\n${summary}\n\nWritten by ${agentName} from a Proofed report; Kane re-ran the scenarios ${checkedWhere(final)} and the fix passes.\n\nFixed-by: ${fixer.model} (${fixer.effort} effort)`);
 if (git("rev-parse", "HEAD^{tree}") !== checkedTree || git("status", "--porcelain", "--untracked-files=no")
@@ -364,6 +365,8 @@ if (git("rev-parse", "HEAD^{tree}") !== checkedTree || git("status", "--porcelai
 const asApp = await pushHead(branch);
 const sha = git("rev-parse", "HEAD");
 console.log(`Pushed ${sha} to ${branch}${asApp ? " as the Proofed app" : ""}`);
+// The broken commit was set to "fixing" above; without this it would stay pending for good.
+if (repo && report) await setStatus(repo, brokenSha, "failure", `${names} broke here; fixed in ${sha.slice(0, 7)}`, runUrl).catch(() => {});
 const skipped = picked.skipped;
 const repoUrl = repo && `https://github.com/${repo.owner}/${repo.name}`;
 // The app's push has started a check of this commit, which skips Kane when the report is already
