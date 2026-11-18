@@ -108,6 +108,8 @@ detect other activity on the account.
 
 `failedCheck: "scenario_doubted"` means a scenario's check failed, but Kane believes the scenario is out of date. `diagnosis` is Kane's opinion; `suggestion` and `next` say to update the scenario if the app change was intended, otherwise fix the app. Unless `--no-retry` is set, such a failure is run a second time, at the scenario's cost again. A check that fails both times is a failure (exit 1). A failure followed by a pass stays unconfirmed and is reported as `notChecked: "runs_disagreed"` (exit 2). `notChecked: "scenario_doubted"` means Kane doubted the scenario without a failed check (exit 2).
 
+In GitHub Actions, the check generated from a PR description is best effort. If Kane doubts it, Proofed adds a note to the PR report and leaves the check out of the commit status and autofix.
+
 ## Mobile and Electron targets
 
 A scenario can select `target: web|ios|android|desktop` and `execution: local|cloud`.

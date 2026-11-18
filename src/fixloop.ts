@@ -7,15 +7,14 @@ import { checkedWhere } from "./fixtarget.ts";
 import { live } from "./live.ts";
 import { providerLabel, providerOf, type Fixer } from "./models.ts";
 import type { FailureData, FixAttempt } from "./report.ts";
-import { nothingAsked } from "./requests.ts";
+import { descriptionCheckNote } from "./requests.ts";
 import type { ScenarioResult } from "./run.ts";
 import { affectedBy, touches, type Scenario } from "./scenarios.ts";
 
 export const MAX_ATTEMPTS = 3;
 
-// A fix counts only when Kane saw the scenario pass; an unsure run hasn't shown anything. A PR
-// description that names nothing to check isn't a failure and can't be fixed, so it never holds a fix back.
-export const settled = (r: ScenarioResult) => r.outcome === "passed" || nothingAsked(r);
+// An unconfirmed description check can be set aside while Kane verifies the other fixes.
+export const settled = (r: ScenarioResult) => r.outcome === "passed" || !!descriptionCheckNote(r);
 const notPassing = (results: ScenarioResult[]) =>
   results
     .filter((r) => !settled(r))

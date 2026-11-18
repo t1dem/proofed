@@ -4,7 +4,7 @@ import { MARKER, OLD_MARKER } from "./github.ts";
 import { BLANK_PAGE, FAILED_CHECK_ACTION, FAILED_CHECK_REASON, runMarker } from "./runfile.ts";
 import type { Step } from "./kane.ts";
 import { DEFAULT_FIXER, describeFixer, providerLabel, providerOf, type Fixer, type Provider } from "./models.ts";
-import { nothingAsked } from "./requests.ts";
+import { DESCRIPTION_DOUBTED, DESCRIPTION_UNCHECKED, descriptionCheckNote, isDescriptionScenario } from "./requests.ts";
 import { creditsOf, scenarioDoubted, unchecked, type ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
 import type { FixSetup } from "./fixsetup.ts";
@@ -32,7 +32,7 @@ export type RunEntry = { sha: string; state: RunState };
 // `asked`: one-off checks from the PR description or a /proofed comment, kept so the fixer can re-run them.
 // `history`: one entry per published report, newest last.
 // `open`: the scenarios that didn't pass (failed, couldn't finish, not confirmed); left out when there are none.
-export type ReportData = { sha: string; failures: FailureData[]; asked?: Scenario[]; history?: RunEntry[]; open?: string[] };
+export type ReportData = { sha: string; failures: FailureData[]; asked?: Scenario[]; history?: RunEntry[]; open?: string[]; descriptionNote?: ReturnType<typeof descriptionCheckNote> };
 export type FileChange = { file: string; added: number; removed: number };
 // One round of the fix loop: what Claude said it changed, and what came of it.
 export type FixAttempt = { summary: string; result: string };
@@ -299,8 +299,12 @@ function compose(
   { sha, results: all, skipped, clips, runUrl, fixEnabled, fixer = DEFAULT_FIXER, fix, asked, previous, repoUrl, runKey, written, fixSetup }: ReportInput,
   { stepList: withSteps, storedSteps }: Fit,
 ) {
-  const unasked = all.filter(nothingAsked);
-  const results = all.filter((r) => !nothingAsked(r));
+  const previousNote = previous?.descriptionNote;
+  const carryNote = fix && !all.some((r) => isDescriptionScenario(r.scenario));
+  const descriptionNote = all.map(descriptionCheckNote).find((note) => note)
+    ?? (carryNote && (previousNote === DESCRIPTION_DOUBTED || previousNote === DESCRIPTION_UNCHECKED) ? previousNote : undefined)
+    ?? (carryNote && previous?.failures.some((f) => isDescriptionScenario(f) && f.failedCheck === "scenario_doubted") ? DESCRIPTION_DOUBTED : undefined);
+  const results = all.filter((r) => !descriptionCheckNote(r));
   const failed = results.filter((r) => r.outcome === "failed");
   const errored = results.filter((r) => r.outcome === "error");
   const unsure = results.filter((r) => r.outcome === "unsure");
@@ -422,16 +426,16 @@ function compose(
   }
 
   if (skipped.length > 0) sections.push(`<sub>Not affected by this diff: ${skipped.join(", ")}</sub>`);
-  if (unasked.length > 0) sections.push("<sub>The PR description didn't name anything Kane could check.</sub>");
+  if (descriptionNote) sections.push(`<sub>${descriptionNote}</sub>`);
 
   const state: RunState = failed.length > 0 ? "failed" : errored.length > 0 ? "error" : fix?.status === "fixed" ? "fixed" : unsure.length > 0 ? "unsure" : "passed";
   const history = addRun(previous?.history, { sha, state });
   const open = [...failed, ...errored, ...unsure].map((r) => r.scenario.id);
-  // Not kept for the fixer: its final check would only spend credits finding nothing to check again.
-  const rerun = asked?.filter((s) => !unasked.some((r) => r.scenario.id === s.id));
+  const rerun = asked?.filter((s) => !descriptionNote || !isDescriptionScenario(s));
   const data: ReportData = {
     sha,
     ...(rerun?.length && { asked: rerun }),
+    ...(descriptionNote && { descriptionNote }),
     failures: failed.map((r) => ({
       id: r.scenario.id,
       name: r.scenario.name,

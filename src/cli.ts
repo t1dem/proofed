@@ -8,7 +8,7 @@ import { acknowledge, findReport, getPullRequest, reply, setStatus, type PullReq
 import { live } from "./live.ts";
 import { baseRev, ctx, env, publish, readEvent, runAll } from "./pipeline.ts";
 import { readReportData } from "./report.ts";
-import { parseCommand, parseFix } from "./requests.ts";
+import { descriptionCheckNote, parseCommand, parseFix } from "./requests.ts";
 
 type Event = {
   pull_request: PullRequest;
@@ -62,7 +62,8 @@ try {
   throw e;
 }
 
-console.log(`\n${broken.length > 0 ? "✗" : "✓"} ${results.filter((r) => r.outcome === "passed").length}/${results.length} passed`);
+const counted = results.filter((r) => !descriptionCheckNote(r));
+console.log(`\n${broken.length > 0 ? "✗" : "✓"} ${counted.filter((r) => r.outcome === "passed").length}/${counted.length} passed`);
 process.exitCode = broken.length > 0 ? 1 : 0;
-// For "Fix automatically" (action.yml): only a scenario Kane saw fail, not one where the test may be wrong.
-if (process.env.GITHUB_OUTPUT && results.some((r) => r.outcome === "failed")) appendFileSync(process.env.GITHUB_OUTPUT, "fixable=true\n");
+// For "Fix automatically" (action.yml): the report has a failure the fixer can act on.
+if (process.env.GITHUB_OUTPUT && broken.some((r) => r.outcome === "failed")) appendFileSync(process.env.GITHUB_OUTPUT, "fixable=true\n");

@@ -11,7 +11,7 @@ import { live } from "./live.ts";
 import { log } from "./log.ts";
 import { crashResult, findCrashes } from "./precheck.ts";
 import { buildReport, outdated, postsNew, type ClipLinks, type FixNote, type ReportData, type Written } from "./report.ts";
-import { nothingAsked } from "./requests.ts";
+import { descriptionCheckNote } from "./requests.ts";
 import { creditsOf, scenarioDoubted, runScenario, type RunEvent, type ScenarioResult } from "./run.ts";
 import { FAILED_CHECK_ACTION, FAILED_CHECK_REASON, RUN_FILE, type RunFile } from "./runfile.ts";
 import { affectedBy, loadScenariosOr, type Scenario } from "./scenarios.ts";
@@ -139,7 +139,7 @@ export async function runAll(scenarios: Scenario[], outDir: string, requestedCon
   return results;
 }
 
-export const isBroken = (r: ScenarioResult) => r.outcome === "failed" || r.outcome === "error";
+export const isBroken = (r: ScenarioResult) => !descriptionCheckNote(r) && (r.outcome === "failed" || r.outcome === "error");
 
 // Posts the report as a new comment or edits the current one (postsNew). A new one retires the reports
 // before it: folded as outdated and left without anything that reads as the report. Neither step can
@@ -172,13 +172,13 @@ type PublishInput = {
 };
 
 // The dashboard's copy of the run. Steps are capped like the comment's, so the file stays small.
-// A description that asked for nothing isn't in it, as it isn't in the comment's count.
+// The dashboard counts the same scenarios as the comment.
 export function runFile({ sha, results, skipped, runUrl, fix }: PublishInput, clips: Map<string, ClipLinks>): RunFile {
   return {
     sha,
     runUrl,
     skipped,
-    scenarios: results.filter((r) => !nothingAsked(r)).map((r) => ({
+    scenarios: results.filter((r) => !descriptionCheckNote(r)).map((r) => ({
       id: r.scenario.id,
       name: r.scenario.name,
       outcome: r.outcome,
@@ -231,7 +231,8 @@ export async function publish(input: PublishInput) {
 
   const repoUrl = repo && `https://github.com/${repo.owner}/${repo.name}`;
   const fixer = configuredFixer();
-  const refusal = process.env.PROOFED_FIX === "false" ? undefined : fixRefusal(results.map((r) => r.scenario), process.env.PROOFED_BUILD);
+  const counted = results.filter((r) => !descriptionCheckNote(r));
+  const refusal = process.env.PROOFED_FIX === "false" ? undefined : fixRefusal(counted.filter((r) => !r.requestUnavailable).map((r) => r.scenario), process.env.PROOFED_BUILD);
   const body = buildReport({
     sha, results, skipped, clips, runUrl, fixEnabled: process.env.PROOFED_FIX !== "false", fixer, fix, asked, previous, repoUrl, runKey, written,
     fixSetup: refusal ? { note: refusal, comment: false } : fixSetup(providerOf(fixer.model)),
@@ -241,9 +242,8 @@ export async function publish(input: PublishInput) {
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, body);
 
   const broken = results.filter(isBroken);
-  const failed = results.filter((r) => r.outcome === "failed");
-  const passed = results.filter((r) => r.outcome === "passed");
-  const counted = results.filter((r) => !nothingAsked(r));
+  const failed = counted.filter((r) => r.outcome === "failed");
+  const passed = counted.filter((r) => r.outcome === "passed");
   if (repo && pr) {
     // The end of a fix is news too, either way it went.
     const comment = await putReport(repo, pr, body, requested || !!fix);
@@ -256,7 +256,9 @@ export async function publish(input: PublishInput) {
           ? (["error", `Kane couldn't finish: ${names(broken)}`] as const)
           : passed.length < counted.length
             ? (["success", `${passed.length} passed, ${counted.length - passed.length} not checked`] as const)
-            : (["success", `${counted.length} scenario(s) pass ${checkedWhere(results.map((r) => r.scenario))}`] as const);
+            : counted.length === 0
+              ? (["success", "No scenarios to report"] as const)
+              : (["success", `${counted.length} scenario(s) pass ${checkedWhere(counted.map((r) => r.scenario))}`] as const);
     await setStatus(repo, sha, state, failed.length && refusal ? refusal : description, comment.html_url);
   }
   return broken;

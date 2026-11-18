@@ -17,7 +17,7 @@ import { changedFiles, ctx, env, pickScenarios, publish, putReport, readEvent, r
 import { pushHead } from "./push.ts";
 import { fixLoop, settled } from "./fixloop.ts";
 import { fixRequested, readReportData, WORKING, type FailureData } from "./report.ts";
-import { replayAskedScenario } from "./requests.ts";
+import { descriptionCheckNote, isDescriptionScenario, replayAskedScenario } from "./requests.ts";
 import type { ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
 import { targetChecks } from "./targetchecks.ts";
@@ -40,6 +40,13 @@ const data = readReportData(body);
 const replaced = ticked && !!repo && report?.id !== event.comment?.id;
 if (!prNumber || !(auto || event.issue?.pull_request) || !data || data.failures.length === 0 || (ticked && !fixRequested(body)) || replaced) {
   console.log("No fix requested.");
+  process.exit(0);
+}
+// Reports written before description checks became best effort may still list one as a failure.
+const reportedFailures = data.failures.filter((f) => !(isDescriptionScenario(f) && f.failedCheck === "scenario_doubted"));
+const doubtedDescription = reportedFailures.length !== data.failures.length;
+if (!reportedFailures.length) {
+  console.log("No fix requested. Kane couldn't verify what the PR description asks.");
   process.exit(0);
 }
 // The app's folder when it isn't the repo root. The agent and git work from the root; build and serve run there.
@@ -78,7 +85,7 @@ async function checkSetup(scenarios: Scenario[]) {
 }
 
 const checkedFiles = pickScenarios({ changed: changedFiles(base), rev }).selected;
-const fileIds = data.failures.filter((f) => f.file).map((f) => f.id);
+const fileIds = reportedFailures.filter((f) => f.file).map((f) => f.id);
 const failedFiles = fileIds.length ? pickScenarios({ only: fileIds, rev }).selected : [];
 const uniqueScenarios = (scenarios: Scenario[]) => [...new Map(scenarios.map((s) => [s.id, s])).values()];
 const refusal = await checkSetup(targetScenarios(uniqueScenarios([...checkedFiles, ...failedFiles])));
@@ -89,8 +96,9 @@ if (refusal) {
 }
 const asked: Scenario[] = [];
 for (const stored of data.asked ?? []) {
+  if (doubtedDescription && isDescriptionScenario(stored)) continue;
   const rebuilt = replayAskedScenario(stored);
-  const failure = data.failures.find((f) => !f.file && f.id === stored.id);
+  const failure = reportedFailures.find((f) => !f.file && f.id === stored.id);
   if (!rebuilt || (failure && failure.objective !== rebuilt.objective)) continue;
   const targeted = targetScenarios([rebuilt]);
   if (!targeted.length) continue;
@@ -98,8 +106,8 @@ for (const stored of data.asked ?? []) {
   if (reason) console.log(reason);
   else asked.push(rebuilt);
 }
-const failures = data.failures.filter((f) => f.file || asked.some((s) => s.id === f.id));
-const unverified: ScenarioResult[] = data.failures.filter((f) => !failures.includes(f)).map((f) => ({
+const failures = reportedFailures.filter((f) => f.file || asked.some((s) => s.id === f.id));
+const unverified: ScenarioResult[] = reportedFailures.filter((f) => !failures.includes(f)).map((f) => ({
   scenario: { id: f.id, name: f.name, file: "", paths: [], url: "/", objective: f.objective },
   outcome: "unsure",
   requestUnavailable: true,
@@ -337,8 +345,9 @@ try {
 }
 const fixedIds = new Set(failures.map((f) => f.id));
 const finalFixed = results.filter((r) => fixedIds.has(r.scenario.id));
-const regressed = results.filter((r) => !fixedIds.has(r.scenario.id) && r.outcome === "failed" && !(data.open ?? []).includes(r.scenario.id));
-if (finalFixed.length !== fixedIds.size || !finalFixed.every(settled) || regressed.length) {
+const regressed = results.filter((r) => !fixedIds.has(r.scenario.id) && r.outcome === "failed" && !descriptionCheckNote(r) && !(data.open ?? []).includes(r.scenario.id));
+const verified = finalFixed.filter((r) => r.outcome === "passed");
+if (!verified.length || finalFixed.length !== fixedIds.size || !finalFixed.every(settled) || regressed.length) {
   git("checkout", "--", ".");
   await restoreReport("Kane couldn't confirm the fix in the final check. Nothing was pushed.", true, "The final check didn't pass; nothing was pushed");
   process.exit(1);
@@ -377,7 +386,7 @@ const changes = git("diff", "--cached", "--numstat").split("\n").filter(Boolean)
   const [added = "", removed = "", file = ""] = line.split("\t");
   return { file, added: Number(added) || 0, removed: Number(removed) || 0 };
 });
-const names = failures.map((f) => f.name).join(", ");
+const names = verified.map((r) => r.scenario.name).join(", ");
 live.fix({ doing: "pushing", tries: [...tries] });
 const checkedTree = git("write-tree");
 const brokenSha = git("rev-parse", "HEAD");
@@ -393,7 +402,9 @@ const sha = git("rev-parse", "HEAD");
 console.log(`Pushed ${sha} to ${branch}${asApp ? " as the Proofed app" : ""}`);
 // The broken commit was set to "fixing" above; without this it would stay pending for good.
 if (repo && report) {
-  const status = unverified.length ? `${names} fixed in ${sha.slice(0, 7)}; a request wasn't re-checked` : `${names} broke here; fixed in ${sha.slice(0, 7)}`;
+  const status = unverified.length || finalFixed.some(descriptionCheckNote)
+    ? `${names} fixed in ${sha.slice(0, 7)}; a request wasn't verified`
+    : `${names} broke here; fixed in ${sha.slice(0, 7)}`;
   await setStatus(repo, brokenSha, "failure", status, runUrl).catch(() => {});
 }
 const skipped = picked.skipped;

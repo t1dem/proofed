@@ -1,12 +1,12 @@
 // Execute fix.ts against a temporary git repo. The fixer, Kane and GitHub/push are fakes.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { dataComment, readReportData } from "./report.ts";
+import { dataComment, readReportData, type FailureData } from "./report.ts";
 import { askedScenario } from "./requests.ts";
 import { kaneObjective } from "./run.ts";
 import { resolveScenarioTarget } from "./target.ts";
@@ -14,7 +14,6 @@ import { resolveScenarioTarget } from "./target.ts";
 const description = askedScenario("description", "Check that the counter survives a restart.\n\n[delay:1]",
   resolveScenarioTarget({ target: "android", execution: "cloud", app: "app.apk" }, {}, {}, process.cwd()));
 
-const fixUrl = new URL("./fix.ts", import.meta.url).href;
 const fakeKane = fileURLToPath(new URL("./testing/fake-kane.ts", import.meta.url));
 
 function fixture(target = "android", extra = "", build = "node build.cjs", finalFails = false, options: {
@@ -22,7 +21,7 @@ function fixture(target = "android", extra = "", build = "node build.cjs", final
   changeAfterAttempt?: boolean;
   buildOutput?: boolean;
   agentBuildOutput?: "with-source" | "only";
-  description?: "stored" | "missing";
+  description?: "stored" | "missing" | "doubted";
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "proofed-fix-runtime-"));
   const log = join(dir, "events.jsonl");
@@ -63,9 +62,13 @@ fs.writeFileSync('modes/counter', fs.readFileSync('dist/config.js', 'utf8') === 
   if (options.extraScenario || finalFails) writeFileSync(join(dir, "extra.js"), "PR changed it\n");
   writeFileSync(join(dir, "app.js"), "PR broke it\n"); git("commit", "-qam", "Break counter");
   const original = git("rev-parse", "HEAD");
-  const failures = [{ id: "counter", name: "Counter", file: ".proofed/scenarios/counter.md", objective: "Assert counter is 1.", reason: "Counter is 0.", diagnosis: "", steps: [] }];
-  if (options.description) failures.push({ ...description, reason: "The counter reset.", diagnosis: "", steps: [] });
-  const body = `<!-- proofed -->\n### Proofed\n\nCounter broke.\n\n- [ ] **Fix with Claude**\n${dataComment({ sha: original, failures, asked: options.description === "stored" ? [description] : undefined })}`;
+  const failures: FailureData[] = [{ id: "counter", name: "Counter", file: ".proofed/scenarios/counter.md", objective: "Assert counter is 1.", reason: "Counter is 0.", diagnosis: "", steps: [] }];
+  if (options.description) failures.push({
+    ...description, reason: "The counter reset.", diagnosis: "", steps: [],
+    ...(options.description === "doubted" && { failedCheck: "scenario_doubted" }),
+  });
+  const asked = options.description && options.description !== "missing" ? [description] : undefined;
+  const body = `<!-- proofed -->\n### Proofed\n\nCounter broke.\n\n- [ ] **Fix with Claude**\n${dataComment({ sha: original, failures, asked })}`;
   // All API functions fix.ts/pipeline.ts can call are local spies, and push never invokes git push.
   const github = `export * from ${JSON.stringify(new URL("./github.ts", import.meta.url).href)};
 const record = (type, value) => { globalThis.fixtureLog(type,value); };
@@ -112,18 +115,33 @@ registerHooks({resolve(specifier,context,next){const url=specifier.startsWith('.
 // A mock's re-export loads the original implementation, without remapping it again.
 if(mocks.has(url)&&!context.parentURL?.startsWith('data:'))return {url:mocks.get(url),shortCircuit:true};return next(specifier,context);}});
 globalThis.fetch=async()=>{throw new Error('Network forbidden in fixer fixture');};
-await import(${JSON.stringify(fixUrl)});`;
+await import(process.argv[2]);`;
   const env = { ...process.env, TMPDIR: dir, TEMP: dir, TMP: dir, GITHUB_TOKEN: "fixture-token", GITHUB_REPOSITORY: "fixture/repo", PROOFED_AUTO: "true", PROOFED_NUMBER: "1", PROOFED_BUILD: build, PROOFED_BASE_SHA: base, PROOFED_HEAD_REF: "main", PROOFED_OUT: join(dir, "out"), PROOFED_FIX: "true", PROOFED_DIR: ".", KANE_CLI: fakeKane, FAKE_KANE_LOG: join(dir, "kane.log"), FAKE_KANE_MODES: join(dir, "modes"), RUNNER_TEMP: dir };
   for (const key of ["PROOFED_TARGET", "PROOFED_EXECUTION", "PROOFED_APP", "PROOFED_URL", "PROOFED_SERVE", "PROOFED_BASE_REF", "GITHUB_EVENT_PATH", "GITHUB_RUN_ID", "PROOFED_MODEL", "PROOFED_PROVIDER", "PROOFED_CLAUDE_MODEL", "PROOFED_SCENARIOS", "ACTIONS_ID_TOKEN_REQUEST_URL", "ACTIONS_ID_TOKEN_REQUEST_TOKEN"]) delete env[key as keyof typeof env];
   if (options.description) Object.assign(env, { PROOFED_TARGET: "android", PROOFED_EXECUTION: "cloud", PROOFED_APP: "app.apk" });
   // Hooks and generated scripts sit outside the tested checkout so they can never be committed.
   const preload = join(tmpdir(), `proofed-fix-preload-${process.pid}-${Date.now()}.mjs`);
   writeFileSync(preload, script);
-  const run = () => spawnSync(process.execPath, [preload], { cwd: dir, env, encoding: "utf8", timeout: 30_000 });
+  const run = (entry = "./fix.ts", overrides: NodeJS.ProcessEnv = {}) => spawnSync(process.execPath, [preload, new URL(entry, import.meta.url).href], {
+    cwd: dir, env: { ...env, ...overrides }, encoding: "utf8", timeout: 30_000,
+  });
+  const check = (request: string, counter: "pass" | "fail") => {
+    const out = join(dir, "out");
+    mkdirSync(out, { recursive: true });
+    const event = join(out, "event.json");
+    const output = join(out, "github-output");
+    writeFileSync(event, JSON.stringify({ pull_request: { number: 1, body: request, head: { sha: original, ref: "feature" }, base: { sha: base, ref: "main" } } }));
+    writeFileSync(join(dir, "modes/counter"), counter);
+    execFileSync(process.execPath, ["build.cjs"], { cwd: dir });
+    const ran = run("./cli.ts", {
+      GITHUB_EVENT_PATH: event, GITHUB_OUTPUT: output, PROOFED_TARGET: "android", PROOFED_EXECUTION: "cloud", PROOFED_APP: "app.apk",
+    });
+    return { ran, output: existsSync(output) ? readFileSync(output, "utf8") : "", body: readFileSync(join(out, "report.md"), "utf8") };
+  };
   const runs = () => readFileSync(join(dir, "kane.log"), "utf8").trim().split("\n")
     .map((s) => JSON.parse(s) as { args?: string[] }).filter((c) => c.args?.[0] === "run");
   const events = () => readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((s) => JSON.parse(s) as { type: string; value?: string | { description: string; state: string }; code?: string });
-  return { dir, original, git, run, runs, events, cleanup: () => { rmSync(dir, { recursive: true, force: true }); rmSync(preload, { force: true }); } };
+  return { dir, original, git, run, check, runs, events, cleanup: () => { rmSync(dir, { recursive: true, force: true }); rmSync(preload, { force: true }); } };
 }
 
 for (const target of ["android", "ios"]) test(`the ${target} fixer reuses its last attempt without another build or Kane run`, () => {
@@ -175,6 +193,45 @@ test("a missing PR request leaves its result unverified and lets the file fix pr
     assert.match(body, /Proofed couldn't re-run this request during the fix\. The previous check failed: The counter reset\./);
     assert.deepEqual(readReportData(body)?.open, ["asked-in-description"]);
     assert.deepEqual(events.findLast((e) => e.type === "status")?.value, { state: "success", description: "1 passed, 1 not checked" });
+  } finally { f.cleanup(); }
+});
+
+test("the fixer skips a doubted description stored as a failure in an older report", () => {
+  const f = fixture("android", "", "node build.cjs", false, { description: "doubted" });
+  try {
+    const ran = f.run();
+    assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+    assert.equal(f.runs().length, 1);
+    const events = f.events();
+    assert.ok(events.some((e) => e.type === "push"));
+    assert.doesNotMatch(events.find((e) => e.type === "ask")!.value as string, /What the PR description asks/);
+    const body = events.find((e) => e.type === "report" && (e.value as string).includes("**Fixed in "))!.value as string;
+    assert.match(body, /<sub>Kane couldn't verify what the PR description asks\.<\/sub>/);
+    assert.equal(readReportData(body)?.asked, undefined);
+  } finally { f.cleanup(); }
+});
+
+for (const [descriptionVerdict, counter, expectedStatus, failures, summary] of [
+  ["refuted", "fail", "failure", ["counter"], "1 of 1 broke: Counter"],
+  ["refuted", "pass", "success", [], "1 scenario(s) pass on an Android device"],
+  ["fail", "pass", "failure", ["asked-in-description"], "1 of 2 broke: What the PR description asks"],
+] as const) test(`the PR check reports a ${descriptionVerdict} description with a ${counter}ing file scenario`, () => {
+  const f = fixture();
+  try {
+    const { ran, output, body } = f.check(`Check the upgrade condition. [fake:${descriptionVerdict}] [delay:1]`, counter);
+    assert.equal(ran.status, failures.length ? 1 : 0, ran.stdout + ran.stderr);
+    assert.equal(output, failures.length ? "fixable=true\n" : "");
+    assert.deepEqual(f.events().findLast((e) => e.type === "status")?.value, { state: expectedStatus, description: summary });
+    const data = readReportData(body);
+    assert.deepEqual(data?.failures.map((failure) => failure.id), failures);
+    if (descriptionVerdict === "refuted") {
+      assert.match(body, /<sub>Kane couldn't verify what the PR description asks\.<\/sub>/);
+      assert.equal(data?.asked, undefined);
+      assert.equal(data?.open?.includes("asked-in-description") ?? false, false);
+    } else {
+      assert.match(body, /#### ✗ What the PR description asks/);
+      assert.equal(data?.asked?.[0]?.id, "asked-in-description");
+    }
   } finally { f.cleanup(); }
 });
 

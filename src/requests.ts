@@ -1,5 +1,5 @@
 import { effortsFor, isEffort, parseModel, type Effort } from "./models.ts";
-import type { ScenarioResult } from "./run.ts";
+import { scenarioDoubted, type ScenarioResult } from "./run.ts";
 import type { Scenario } from "./scenarios.ts";
 import { checkedAt } from "./fixtarget.ts";
 import { resolveScenarioTarget, type Target } from "./target.ts";
@@ -46,9 +46,16 @@ const MAY_ASK_NOTHING =
   "If the text above doesn't describe something a user can see or do in this app, stop right away " +
   "without clicking anything: there is nothing to check. Never sign in, and never leave the app's own pages to get there.";
 
-// The description asked for nothing Kane could check: not a result of the PR, only a line under the report.
-export const nothingAsked = (r: ScenarioResult) =>
-  r.scenario.id === "asked-in-description" && r.outcome === "unsure" && !r.requestUnavailable;
+export const isDescriptionScenario = (s: Pick<Scenario, "id" | "file">) => !s.file && s.id === "asked-in-description";
+export const DESCRIPTION_DOUBTED = "Kane couldn't verify what the PR description asks.";
+export const DESCRIPTION_UNCHECKED = "The PR description didn't name anything Kane could check.";
+
+// The description is best effort. An unconfirmed result only gets a line under the report.
+export function descriptionCheckNote(r: ScenarioResult) {
+  if (!isDescriptionScenario(r.scenario) || r.requestUnavailable) return;
+  if (scenarioDoubted(r)) return DESCRIPTION_DOUBTED;
+  if (r.outcome === "unsure") return DESCRIPTION_UNCHECKED;
+}
 
 const NAMES = {
   description: "What the PR description asks",

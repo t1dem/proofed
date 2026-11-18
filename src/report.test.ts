@@ -166,6 +166,26 @@ test("a PR description whose check failed is reported as before", () => {
   assert.equal(readReportData(body)?.failures[0]?.id, "asked-in-description");
 });
 
+test("a file fix carries forward an unconfirmed description note without re-running the request", () => {
+  const doubted = { ...askedNothing, outcome: "failed" } satisfies ScenarioResult;
+  const before = buildReport({
+    sha: "abc1234def", results: [failed, doubted], skipped: [], clips: new Map(), fixEnabled: true, asked: [description],
+  });
+  const previous = readReportData(before);
+  assert.match(before, /\*\*1 of 1\*\* scenarios broke/);
+  assert.deepEqual(previous?.failures.map((f) => f.id), ["promo"]);
+  const run = runFile({
+    repo: undefined, pr: undefined, sha: "abc1234def", results: [failed, doubted], skipped: [], runUrl: undefined, outDir: "",
+  }, new Map());
+  assert.deepEqual(run.scenarios.map((s) => s.id), ["promo"]);
+
+  const after = buildReport({
+    sha: "9f8e7d6c5b", results: [passed], skipped: [], clips: new Map(), fixEnabled: true, fix, previous,
+  });
+  assert.match(after, /<sub>Kane couldn't verify what the PR description asks\.<\/sub>/);
+  assert.deepEqual(readReportData(after)?.failures, []);
+});
+
 test("after a fix of a page that crashed on load before screenshots, the Before side has only the browser's error", () => {
   const raw = "https://github.com/o/r/raw/proofed-clips/pr-1";
   const crash = crashResult(failed.scenario, { error: "TypeError: Cannot read properties of null (reading '1') | x" });
