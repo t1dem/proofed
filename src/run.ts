@@ -11,46 +11,13 @@ import { log as logLine } from "./log.ts";
 import { runKane, type RunEnd, type Step } from "./kane.ts";
 
 import { NOTHING_CHECKED } from "./runfile.ts";
+import { scenarioDoubted } from "./runresult.ts";
 import { startRecorder, type Rect } from "./recorder.ts";
 import { checkScenarioId, type Scenario } from "./scenarios.ts";
+import type { Clip, Outcome, RunEvent, ScenarioResult } from "./types.ts";
 
 // Kane's --timeout counts active time; the wall-clock limit leaves a minute on top, as the defaults do.
 const kaneTimeouts = (s: Scenario) => s.timeoutMinutes ? { timeoutSeconds: s.timeoutMinutes * 60, wallTimeoutSeconds: s.timeoutMinutes * 60 + 60 } : {};
-
-// "unsure": the run says nothing about the code. Either Kane decided the test itself looks wrong
-// before it could check the page (verdict family automation_bug, no failed assert), or it reported
-// a pass without checking anything (see outcomeOf).
-// Worth showing, not worth blocking a merge over, and never counted as a pass.
-export type Outcome = "passed" | "failed" | "unsure" | "error";
-
-// Files of a run's recording: the video, its GIF and the still it ends on. A page that crashed on
-// load (precheck.ts) has only a screenshot: Kane never ran, so there is nothing to play.
-export type Clip = { mp4: string; gif: string; jpg: string } | { jpg: string; mp4?: undefined; gif?: undefined };
-
-// `at`: where the step starts in the clip, in seconds; the dashboard jumps there from the step.
-export type RunStep = Step & { at?: number };
-
-export type ScenarioResult = {
-  scenario: Scenario;
-  outcome: Outcome;
-  steps: RunStep[];
-  end: RunEnd | undefined;
-  clip: Clip | undefined;
-  error?: string;
-  recordingNote?: string;
-  accountBalance?: { before: number; after: number; debit: number };
-  notChecked?: "runs_disagreed" | "text_contradicted";
-  // The fixer had a previous failure but could not reconstruct or run the request.
-  requestUnavailable?: true;
-  // The uncaught exception that left the page blank, when Proofed failed the scenario before Kane ran (precheck.ts).
-  pageError?: string;
-  // Wall time of the run, retries included.
-  seconds?: number;
-  // What the runs before this one took (an automatic retry, a second run of a doubted failure); `end` holds only the last.
-  earlierCredits?: number;
-  // Kane refused to start for want of a login: an error a retry can't fix.
-  notSignedIn?: boolean;
-};
 
 // Failures of the browser plumbing rather than of the app: the run is retried, never reported as a bug.
 const INFRA = /Screenshot failed|TimeoutError|TargetClosedError|has been closed|ECONNREFUSED|ECONNRESET|socket hang up|Project and folder must be configured/i;
@@ -94,8 +61,6 @@ export function focusWords(end: RunEnd) {
   return [...new Set(words)];
 }
 
-export { NOTHING_CHECKED };
-
 // Each step's remark starts with its kind ("navigate: …", "wait: …", "analyze: …", "assert: …").
 // Only an assert compares the page with what the scenario expects.
 const checked = (steps: Step[]) => steps.some((s) => s.status === "done" && /^assert:/i.test(s.remark));
@@ -122,14 +87,6 @@ export function outcomeOf(end: RunEnd | undefined, steps: Step[]): Outcome {
   return end.verdict?.family === "automation_bug" && !refuted(steps) ? "unsure" : "failed";
 }
 
-// An unsure run where Kane said "passed": nothing was checked, as opposed to Kane doubting the test.
-export const unchecked = (r: ScenarioResult) => r.outcome === "unsure" && r.end?.status === "passed" && !r.notChecked;
-
-export const scenarioDoubted = (r: ScenarioResult) => r.outcome === "failed" && r.end?.verdict?.family === "automation_bug";
-
-// All the credits a scenario took, the runs before the last one included.
-export const creditsOf = (r: ScenarioResult) => (r.end?.credits_consumed ?? 0) + (r.earlierCredits ?? 0);
-
 const RECHECK = "the check failed, but Kane blames the scenario; running it once more to be sure";
 
 // Kane is good at reaching a goal, so on its own it routes around a broken button (a key press, another
@@ -142,14 +99,6 @@ const NO_WORKAROUNDS =
 export function kaneObjective(objective: string) {
   return `${objective}\n\n${NO_WORKAROUNDS}`;
 }
-
-// What a run reports as it goes, for a terminal to draw (src/proofed.ts). The PR check doesn't listen.
-export type RunEvent =
-  | { type: "waiting"; id: string }
-  | { type: "started"; id: string }
-  | { type: "step"; id: string; step: Step }
-  | { type: "retry"; id: string; error: string }
-  | { type: "finished"; id: string; result: ScenarioResult };
 
 type RunOptions = {
   baseUrl: string;

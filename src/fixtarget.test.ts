@@ -8,7 +8,7 @@ import { checkFix, checkedAt, checkedWhere, fixRefusal } from "./fixtarget.ts";
 import { fixLoop } from "./fixloop.ts";
 import { describeFailure } from "./fixprompt.ts";
 import { buildReport, readReportData, type FailureData } from "./report.ts";
-import type { ScenarioResult } from "./run.ts";
+import type { ScenarioResult } from "./types.ts";
 import type { Scenario } from "./scenarios.ts";
 import { resolveScenarioTarget, type TargetFields } from "./target.ts";
 import { targetChecks } from "./targetchecks.ts";

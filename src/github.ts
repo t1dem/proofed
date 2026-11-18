@@ -1,10 +1,26 @@
 import { readFileSync } from "node:fs";
+import { env } from "./env.ts";
 
 export type Repo = { owner: string; name: string; token: string };
 
 export const repoFromEnv = (token: string): Repo => {
   const [owner = "", name = ""] = (process.env.GITHUB_REPOSITORY ?? "").split("/");
   return { owner, name, token };
+};
+
+export function readEvent<T>(): Partial<T> {
+  return process.env.GITHUB_EVENT_PATH ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")) : {};
+}
+
+export const ctx = () => {
+  const token = process.env.GITHUB_TOKEN;
+  return {
+    repo: token && process.env.GITHUB_REPOSITORY ? repoFromEnv(token) : undefined,
+    runUrl: process.env.GITHUB_RUN_ID
+      ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
+      : undefined,
+    outDir: env("PROOFED_OUT", ".proofed-out"),
+  };
 };
 
 async function request<T>(token: string, method: string, path: string, body?: unknown): Promise<T> {

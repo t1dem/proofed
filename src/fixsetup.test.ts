@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fixSetup } from "./fixsetup.ts";
 import { buildReport } from "./report.ts";
-import type { ScenarioResult } from "./run.ts";
+import type { ScenarioResult } from "./types.ts";
 
 const REF = "o/r/.github/workflows/proofed.yml@refs/heads/main";
 

@@ -2,8 +2,8 @@
 // holds, and what the terminal views draw from. Its names are the CLI's contract with coding agents.
 import { resolve } from "node:path";
 import type { CachedPass } from "./cache.ts";
-import type { ScenarioResult } from "./run.ts";
-import { creditsOf, scenarioDoubted, unchecked } from "./run.ts";
+import type { ScenarioResult } from "./types.ts";
+import { creditsOf, scenarioDoubted, unchecked } from "./runresult.ts";
 import { FAILED_CHECK_ACTION } from "./runfile.ts";
 import type { Scenario } from "./scenarios.ts";
 import type { SetupError } from "./setuperror.ts";

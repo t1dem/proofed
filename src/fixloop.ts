@@ -8,7 +8,7 @@ import { live } from "./live.ts";
 import { providerLabel, providerOf, type Fixer } from "./models.ts";
 import type { FailureData, FixAttempt } from "./report.ts";
 import { descriptionCheckNote } from "./requests.ts";
-import type { ScenarioResult } from "./run.ts";
+import type { ScenarioResult } from "./types.ts";
 import { affectedBy, touches, type Scenario } from "./scenarios.ts";
 
 export const MAX_ATTEMPTS = 3;

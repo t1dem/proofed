@@ -1,7 +1,8 @@
 import { checkedAt } from "./fixtarget.ts";
 import type { Step } from "./kane.ts";
 import { isDescriptionScenario, type descriptionCheckNote } from "./requests.ts";
-import { scenarioDoubted, type ScenarioResult } from "./run.ts";
+import { scenarioDoubted } from "./runresult.ts";
+import type { ScenarioResult } from "./types.ts";
 import type { Scenario } from "./scenarios.ts";
 
 export { readRunKey, runMarker } from "./runfile.ts";

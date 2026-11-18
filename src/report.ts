@@ -5,7 +5,8 @@ import { BLANK_PAGE, FAILED_CHECK_ACTION, FAILED_CHECK_REASON } from "./runfile.
 import type { Step } from "./kane.ts";
 import { DEFAULT_FIXER, describeFixer, providerLabel, providerOf, type Fixer, type Provider } from "./models.ts";
 import { DESCRIPTION_DOUBTED, DESCRIPTION_UNCHECKED, descriptionCheckNote, isDescriptionScenario } from "./requests.ts";
-import { creditsOf, scenarioDoubted, unchecked, type ScenarioResult } from "./run.ts";
+import { creditsOf, scenarioDoubted, unchecked } from "./runresult.ts";
+import type { ScenarioResult } from "./types.ts";
 import type { Scenario } from "./scenarios.ts";
 import type { FixSetup } from "./fixsetup.ts";
 import {

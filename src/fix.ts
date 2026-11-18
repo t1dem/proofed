@@ -2,23 +2,25 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { configuredFixer } from "./agent.ts";
+import { changedFiles } from "./changes.ts";
+import { env } from "./env.ts";
 import { fixLoop, settled, type FixLoopEnd } from "./fixloop.ts";
 import { askFixer, fixPrompt } from "./fixprompt.ts";
 import { gaveUpReport } from "./fixreport.ts";
 import { checkFix, checkedWhere, fixRefusal, needsWeb, targetScenarios } from "./fixtarget.ts";
 import { diffPaths, discardLeak, fileStates, fixChanges, git, ignoredTrackedPaths, prepareBuild, stageCheckedFiles, treeBeforeCheck, untrackedPaths } from "./fixworkspace.ts";
-import { editComment, findReport, setStatus, type Comment } from "./github.ts";
+import { ctx, editComment, findReport, readEvent, setStatus, type Comment } from "./github.ts";
 import { putBack } from "./guard.ts";
 import { live } from "./live.ts";
 import { describeFixer, providerLabel, providerOf, type Fixer } from "./models.ts";
-import { changedFiles, ctx, env, pickScenarios, publish, putReport, readEvent, runAll } from "./pipeline.ts";
+import { publish, putReport, runAll } from "./pipeline.ts";
 import { pushHead } from "./push.ts";
 import { FIX_BOX_LINE, fixRequested, readReportData, WORKING, type FileChange, type FixNote, type ReportData } from "./report.ts";
 import { descriptionCheckNote, isDescriptionScenario, replayAskedScenario } from "./requests.ts";
-import type { ScenarioResult } from "./run.ts";
-import type { Scenario } from "./scenarios.ts";
+import { pickScenarios, type Scenario } from "./scenarios.ts";
 import { maskSecrets } from "./secrets.ts";
 import { targetChecks } from "./targetchecks.ts";
+import type { ScenarioResult } from "./types.ts";
 
 type CommentEvent = { action: string; comment: { id: number; body: string }; issue: { number: number; pull_request?: object } };
 type FixRequest = ReturnType<typeof ctx> & {

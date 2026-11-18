@@ -3,62 +3,20 @@ import { configuredFixer } from "./agent.ts";
 import { fixSetup } from "./fixsetup.ts";
 import { providerOf } from "./models.ts";
 // Shared by the PR check (cli.ts) and the fix loop (fix.ts).
-import { execFileSync } from "node:child_process";
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { editComment, listReports, minimize, postComment, publishClips, repoFromEnv, setStatus, type Repo } from "./github.ts";
+import { editComment, listReports, minimize, postComment, publishClips, setStatus, type Repo } from "./github.ts";
 import { live } from "./live.ts";
 import { log } from "./log.ts";
 import { crashResult, findCrashes } from "./precheck.ts";
 import { buildReport, outdated, postsNew, type ClipLinks, type FixNote, type ReportData, type Written } from "./report.ts";
 import { descriptionCheckNote } from "./requests.ts";
-import { creditsOf, scenarioDoubted, runScenario, type RunEvent, type ScenarioResult } from "./run.ts";
+import { runScenario } from "./run.ts";
+import { creditsOf, scenarioDoubted } from "./runresult.ts";
 import { FAILED_CHECK_ACTION, FAILED_CHECK_REASON, RUN_FILE, type RunFile } from "./runfile.ts";
-import { affectedBy, loadScenariosOr, type Scenario } from "./scenarios.ts";
+import type { Scenario } from "./scenarios.ts";
 import { SetupError } from "./setuperror.ts";
-
-export const env = (name: string, fallback?: string) => {
-  const value = process.env[name]?.trim() || fallback;
-  if (value === undefined) throw new Error(`Missing ${name}`);
-  return value;
-};
-
-export function readEvent<T>(): Partial<T> {
-  return process.env.GITHUB_EVENT_PATH ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")) : {};
-}
-
-export const ctx = () => {
-  const token = process.env.GITHUB_TOKEN;
-  return {
-    repo: token && process.env.GITHUB_REPOSITORY ? repoFromEnv(token) : undefined,
-    runUrl: process.env.GITHUB_RUN_ID
-      ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
-      : undefined,
-    outDir: env("PROOFED_OUT", ".proofed-out"),
-  };
-};
-
-export const changedFiles = (base: string, head = "HEAD") =>
-  execFileSync("git", ["diff", "--name-only", "--no-renames", "-z", `${base}...${head}`], { encoding: "utf8" }).split("\0").filter(Boolean);
-
-// The base branch as the runner sees it (origin/main), so the diff and any scenarios read from it
-// are current even for a PR whose recorded base commit is weeks old. Falls back to that commit.
-export function baseRev(base: { ref: string; sha: string }) {
-  try {
-    execFileSync("git", ["rev-parse", "--verify", "--quiet", `origin/${base.ref}`], { stdio: "ignore" });
-    return `origin/${base.ref}`;
-  } catch {
-    return base.sha;
-  }
-}
-
-export function pickScenarios({ changed, only, rev }: { changed?: string[]; only?: string[]; rev?: string }) {
-  const all = loadScenariosOr(env("PROOFED_SCENARIOS", ".proofed/scenarios"), rev);
-  const unknown = only?.filter((id) => !all.some((s) => s.id === id));
-  if (unknown?.length) throw new Error(`No scenario ${unknown.join(", ")} in ${env("PROOFED_SCENARIOS", ".proofed/scenarios")}.`);
-  const selected = only?.length ? all.filter((s) => only.includes(s.id)) : changed ? affectedBy(all, changed) : all;
-  return { selected, skipped: all.filter((s) => !selected.includes(s)).map((s) => s.name) };
-}
+import type { RunEvent, ScenarioResult } from "./types.ts";
 
 type RunAllOptions = {
   baseUrl?: string;

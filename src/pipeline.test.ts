@@ -4,9 +4,10 @@ import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { changedFiles } from "./changes.ts";
 import { live } from "./live.ts";
-import { changedFiles, pickScenarios, runAll } from "./pipeline.ts";
-import { loadScenariosOr } from "./scenarios.ts";
+import { runAll } from "./pipeline.ts";
+import { loadScenariosOr, pickScenarios } from "./scenarios.ts";
 import { resolveScenarioTarget } from "./target.ts";
 
 function inRepo(check: (git: (...args: string[]) => void) => void) {

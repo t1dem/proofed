@@ -3,9 +3,8 @@
 // so a "/proofed fix" that can't run gets an answer before anything is installed, and whether the
 // setup PR's check starts by writing scenarios.
 import { appendFileSync } from "node:fs";
-import { acknowledge, findReport, getPermission, getPullRequest, hasStatus, listFolder, readFile, reply, setStatus, type PullRequest } from "./github.ts";
+import { acknowledge, ctx, findReport, getPermission, getPullRequest, hasStatus, listFolder, readEvent, readFile, reply, setStatus, type PullRequest } from "./github.ts";
 import { DEFAULT_FIXER, resolveFixer } from "./models.ts";
-import { ctx, readEvent } from "./pipeline.ts";
 import { alreadyReported, fixRequested, readReportData } from "./report.ts";
 import { parseCommand, parseFix, type FixCommand } from "./requests.ts";
 import { APP_LOGIN, FIRST_ANDROID_SCENARIO, FIRST_SCENARIO, onlyFirstScenario, SETUP_BRANCH } from "./setup.ts";

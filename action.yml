@@ -300,7 +300,7 @@ runs:
         PROOFED_SCENARIOS: ${{ inputs.scenarios }}
         PROOFED_ONLY: ${{ inputs.only }}
         PROOFED_FIX: ${{ inputs.fix }}
-        # Only the head is pinned: the base stays origin/<base branch> (pipeline.ts baseRev), current even for an old PR.
+        # Only the head is pinned: the base stays origin/<base branch> (changes.ts baseRev), current even for an old PR.
         PROOFED_SHA: ${{ steps.mode.outputs.head_sha }}
         PROOFED_PROVIDER: ${{ steps.mode.outputs.provider }}
         PROOFED_MODEL: ${{ steps.mode.outputs.model }}

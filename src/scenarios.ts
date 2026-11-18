@@ -3,6 +3,7 @@ import type { Target, TargetFields } from "./target.ts";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { posix, join } from "node:path";
+import { env } from "./env.ts";
 
 export type Scenario = TargetFields & {
   resolvedTarget?: Target;
@@ -113,4 +114,12 @@ export const touches = (s: Scenario, file: string) => gitPath(file) === gitPath(
 // No `paths` means "always run".
 export function affectedBy(scenarios: Scenario[], changed: string[]) {
   return scenarios.filter((s) => s.paths.length === 0 || changed.some((file) => touches(s, file)));
+}
+
+export function pickScenarios({ changed, only, rev }: { changed?: string[]; only?: string[]; rev?: string }) {
+  const all = loadScenariosOr(env("PROOFED_SCENARIOS", ".proofed/scenarios"), rev);
+  const unknown = only?.filter((id) => !all.some((s) => s.id === id));
+  if (unknown?.length) throw new Error(`No scenario ${unknown.join(", ")} in ${env("PROOFED_SCENARIOS", ".proofed/scenarios")}.`);
+  const selected = only?.length ? all.filter((s) => only.includes(s.id)) : changed ? affectedBy(all, changed) : all;
+  return { selected, skipped: all.filter((s) => !selected.includes(s)).map((s) => s.name) };
 }

@@ -10,7 +10,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { connectCdp, type Cdp, type ExceptionDetails } from "./cdp.ts";
 import { launchChrome } from "./chrome.ts";
 import { log } from "./log.ts";
-import type { ScenarioResult } from "./run.ts";
+import type { ScenarioResult } from "./types.ts";
 import { BLANK_PAGE } from "./runfile.ts";
 import type { Scenario } from "./scenarios.ts";
 

@@ -4,9 +4,11 @@
 import { checkSelection } from "./checkselection.ts";
 import { checkedWhere, targetScenarios } from "./fixtarget.ts";
 import { appendFileSync, mkdirSync } from "node:fs";
-import { acknowledge, findReport, getPullRequest, reply, setStatus, type PullRequest } from "./github.ts";
+import { baseRev } from "./changes.ts";
+import { env } from "./env.ts";
+import { acknowledge, ctx, findReport, getPullRequest, readEvent, reply, setStatus, type PullRequest } from "./github.ts";
 import { live } from "./live.ts";
-import { baseRev, ctx, env, publish, readEvent, runAll } from "./pipeline.ts";
+import { publish, runAll } from "./pipeline.ts";
 import { readReportData } from "./report.ts";
 import { descriptionCheckNote, parseCommand, parseFix } from "./requests.ts";
 

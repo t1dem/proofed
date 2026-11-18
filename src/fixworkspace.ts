@@ -3,7 +3,7 @@ import { lstatSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { offLimits } from "./guard.ts";
-import { env } from "./pipeline.ts";
+import { env } from "./env.ts";
 import { findGitBash, killTree } from "./process.ts";
 import { fileWithSecret } from "./secrets.ts";
 

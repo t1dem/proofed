@@ -3,12 +3,12 @@ import { test } from "node:test";
 import { describeFailure } from "./fixprompt.ts";
 import { runFile } from "./pipeline.ts";
 import { refuted } from "./testing/results.ts";
-import { FAILED_CHECK_ACTION, FAILED_CHECK_REASON } from "./runfile.ts";
+import { FAILED_CHECK_ACTION, FAILED_CHECK_REASON, NOTHING_CHECKED } from "./runfile.ts";
 import { blockedReport } from "./blocked.ts";
 import { addRun, alreadyReported, buildReport, fixRequested, outdated, postsNew, readReportData, WORKING, type ReportData } from "./report.ts";
 import { crashResult } from "./precheck.ts";
 import { askedScenario } from "./requests.ts";
-import { NOTHING_CHECKED, type ScenarioResult } from "./run.ts";
+import type { ScenarioResult } from "./types.ts";
 
 const failed: ScenarioResult = {
   scenario: { id: "promo", file: "promo.md", name: "Promo", paths: [], url: "/", objective: "Total is €81.90 -- after the code" },

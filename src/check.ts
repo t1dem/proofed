@@ -15,12 +15,13 @@ import { runAll, runConcurrency } from "./pipeline.ts";
 import { colorOn, LiveView, PlainView, type Plan, type Stream, type View } from "./render.ts";
 import { askedScenario } from "./requests.ts";
 import { buildDoc, errorDoc, quote, sameCommand, scenarioDoc, type Doc, type ErrorDoc, type Item, type RerunContext, type Skipped } from "./result.ts";
-import { creditsOf, type RunEvent, type ScenarioResult } from "./run.ts";
+import { creditsOf } from "./runresult.ts";
 import { affectedBy, readScenarios, type Scenario } from "./scenarios.ts";
 import { answers, buildApp, startApp, type RunningApp } from "./serve.ts";
 import { SetupError } from "./setuperror.ts";
 import { isHttpUrl, resolveTarget, resolveScenarioTarget, type Setting } from "./target.ts";
 import { readKaneVersion } from "./kaneversion.ts";
+import type { RunEvent, ScenarioResult } from "./types.ts";
 import { targetChecks } from "./targetchecks.ts";
 import { findKane } from "./which.ts";
 

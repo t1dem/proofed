@@ -1,4 +1,5 @@
-import { baseRev, changedFiles, pickScenarios } from "./pipeline.ts";
+import { baseRev, changedFiles } from "./changes.ts";
+import { pickScenarios } from "./scenarios.ts";
 import { askedScenario, descriptionRequest } from "./requests.ts";
 import { APP_LOGIN, SETUP_BRANCH } from "./setup.ts";
 import type { PullRequest } from "./github.ts";

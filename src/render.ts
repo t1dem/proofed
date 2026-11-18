@@ -3,7 +3,8 @@
 // agents and logs: no escape codes and no redraw, one line per event, a heartbeat at least every 30
 // seconds, then the same details. Colour is drawn by hand; there are no runtime dependencies.
 import { FAILED_CHECK_REASON } from "./runfile.ts";
-import { creditsOf, type RunEvent } from "./run.ts";
+import { creditsOf } from "./runresult.ts";
+import type { RunEvent } from "./types.ts";
 import { outcomeOf, type Doc, type ErrorDoc, type Outcome, type ScenarioDoc } from "./result.ts";
 import type { Scenario } from "./scenarios.ts";
 

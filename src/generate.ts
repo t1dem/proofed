@@ -6,14 +6,16 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { basename, relative, resolve } from "node:path";
 import { askAgent, configuredFixer } from "./agent.ts";
-import { findReport, setStatus, type PullRequest } from "./github.ts";
+import { env } from "./env.ts";
+import { ctx, findReport, readEvent, setStatus, type PullRequest } from "./github.ts";
 import { providerLabel, providerOf } from "./models.ts";
-import { ctx, env, isBroken, publish, readEvent, runAll } from "./pipeline.ts";
+import { isBroken, publish, runAll } from "./pipeline.ts";
 import { pushHead } from "./push.ts";
 import { readReportData, type Written } from "./report.ts";
-import { creditsOf, unchecked, type ScenarioResult } from "./run.ts";
+import { creditsOf, unchecked } from "./runresult.ts";
 import { loadScenarios, parseScenario, type Scenario } from "./scenarios.ts";
 import { fileWithSecret } from "./secrets.ts";
+import type { ScenarioResult } from "./types.ts";
 
 const MAX_SCENARIOS = 5;
 // Reading an app and writing a few files takes the agent a few minutes; one that runs this long is stuck,

@@ -1,9 +1,9 @@
 // Resolve after checkout: target fields may live in scenario frontmatter rather than action inputs.
 import { appendFileSync } from "node:fs";
 import { checkSelection } from "./checkselection.ts";
-import { ctx, env, readEvent } from "./pipeline.ts";
+import { env } from "./env.ts";
 import { needsWeb, targetScenarios } from "./fixtarget.ts";
-import { getPullRequest, type PullRequest } from "./github.ts";
+import { ctx, getPullRequest, readEvent, type PullRequest } from "./github.ts";
 import { parseCommand } from "./requests.ts";
 
 type Event = { pull_request: PullRequest; issue: { number: number; pull_request?: object }; comment: { body: string } };

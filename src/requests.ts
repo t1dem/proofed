@@ -1,5 +1,6 @@
 import { effortsFor, isEffort, parseModel, type Effort } from "./models.ts";
-import { scenarioDoubted, type ScenarioResult } from "./run.ts";
+import { scenarioDoubted } from "./runresult.ts";
+import type { ScenarioResult } from "./types.ts";
 import type { Scenario } from "./scenarios.ts";
 import { checkedAt } from "./fixtarget.ts";
 import { resolveScenarioTarget, type Target } from "./target.ts";

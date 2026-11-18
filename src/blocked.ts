@@ -4,8 +4,9 @@
 // run history on, and has no failures, since nothing ran that the fixer could fix.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { findReport, MARKER, setStatus } from "./github.ts";
-import { ctx, env, putReport, readEvent } from "./pipeline.ts";
+import { env } from "./env.ts";
+import { ctx, findReport, MARKER, readEvent, setStatus } from "./github.ts";
+import { putReport } from "./pipeline.ts";
 import { addRun, dataComment, readReportData, type ReportData } from "./report.ts";
 import { maskSecrets } from "./secrets.ts";
 

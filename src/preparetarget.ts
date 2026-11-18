@@ -7,7 +7,7 @@ import { adopt } from "./children.ts";
 import { launchChrome } from "./chrome.ts";
 import { command, kaneTarget, localDevice, renderer, targetChecks } from "./targetchecks.ts";
 import { startRecorder } from "./recorder.ts";
-import type { Clip } from "./run.ts";
+import type { Clip } from "./types.ts";
 import type { Target } from "./target.ts";
 
 function owned(bin: string, args: string[], cwd?: string, env = process.env, shell = false) {
