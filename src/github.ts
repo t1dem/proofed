@@ -7,11 +7,11 @@ export const repoFromEnv = (token: string): Repo => {
   return { owner, name, token };
 };
 
-async function api<T>(repo: Repo, method: string, path: string, body?: unknown): Promise<T> {
-  const send = () => fetch(`https://api.github.com/repos/${repo.owner}/${repo.name}${path}`, {
+async function request<T>(token: string, method: string, path: string, body?: unknown): Promise<T> {
+  const send = () => fetch(`https://api.github.com${path}`, {
     method,
     headers: {
-      authorization: `Bearer ${repo.token}`,
+      authorization: `Bearer ${token}`,
       accept: "application/vnd.github+json",
       "x-github-api-version": "2022-11-28",
       ...(body !== undefined && { "content-type": "application/json" }),
@@ -20,18 +20,20 @@ async function api<T>(repo: Repo, method: string, path: string, body?: unknown):
   });
   // A dropped connection ("fetch failed") ended a whole run after Kane had finished. Requests that
   // are safe to repeat get two more tries; a POST might already have landed, so it doesn't.
-  let res: Response | undefined;
-  for (let attempt = 1; !res; attempt++) {
+  for (let attempt = 1; ; attempt++) {
     try {
-      res = await send();
+      const res = await send();
+      if (!res.ok) throw new GitHubError(res.status, `${method} ${path}: ${res.status} ${await res.text()}`);
+      return (res.status === 204 ? undefined : await res.json()) as T;
     } catch (e) {
       if (method === "POST" || attempt === 3 || !(e instanceof TypeError)) throw e;
       await new Promise((r) => setTimeout(r, 2000 * attempt));
     }
   }
-  if (!res.ok) throw new GitHubError(res.status, `${method} ${path}: ${res.status} ${await res.text()}`);
-  return (res.status === 204 ? undefined : await res.json()) as T;
 }
+
+const api = <T>(repo: Repo, method: string, path: string, body?: unknown) =>
+  request<T>(repo.token, method, `/repos/${repo.owner}/${repo.name}${path}`, body);
 
 export type PullRequest = {
   number: number;
@@ -82,13 +84,27 @@ export const MARKER = "<!-- proofed -->";
 // nor the dashboard's webhook matches it, so an edit of an old report is never read as the PR's report.
 export const OLD_MARKER = "<!-- proofed:old -->";
 
-export type Comment = { id: number; node_id: string; html_url: string; body?: string; user?: { type: string } };
+export type Comment = { id: number; node_id: string; html_url: string; body?: string; user?: { type: string; id?: number } };
 
-// Proofed's reports on the PR, oldest first: the newest is the report. Only a bot's comment counts,
-// since anyone can paste the marker. `older` are reports that weren't retired, as when an edit failed.
-export function reportsIn(comments: Comment[]) {
-  const reports = comments.filter((c) => c.user?.type === "Bot" && c.body?.includes(MARKER));
+// The marker is public; report authors must be bots or the user whose token posts the report.
+export function reportsIn(comments: Comment[], userId?: number) {
+  const reports = comments.filter((c) => c.body?.includes(MARKER) && (c.user?.type === "Bot" || (userId !== undefined && c.user?.id === userId)));
   return { current: reports.at(-1), older: reports.slice(0, -1) };
+}
+
+const identities = new WeakMap<Repo, Promise<number | undefined>>();
+
+function authenticatedUser(repo: Repo) {
+  const known = identities.get(repo);
+  if (known) return known;
+  const identity = request<{ id: number }>(repo.token, "GET", "/user").then(({ id }) => id).catch((e: unknown) => {
+    // App and installation tokens have no user endpoint.
+    if (e instanceof GitHubError && (e.status === 401 || e.status === 403 || e.status === 404)) return undefined;
+    identities.delete(repo);
+    throw e;
+  });
+  identities.set(repo, identity);
+  return identity;
 }
 
 // Every page: a report is posted afresh further down a long thread, past the first hundred comments.
@@ -97,7 +113,12 @@ export async function listReports(repo: Repo, pr: number) {
   for (let page = 1; ; page++) {
     const batch = await api<Comment[]>(repo, "GET", `/issues/${pr}/comments?per_page=100&page=${page}`);
     comments.push(...batch);
-    if (batch.length < 100) return reportsIn(comments);
+    if (batch.length < 100) {
+      const userId = comments.some((c) => c.user?.type !== "Bot" && c.user?.id !== undefined && c.body?.includes(MARKER))
+        ? await authenticatedUser(repo)
+        : undefined;
+      return reportsIn(comments, userId);
+    }
   }
 }
 
