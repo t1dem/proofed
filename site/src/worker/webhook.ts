@@ -1,4 +1,4 @@
-import { pushSecrets } from "./api";
+import { syncSecrets } from "./api";
 import type { UserRow } from "./auth";
 import { gh, installationToken, verifySignature } from "./github";
 import type { Env } from "./index";
@@ -22,14 +22,14 @@ type Payload = {
 // (src/github.ts), so the edit that retires it doesn't take the row back to its old state.
 const MARKER = "<!-- proofed -->";
 
-// Reads the state out of the comment Proofed itself posts on the PR (see src/report.ts in the action).
+// Reads the state out of the comment Proofed itself posts on the PR (see src/report/report.ts in the action).
 function readReport(body: string) {
   const headline =
     body
       .split("\n")
       .map((l) => l.trim())
       .find((l) => l && !l.startsWith("<!--") && !l.startsWith("#")) ?? "";
-  const state = body.includes("⏳ **Claude is working")
+  const state = /⏳ \*\*(?:Claude|Codex) is working/.test(body)
     ? "fixing"
     : /scenarios broke on this PR/.test(headline)
       ? "failing"
@@ -63,9 +63,14 @@ export async function handleWebhook(request: Request, env: Env, ctx: ExecutionCo
           ? await env.DB.prepare("SELECT * FROM users WHERE id = ?1").bind(payload.sender.id).first<UserRow>()
           : null;
         for (const repo of added) {
+          // The setup PR can start its check as soon as it opens.
+          if (user) {
+            await syncSecrets(env, user, repo.full_name, installationId)
+              .then(({ warning }) => { if (warning) console.log("secrets", repo.full_name, warning); })
+              .catch((e: unknown) => console.log("secrets", String(e)));
+          }
           const result = await openSetupPr(token, repo, env.GITHUB_APP_SLUG).catch((e: unknown) => ({ error: String(e) }));
           console.log("setup", repo.full_name, JSON.stringify(result));
-          if (user) await pushSecrets(env, user, repo.full_name, installationId).catch((e: unknown) => console.log("secrets", String(e)));
         }
       })(),
     );

@@ -1,0 +1,85 @@
+// A minimal Chrome DevTools Protocol client over the browser websocket.
+// Only the events Proofed listens to are typed.
+
+export type TargetInfo = { type: string; targetId: string };
+export type ScreencastMetadata = { timestamp: number; deviceWidth: number; deviceHeight: number; scrollOffsetX: number; scrollOffsetY: number };
+export type ExceptionDetails = { text: string; exception?: { description?: string; value?: unknown } };
+
+type Events = {
+  "Target.targetCreated": { targetInfo: TargetInfo };
+  "Target.targetDestroyed": { targetId: string };
+  "Target.attachedToTarget": { sessionId: string; targetInfo: TargetInfo };
+  "Target.detachedFromTarget": { sessionId: string };
+  "Page.screencastFrame": { data: string; sessionId: number; metadata: ScreencastMetadata };
+  "Runtime.bindingCalled": { name: string; payload: string };
+  "Runtime.exceptionThrown": { exceptionDetails: ExceptionDetails };
+  "Page.lifecycleEvent": { loaderId: string; name: string };
+};
+
+type Message = {
+  id?: number;
+  method?: string;
+  params?: unknown;
+  sessionId?: string;
+  result?: unknown;
+  error?: { message: string };
+};
+
+export type Cdp = Awaited<ReturnType<typeof connectCdp>>;
+
+export const cdpUrl = (endpoint: string, path: "version" | "list") => new URL(`/json/${path}`, endpoint);
+
+export async function connectCdp(endpoint: string, signal?: AbortSignal) {
+  const { webSocketDebuggerUrl } = (await (await fetch(cdpUrl(endpoint, "version"), { signal })).json()) as {
+    webSocketDebuggerUrl: string;
+  };
+  signal?.throwIfAborted();
+  const ws = new WebSocket(webSocketDebuggerUrl);
+  const opened = Promise.withResolvers<void>();
+  ws.onopen = () => opened.resolve();
+  ws.onerror = () => opened.reject(new Error("Could not connect to Chrome over CDP"));
+  const abort = () => {
+    opened.reject(signal?.reason);
+    ws.close();
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+  try { await opened.promise; }
+  finally { signal?.removeEventListener("abort", abort); }
+
+  let lastId = 0;
+  const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  const listeners = new Map<string, Set<(params: never, sessionId?: string) => void>>();
+
+  ws.onmessage = (event) => {
+    const m: Message = JSON.parse(String(event.data));
+    if (m.id !== undefined) {
+      const p = pending.get(m.id);
+      pending.delete(m.id);
+      if (m.error) p?.reject(new Error(m.error.message));
+      else p?.resolve(m.result);
+    } else if (m.method) {
+      for (const fn of listeners.get(m.method) ?? []) fn(m.params as never, m.sessionId);
+    }
+  };
+  ws.onclose = () => {
+    for (const p of pending.values()) p.reject(new Error("CDP connection closed"));
+    pending.clear();
+  };
+
+  return {
+    send<T = unknown>(method: string, params: object = {}, sessionId?: string): Promise<T> {
+      if (ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error("CDP connection closed"));
+      const id = ++lastId;
+      ws.send(JSON.stringify({ id, method, params, ...(sessionId && { sessionId }) }));
+      return new Promise<T>((resolve, reject) =>
+        pending.set(id, { resolve: (v) => resolve(v as T), reject }),
+      );
+    },
+    on<K extends keyof Events>(method: K, fn: (params: Events[K], sessionId?: string) => void) {
+      const set = listeners.get(method) ?? new Set();
+      set.add(fn as (params: never, sessionId?: string) => void);
+      listeners.set(method, set);
+    },
+    close: () => ws.close(),
+  };
+}

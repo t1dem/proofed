@@ -1,7 +1,8 @@
 // A run as it goes. The action posts its state and a frame of each scenario's Chrome here while it
-// works (src/live.ts at the repo root); the dashboard reads them back while the pull request is busy.
-import { readCursor, readLive, type Live, type LiveCursor } from "../../../src/livefile";
+// works (src/report/live.ts at the repo root); the dashboard reads them back while the pull request is busy.
+import { readCursor, readLive, type Live, type LiveCursor } from "../../../src/report/livefile";
 import { jobRepo } from "./actions";
+import { readUpTo } from "./body";
 import type { Env } from "./index";
 import { LIVE_LASTS, markAsked } from "./runs";
 
@@ -22,9 +23,8 @@ export async function handleLivePost(request: Request, env: Env) {
     const run = url.searchParams.get("run") ?? "";
     const scenario = url.searchParams.get("scenario") ?? "";
     if (!Number.isSafeInteger(pr) || pr <= 0 || !run || !scenario || scenario.length > 100) return refuse(400, "bad frame");
-    const jpg = await request.arrayBuffer();
-    const bytes = new Uint8Array(jpg, 0, Math.min(jpg.byteLength, 2));
-    if (jpg.byteLength > MAX_FRAME || bytes[0] !== 0xff || bytes[1] !== 0xd8) return refuse(400, "not a JPEG of a few hundred KB");
+    const jpg = await readUpTo(request, MAX_FRAME);
+    if (!jpg || jpg[0] !== 0xff || jpg[1] !== 0xd8) return refuse(400, "not a JPEG of a few hundred KB");
     // A frame belongs to the run the state says is going; one from an older run is dropped.
     const current = await env.DB.prepare("SELECT run FROM live WHERE repo = ?1 AND pr = ?2").bind(repo, pr).first<{ run: string }>();
     if (current?.run !== run) return refuse(409, "not the current run");
@@ -34,7 +34,7 @@ export async function handleLivePost(request: Request, env: Env) {
       `INSERT INTO live_frames (repo, pr, scenario, jpg, at, x, y) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
        ON CONFLICT(repo, pr, scenario) DO UPDATE SET jpg = ?4, at = ?5, x = ?6, y = ?7`,
     )
-      .bind(repo, pr, scenario, jpg, Date.now(), cursor?.x ?? null, cursor?.y ?? null)
+      .bind(repo, pr, scenario, jpg.buffer, Date.now(), cursor?.x ?? null, cursor?.y ?? null)
       .run();
     return new Response(null, { status: 204 });
   }

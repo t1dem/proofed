@@ -1,7 +1,7 @@
 // Results as runScenario returns them, for the tests of what the CLI makes of them.
-import type { RunEnd, Step } from "../kane.ts";
-import type { Item } from "../result.ts";
-import type { Outcome, ScenarioResult } from "../run.ts";
+import type { RunEnd, Step } from "../kane/kane.ts";
+import type { Item } from "../report/result.ts";
+import type { Outcome, ScenarioResult } from "../types.ts";
 import type { Scenario } from "../scenarios.ts";
 
 export const scenario = (id: string, name = id): Scenario => ({ id, name, file: `.proofed/scenarios/${id}.md`, paths: [], url: "/", objective: `Check ${name}.` });

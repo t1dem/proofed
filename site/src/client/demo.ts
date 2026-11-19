@@ -9,8 +9,8 @@
 // it isn't stated. Everything in sample/… is made up, to show the states no real pull request is
 // in right now, and has no GitHub links. The sample clips (public/clips) are the demo store's own
 // recordings of PR #2, standing in for a sample run.
-import { summarize, type Live, type LiveFix, type LiveStatus } from "../../../src/livefile";
-import { BLANK_PAGE } from "../../../src/runfile";
+import { summarize, type Live, type LiveFix, type LiveStatus } from "../../../src/report/livefile";
+import { BLANK_PAGE } from "../../../src/report/runfile";
 import type { FixerView, MeView, RepoView } from "../worker/api";
 import type { LiveView } from "../worker/live";
 import type { PullDetail, PullView, Run } from "../worker/runs";
@@ -22,7 +22,7 @@ const store = "t1dem/proofed-demo-store";
 const proofed = "t1dem/proofed";
 const sample = "sample/sample-coffee-store";
 
-const me: MeView = { login: "t1dem", avatar: null, testmu: "t1dem", claude: true, installUrl: "#" };
+const me: MeView = { login: "t1dem", avatar: null, testmu: "t1dem", claude: true, codex: true, installUrl: "#" };
 
 const at = (iso: string) => Date.parse(iso);
 const actions = (repo: string, id: number) => `https://github.com/${repo}/actions/runs/${id}`;
@@ -627,10 +627,10 @@ const pulls: PullView[] = [
   },
 ];
 
-const secrets = ["LT_USERNAME", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN"];
+const secrets = ["LT_USERNAME", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "CODEX_API_KEY"];
 const repos: RepoView[] = [
   { name: store, url: `https://github.com/${store}`, private: false, installationId: 1, access: "admin", setup: "active", paused: false, secrets: [...secrets], fixer: { model: "claude-opus-5-5", effort: "high", auto: false } },
-  { name: proofed, url: `https://github.com/${proofed}`, private: false, installationId: 1, access: "admin", setup: "active", paused: false, secrets: [...secrets], fixer: { model: "claude-haiku-5-5", effort: "xhigh", auto: false } },
+  { name: proofed, url: `https://github.com/${proofed}`, private: false, installationId: 1, access: "admin", setup: "active", paused: false, secrets: [...secrets], fixer: { provider: "codex", model: "gpt-6.1-sol", effort: "high", auto: false } },
   { name: sample, url: "#", private: true, installationId: 1, access: "admin", setup: "active", paused: false, secrets: [...secrets], fixer: { model: "claude-opus-5-5", effort: "high", auto: false } },
   { name: "sample/landing-page", url: "#", private: true, installationId: 1, access: "admin", setup: "pr-open", setupPr: "#", paused: false, secrets: ["LT_USERNAME"], fixer: { model: "claude-haiku-5-5", effort: "xhigh", auto: false } },
   { name: "sample/docs-site", url: "#", private: true, installationId: 1, access: "admin", setup: "none", paused: false, secrets: [], fixer: null },
@@ -644,7 +644,7 @@ let fixed = new URLSearchParams(location.search).get("demo") === "fixed";
 const keyOf = (pull: { repo: string; pr: number }) => `${pull.repo}/${pull.pr}`;
 const historyOf = (pull: PullView) => (keyOf(pull) === FIXABLE ? (fixed ? sampleShipping : sampleShipping.slice(1)) : (runsOf[`${pull.repo}#${pull.pr}`] ?? []));
 
-// A run as the action reports it while it goes (src/live.ts), played out on the sample data after
+// A run as the action reports it while it goes (src/report/live.ts), played out on the sample data after
 // "Run again", "Fix with Claude" or a question to Kane, so the live view shows without a real run.
 // The pull request is busy for as long as its run plays, then shows how it ended.
 const STEP_MS = 3000;
@@ -781,6 +781,10 @@ const looping = new Set(asked.keys());
 // this page's memory only.
 export async function demo(path: string, init?: RequestInit): Promise<unknown> {
   await new Promise((done) => setTimeout(done, 150));
+  if (path === "/api/try" || path === `/api/pulls/${store}/14`) {
+    const sample = await import("./demo-try");
+    return path === "/api/try" ? sample.view : sample.detail;
+  }
   const ask = /^\/api\/pulls\/(.+\/\d+)\/(fix|rerun|check)$/.exec(path);
   if (ask && init?.method === "POST") {
     const { what } = init.body ? (JSON.parse(String(init.body)) as { what?: string }) : {};
@@ -795,6 +799,7 @@ export async function demo(path: string, init?: RequestInit): Promise<unknown> {
     if (action === "fixer") {
       const fixer = JSON.parse(String(init.body)) as FixerView;
       if (repo) repo.fixer = fixer;
+      for (const pull of pulls) if (pull.repo === repo?.name) pull.fixer = fixer;
       return { fixer };
     }
     if (action === "setup") return { skipped: "this is the demo, so no pull request was opened" };
@@ -818,23 +823,24 @@ export async function demo(path: string, init?: RequestInit): Promise<unknown> {
     }
   }
 
-  const list = pulls.map((p) =>
-    fixed && keyOf(p) === FIXABLE
+  const list = pulls.map((p) => {
+    const fixer = repos.find((r) => r.name === p.repo)?.fixer ?? { model: "claude-opus-5-5", effort: "high" };
+    return fixed && keyOf(p) === FIXABLE
       ? {
           ...p,
           state: "passing" as const,
           headline: "All 3 affected scenarios pass in a real browser.",
           updatedAt: sampleShipping[0]!.at,
           scenarios: p.scenarios.map((s) => ({ name: s.name, outcome: "passed" as const })),
-          fix: { status: "fixed" as const, model: "claude-opus-5-5", effort: "high", commit: SAMPLE_FIX, attempts: 2 },
+          fix: { status: "fixed" as const, model: fixer.model, effort: fixer.effort, commit: SAMPLE_FIX, attempts: 2 },
         }
-      : p,
-  );
+      : p;
+  });
   // Pausing a repo in Settings shows on its pull requests, as it does in production.
   const withPause = list.map((p) => {
     const going = runs.get(keyOf(p));
     const state = going ? (going.live.kind === "fix" ? ("fixing" as const) : ("running" as const)) : p.state;
-    return { ...p, state, ...(going && { live: summarize(going.live), checking: { sha: going.live.sha, at: going.live.startedAt } }), paused: repos.some((r) => r.name === p.repo && r.paused) };
+    return { ...p, state, fixer: repos.find((r) => r.name === p.repo)?.fixer ?? undefined, ...(going && { live: summarize(going.live), checking: { sha: going.live.sha, at: going.live.startedAt } }), paused: repos.some((r) => r.name === p.repo && r.paused) };
   });
   if (path === "/api/pulls") return withPause;
   const live = /^\/api\/pulls\/(.+\/\d+)\/live$/.exec(path);

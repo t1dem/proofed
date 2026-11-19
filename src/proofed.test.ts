@@ -1,17 +1,19 @@
+import { fileURLToPath } from "node:url";
 // `proofed` end to end, with the fake Kane (src/testing/fake-kane.ts) in place of kane-cli, a tiny
 // app served by node:http, and a temp git repo for the app's code. Real Chrome, no credits.
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
+import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { findChrome } from "./chrome.ts";
-import type { Doc, ErrorDoc } from "./result.ts";
+import { findChrome } from "./targets/chrome.ts";
+import type { Doc, ErrorDoc } from "./report/result.ts";
 
-const CLI = new URL("./proofed.ts", import.meta.url).pathname;
-const FAKE_KANE = new URL("./testing/fake-kane.ts", import.meta.url).pathname;
+const CLI = fileURLToPath(new URL("./proofed.ts", import.meta.url));
+const FAKE_KANE = fileURLToPath(new URL("./testing/fake-kane.ts", import.meta.url));
 const noChrome = findChrome() ? false : "Chrome not found; set CHROME_PATH to run the end-to-end tests";
 
 const APP = `const http = require("node:http");
@@ -75,7 +77,7 @@ const portFree = (port: number) =>
 function env(r: Repo, extra: NodeJS.ProcessEnv = {}) {
   const { NO_COLOR, FORCE_COLOR, PROOFED_URL, PROOFED_SERVE, PROOFED_BUILD, PROOFED_OUT, PROOFED_SCENARIOS, ...rest } = process.env;
   // TMPDIR: each Chrome's profile goes there, so the test can tell its Chromes from any other.
-  return { ...rest, KANE_CLI: FAKE_KANE, FAKE_KANE_LOG: r.log, TMPDIR: join(r.dir, "tmp"), ...extra };
+  return { ...rest, KANE_CLI: FAKE_KANE, FAKE_KANE_LOG: r.log, TMPDIR: join(r.dir, "tmp"), TEMP: join(r.dir, "tmp"), TMP: join(r.dir, "tmp"), ...extra };
 }
 
 type Ran = { code: number | null; stdout: string; stderr: string };
@@ -93,6 +95,7 @@ function cli(r: Repo, args: string[], extra: NodeJS.ProcessEnv = {}, onSpawn?: (
 // stdout must be exactly one JSON document.
 const json = <T = Doc>(ran: Ran) => {
   assert.match(ran.stdout, /^\{[\s\S]*\}\n$/, `stdout isn't only JSON:\n${ran.stdout}\n--- stderr:\n${ran.stderr}`);
+  assert.equal(ran.stdout.trimEnd().split("\n").length, 1, "JSON stdout is compact");
   return JSON.parse(ran.stdout) as T;
 };
 
@@ -117,7 +120,9 @@ const alive = async (pid: number) => {
   return true;
 };
 
-describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, timeout: 240_000 }, () => {
+// The limit covers the whole suite: 23 Chrome-backed checks, three at a time. A GitHub macOS runner needs
+// 30-70 s for one, so 240 s cut the suite off there while every test still passed.
+describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, timeout: 600_000 }, () => {
   test("--json: pass, fail, not checked twice and error, as one JSON document", async () => {
     const r = repo({ pass: { mode: "pass" }, fail: { mode: "fail", credits: 27 }, vague: { mode: "noassert" }, doubted: { mode: "automation" }, broken: { mode: "error" } });
     const port = await freePort();
@@ -129,7 +134,10 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.deepEqual(doc.counts, { passed: 1, failed: 1, not_checked: 2, error: 1, skipped: 0 });
       const by = Object.fromEntries(doc.scenarios.map((s) => [s.id, s]));
       assert.equal(by.pass!.outcome, "passed");
-      assert.ok(by.pass!.clip?.mp4 && existsSync(by.pass!.clip.mp4), "a clip of the real page");
+      if (!by.pass!.clip?.mp4 || !existsSync(by.pass!.clip.mp4)) {
+        const runLog = join(r.out, "run.log");
+        assert.fail(`Missing clip for pass\n${existsSync(runLog) ? readFileSync(runLog, "utf8") : "run.log is missing"}\n${ran.stderr}`);
+      }
       assert.equal(by.fail!.outcome, "failed");
       assert.equal(by.fail!.diagnosis, "The free shipping threshold is €40, not €50.");
       assert.equal(by.fail!.failedStep, "assert: shipping is €4.90");
@@ -141,6 +149,7 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       // The progress went to stderr, the same document to result.json, and the clips stay out of git.
       assert.match(ran.stderr, /started pass: Scenario pass/);
       assert.deepEqual(JSON.parse(readFileSync(join(r.out, "result.json"), "utf8")), doc);
+      assert.match(readFileSync(join(r.out, "result.json"), "utf8"), /\n  "ok":/);
       assert.equal(readFileSync(join(r.out, ".gitignore"), "utf8"), "*\n");
       // An error is tried twice, like in CI.
       assert.equal(runs(r).length, 6);
@@ -150,7 +159,25 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     }
   });
 
-  test("exit 0 for a pass, without ffmpeg, in plain output", async () => {
+  test("--no-retry returns the first doubted failure and infrastructure error", async () => {
+    const r = repo({ shipping: { mode: "refuted", credits: 27.42 }, broken: { mode: "error" } });
+    const port = await freePort();
+    try {
+      const ran = await cli(r, ["check", "--json", "--no-retry", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`]);
+      const doc = json(ran);
+      assert.equal(ran.code, 1);
+      assert.equal(runs(r).length, 2, "one Kane attempt per scenario");
+      assert.equal(doc.scenarios.find((s) => s.id === "shipping")!.failedCheck, "scenario_doubted");
+      assert.equal(doc.scenarios.find((s) => s.id === "broken")!.outcome, "error");
+      assert.equal(doc.credits, 27.42);
+      assert.match(doc.rerun!, /--no-retry/);
+      assert.doesNotMatch(ran.stderr, /retrying/);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  test("exit 0 for a pass, without ffmpeg, in plain output", { skip: process.platform === "win32" ? "The restricted PATH fixture uses POSIX executable symlinks; Windows ffmpeg fallback is covered by doctor and media tests" : false }, async () => {
     const r = repo({ pass: { mode: "pass" } });
     const port = await freePort();
     // A PATH with node and git but no ffmpeg: no clip, and the verdict still holds.
@@ -158,6 +185,15 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     mkdirSync(bin);
     symlinkSync(process.execPath, join(bin, "node"));
     symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(bin, "git"));
+    // Linux's google-chrome is a shell script that needs coreutils on PATH.
+    if (process.platform === "linux") {
+      const linked = new Set(["node", "git"]);
+      for (const dir of ["/usr/bin", "/bin"]) for (const name of readdirSync(dir)) {
+        if (name.startsWith("ff") || linked.has(name)) continue;
+        linked.add(name);
+        symlinkSync(join(dir, name), join(bin, name));
+      }
+    }
     try {
       const ran = await cli(r, ["check", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`], { PATH: bin });
       assert.equal(ran.code, 0, ran.stdout + ran.stderr);
@@ -189,6 +225,10 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       const e = json<ErrorDoc>(unknown);
       assert.equal(e.error.code, "unknown_scenario");
       assert.match(e.error.message, /Scenarios: broken, vague/);
+
+      const named = await cli(r, ["check", "Vague", "--dry-run", "--json", "--url", url]);
+      assert.equal(named.code, 3);
+      assert.deepEqual([json<ErrorDoc>(named).error.code, json<ErrorDoc>(named).error.fix.split(".")[0]], ["text_is_scenario", "Run that scenario: proofed check --only vague"]);
 
       const down = await cli(r, ["check", "--json", "--url", "http://127.0.0.1:9"]);
       assert.equal(down.code, 3);
@@ -226,7 +266,7 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.ok(Date.now() - started < 10_000, "it took seconds, not a build and a run");
       assert.equal(existsSync(join(r.dir, "tmp/built")), false, "nothing was built");
       assert.ok(await portFree(port), "the app was never started");
-      assert.deepEqual(calls(r).map((c) => c.args?.[0]), ["balance"]);
+      assert.deepEqual(calls(r).map((c) => c.args?.[0]), ["--version", "balance"]);
 
       const plain = await cli(r, args.filter((a) => a !== "--json"), { FAKE_KANE_SIGNED_IN: "0", LT_USERNAME: "", LT_ACCESS_KEY: "" });
       assert.equal(plain.code, 3);
@@ -324,9 +364,10 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
   test("a pass is cached until a file in its paths changes", async () => {
     const r = repo({ pricing: { mode: "pass", paths: ["src/app.js"] } });
     const port = await freePort();
-    const check = () => cli(r, ["check", "--json", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`]);
+    const check = (extra: NodeJS.ProcessEnv = {}) => cli(r, ["check", "--json", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`], extra);
     try {
-      const first = json(await check());
+      const warning = { FAKE_KANE_VERSION_WARNING: "kane-cli: bundled Node runtime not found - running on system node 24.11.1" };
+      const first = json(await check(warning));
       assert.equal(first.credits, 7);
       assert.equal(runs(r).length, 1);
 
@@ -335,11 +376,21 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.deepEqual([second.exitCode, second.credits, second.scenarios[0]!.cached], [0, 0, true]);
       assert.ok(second.scenarios[0]!.cachedAt);
       assert.equal(runs(r).length, 1, "the cached pass didn't call Kane");
+      const listed = json<{ estimatedCredits: number; scenarios: { selected: boolean; cached: boolean; estimatedCredits: number }[] }>(
+        await cli(r, ["list", "--json", "--url", `http://127.0.0.1:${port}`]),
+      );
+      assert.equal(listed.estimatedCredits, 0);
+      assert.deepEqual(listed.scenarios.map((s) => [s.selected, s.cached, s.estimatedCredits]), [[true, true, 0]]);
+      const warnedList = json<{ scenarios: { cached: boolean }[] }>(await cli(r, ["list", "--json", "--url", `http://127.0.0.1:${port}`], warning));
+      assert.equal(warnedList.scenarios[0]!.cached, true);
 
       writeFileSync(join(r.dir, "src/app.js"), "export const price = 3;\n");
       const third = json(await check());
       assert.deepEqual([third.credits, third.scenarios[0]!.cached], [7, false]);
       assert.equal(runs(r).length, 2);
+      writeFileSync(join(r.dir, "src/app.js"), "export const price = 4;\n");
+      const estimate = json<{ estimatedCredits: number }>(await cli(r, ["list", "--json", "--url", `http://127.0.0.1:${port}`]));
+      assert.equal(estimate.estimatedCredits, 7, "a changed scenario uses its last reported cost");
 
       const forced = json(await cli(r, ["check", "--json", "--no-cache", "--dry-run", "--url", `http://127.0.0.1:${port}`]));
       assert.equal(forced.scenarios[0]!.outcome, "would_run");
@@ -348,7 +399,63 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     }
   });
 
-  test("--dry-run and a change that touches nothing never call Kane", async () => {
+  test("changing the web build or explicitly reusing it bypasses a prior pass", async () => {
+    const r = repo({ pass: { mode: "pass" } });
+    const port = await freePort();
+    const args = ["--json", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`];
+    try {
+      writeFileSync(join(r.dir, "build.cjs"), "");
+      const first = json(await cli(r, ["check", ...args], { PROOFED_BUILD: "node build.cjs" }));
+      assert.equal(first.scenarios[0]?.outcome, "passed");
+      const plan = (build: string, flags: string[] = []) => cli(r, ["check", ...args, "--dry-run", ...flags], { PROOFED_BUILD: build }).then((r) => json(r));
+      assert.equal((await plan("node build.cjs")).scenarios[0]?.cached, true);
+      assert.equal((await plan("node build.cjs alternate")).scenarios[0]?.cached, false);
+      assert.equal((await plan("node build.cjs", ["--reuse"])).scenarios[0]?.cached, false);
+      const listed = json<{ scenarios: { cached: boolean }[] }>(
+        await cli(r, ["list", "--json", "--url", `http://127.0.0.1:${port}`], { PROOFED_SERVE: `node server.cjs ${port}`, PROOFED_BUILD: "node build.cjs alternate" }),
+      );
+      assert.equal(listed.scenarios[0]?.cached, false);
+      assert.equal(runs(r).length, 1);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  test("a failed forced check invalidates a matching cached pass", async () => {
+    const r = repo({ pass: { mode: "pass" } });
+    const port = await freePort();
+    const dir = join(r.dir, "tmp");
+    const mode = join(dir, "current-outcome");
+    const file = join(r.dir, ".proofed/scenarios/pass.md");
+    const args = ["check", "--json", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`];
+    const check = (...more: string[]) => cli(r, [...args, ...more], { FAKE_KANE_MODES: dir }).then((result) => json(result));
+    try {
+      writeFileSync(file, readFileSync(file, "utf8").replace("[fake:pass]", "[fake-from:current-outcome]"));
+      writeFileSync(mode, "pass");
+      assert.equal((await check()).scenarios[0]?.outcome, "passed");
+      assert.equal((await check("--dry-run")).scenarios[0]?.cached, true);
+      writeFileSync(mode, "fail");
+      assert.equal((await check("--no-cache")).scenarios[0]?.outcome, "failed");
+      assert.equal((await check("--dry-run")).scenarios[0]?.cached, false);
+      assert.equal(runs(r).length, 2);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  test("invalid concurrency in the environment fails before Kane is called", async () => {
+    const r = repo({ pass: { mode: "pass" } });
+    try {
+      const ran = await cli(r, ["check", "--json", "--url", "http://127.0.0.1:9"], { PROOFED_CONCURRENCY: "0.5" });
+      assert.equal(ran.code, 3);
+      assert.equal(json<ErrorDoc>(ran).error.code, "concurrency_invalid");
+      assert.deepEqual(calls(r), []);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  test("--dry-run and a change that touches nothing never run Kane scenarios", async () => {
     const r = repo({ pass: { mode: "pass" }, other: { mode: "pass", paths: ["lib/**"] } });
     try {
       const dry = await cli(r, ["check", "--json", "--dry-run", "--url", "http://127.0.0.1:9"]);
@@ -385,16 +492,59 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     }
   });
 
-  test("a failed assert Kane blames on the scenario is run again, and a pass on the second run is the result", async () => {
+  test("Kane credits are labelled as an estimate", async () => {
+    const r = repo({ cost: { mode: "pass", credits: 7 } });
+    const port = await freePort();
+    try {
+      const ran = await cli(r, ["check", "--json", "--no-retry", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`]);
+      const doc = json(ran);
+      assert.equal(doc.scenarios[0]!.credits, 7);
+      assert.equal(doc.scenarios[0]!.creditsSource, "kane_estimate");
+    } finally { r.cleanup(); }
+  });
+
+  test("a quoted text pass contradicted by the page is not checked", async () => {
+    const r = repo({ text: { mode: "text" } });
+    const port = await freePort();
+    try {
+      writeFileSync(join(r.dir, ".proofed/scenarios/text.md"), '---\nname: Text presence\npaths: [src/**]\nurl: /\n---\nCheck that the page contains "Missing words".\n');
+      const ran = await cli(r, ["check", "--json", "--no-retry", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`], { FAKE_KANE_MODE: "text" });
+      const doc = json(ran);
+      assert.equal(ran.code, 2, ran.stderr);
+      assert.equal(doc.scenarios[0]!.notChecked, "text_contradicted");
+      assert.match(doc.scenarios[0]!.reason!, /Missing words/);
+    } finally { r.cleanup(); }
+  });
+
+  test("an unquoted check of on-screen names is not checked when the page lacks them", async () => {
+    const r = repo({});
+    const port = await freePort();
+    try {
+      const scenario = (id: string, check: string) => writeFileSync(join(r.dir, `.proofed/scenarios/${id}.md`), `---\nname: ${id}\npaths: [src/**]\nurl: /\n---\n${check}\n`);
+      scenario("present", "Check that Shop shows Add to bag.");
+      scenario("missing", "Check that Shop shows Ethiopia Guji.");
+      const ran = await cli(r, ["check", "--json", "--no-retry", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`], { FAKE_KANE_MODE: "text" });
+      const doc = json(ran);
+      const by = (id: string) => doc.scenarios.find((s) => s.id === id)!;
+      assert.equal(by("present").outcome, "passed", ran.stderr);
+      assert.equal(by("missing").outcome, "not_checked");
+      assert.equal(by("missing").notChecked, "text_contradicted");
+      assert.match(by("missing").reason!, /no "Ethiopia Guji" when Kane made its final check\. .*unquoted check "Check that Shop shows Ethiopia Guji\."/);
+    } finally { r.cleanup(); }
+  });
+
+  test("a failed assert followed by a passing recheck is not checked", async () => {
     const r = repo({ heading: { mode: "flaky", credits: 15 } });
     const port = await freePort();
     try {
       const ran = await cli(r, ["check", "--json", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`]);
-      assert.equal(ran.code, 0, ran.stderr);
+      assert.equal(ran.code, 2, ran.stderr);
       const doc = json(ran);
-      assert.equal(doc.scenarios[0]!.outcome, "passed");
+      assert.equal(doc.scenarios[0]!.outcome, "not_checked");
       assert.equal(doc.scenarios[0]!.failedCheck, undefined);
       assert.equal(doc.credits, 30);
+      assert.equal(doc.scenarios[0]!.notChecked, "runs_disagreed");
+      assert.match(doc.scenarios[0]!.reason!, /runs disagreed.*First.*failed.*Second.*passed/s);
       assert.match(ran.stderr, /retrying heading: the check failed, but Kane blames the scenario/);
       assert.equal(runs(r).length, 2);
     } finally {
@@ -427,7 +577,7 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
   });
 
   // SIGHUP is a closed terminal tab or a dropped SSH session.
-  for (const signal of ["SIGINT", "SIGHUP"] as const) test(`${signal} stops Kane and its children, every Chrome and the app, and exits 130`, async () => {
+  for (const signal of ["SIGINT", "SIGHUP"] as const) test(`${signal} stops Kane and its children, every Chrome and the app, and exits 130`, { skip: process.platform === "win32" ? "Node cannot send POSIX terminal signals on Windows; process tree cleanup has a separate Windows test" : false }, async () => {
     const r = repo({ stuck: { mode: "hang" } });
     const port = await freePort();
     try {
@@ -459,6 +609,49 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
 });
 
 describe("proofed list and doctor", () => {
+  test("doctor checks Chrome for a desktop-only selection without requiring web tools", async () => {
+    const r = repo({ web: { mode: "pass" }, desktop: { mode: "pass" } });
+    try {
+      writeFileSync(join(r.dir, ".proofed/scenarios/desktop.md"), "---\ntarget: desktop\n---\nAssert editor text.\n");
+      const doc = json<{ checks: { name: string; status: string; detail: string }[] }>(await cli(r, ["doctor", "--json", "--target", "desktop"], { CHROME_PATH: FAKE_KANE }));
+      assert.deepEqual(doc.checks.find((c) => c.name === "Chrome"), { name: "Chrome", status: "ok", detail: FAKE_KANE });
+      assert.ok(!doc.checks.some((c) => ["ffmpeg", "App", "App URL"].includes(c.name)));
+      const mobile = json<typeof doc>(await cli(r, ["doctor", "--json", "--target", "android", "--execution", "cloud", "--app", "APP123"]));
+      assert.ok(!mobile.checks.some((c) => c.name === "Chrome"));
+      assert.deepEqual(calls(r).map((c) => c.args?.[0]).sort(), ["--version", "--version", "balance", "balance"]);
+    } finally { r.cleanup(); }
+  });
+
+  test("list estimates only selected scenarios without running Kane scenarios", async () => {
+    const r = repo({ pricing: { mode: "pass", paths: ["src/app.js"] }, docs: { mode: "pass", paths: ["docs/**"] }, global: { mode: "pass", paths: [] } });
+    try {
+      type ListDoc = { estimatedCredits: number; scenarios: { id: string; selected: boolean; estimatedCredits: number; touched: boolean | null }[] };
+      const doc = json<ListDoc>(await cli(r, ["list", "--json"]));
+      assert.equal(doc.estimatedCredits, 60);
+      assert.deepEqual(doc.scenarios.map((s) => [s.id, s.selected, s.estimatedCredits]), [["docs", false, 0], ["global", true, 30], ["pricing", true, 30]]);
+      writeFileSync(join(r.dir, "src/app.js"), "export const price = 1;\n");
+      assert.equal(json<ListDoc>(await cli(r, ["list", "--json"])).estimatedCredits, 0);
+      rmSync(join(r.dir, ".git"), { recursive: true });
+      const all = json<ListDoc>(await cli(r, ["list", "--json"]));
+      assert.equal(all.estimatedCredits, 90);
+      assert.ok(all.scenarios.every((s) => s.selected && s.touched === null));
+      assert.ok(calls(r).every((c) => c.args?.[0] === "--version"));
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  test("JSON usage errors keep their fields on one line", () => {
+    const ran = spawnSync(process.execPath, [CLI, "check", "--jsn", "--json"], { encoding: "utf8" });
+    assert.equal(ran.status, 3);
+    const doc = JSON.parse(ran.stdout) as ErrorDoc;
+    assert.equal(ran.stdout.trimEnd().split("\n").length, 1);
+    assert.equal(doc.error.code, "usage");
+    assert.match(doc.error.message, /Did you mean: --json/);
+    assert.equal(doc.error.fix, "See proofed --help.");
+    assert.equal(ran.stderr, "");
+  });
+
   test("list shows each scenario and a file that doesn't parse", async () => {
     const r = repo({ pricing: { mode: "pass", paths: ["src/app.js"] }, docs: { mode: "pass", paths: ["docs/**"] } });
     writeFileSync(join(r.dir, ".proofed/scenarios/bad.md"), "no frontmatter\n");
@@ -484,6 +677,7 @@ describe("proofed list and doctor", () => {
       assert.deepEqual([by["Kane login"]!.status, by["Kane login"]!.fix], ["fail", "kane-cli login (or export LT_USERNAME and LT_ACCESS_KEY from TestMu: Settings → Keys)"]);
       assert.equal(by.Credits!.status, "warn");
       assert.equal(by.App!.status, "fail");
+      assert.deepEqual(doc.checks.filter((c) => c.status !== "ok" && !c.fix), []);
       assert.equal(doc.exitCode, 3);
       assert.deepEqual(calls(r).map((c) => c.args?.[0]).sort(), ["--version", "balance"]);
 
@@ -491,8 +685,90 @@ describe("proofed list and doctor", () => {
       const credits = signedIn.checks.find((c) => c.name === "Credits")!;
       assert.deepEqual([signedIn.checks.find((c) => c.name === "Kane login")!.status, credits.status], ["ok", "ok"]);
       assert.match(credits.detail, /^1234 available/);
+
+      const served = json<{ exitCode: number; checks: { name: string; status: string; detail: string }[] }>(await cli(r, ["doctor", "--json"], { PROOFED_URL: "http://127.0.0.1:9", PROOFED_SERVE: "npm start" }));
+      const app = served.checks.find((c) => c.name === "App")!;
+      assert.deepEqual([app.status, served.exitCode], ["ok", 0]);
+      assert.match(app.detail, /proofed check starts it/);
     } finally {
       r.cleanup();
     }
   });
+});
+
+test("a native build bypasses an old cached pass and ignores a web serve setting", async () => {
+  const r = repo({ counter: { mode: "pass" } });
+  try {
+    writeFileSync(join(r.dir, ".proofed/scenarios/counter.md"), "---\nname: Counter\ntarget: android\nexecution: cloud\napp: tmp/app.apk\npaths: [src/**]\n---\nAssert counter is 1. [fake:pass] [delay:1]\n");
+    writeFileSync(join(r.dir, "build.cjs"), "require('node:fs').writeFileSync('tmp/app.apk',require('node:fs').readFileSync('src/app.js'));\n");
+    writeFileSync(join(r.dir, "tmp/app.apk"), "old artifact");
+    // First cache a pass on a supplied artifact, then configure a build at the same path.
+    const first = json(await cli(r, ["check", "--json"]));
+    assert.equal(first.exitCode, 0);
+    assert.equal(runs(r).length, 1);
+    const cached = json(await cli(r, ["check", "--dry-run", "--json"]));
+    assert.equal(cached.scenarios[0]!.cached, true);
+    const flags = ["--build", "node build.cjs", "--serve", "must-not-run-the-web-server"];
+    const planned = json(await cli(r, ["check", "--dry-run", "--json", ...flags]));
+    assert.equal(planned.scenarios[0]!.cached, false);
+    const listed = json<{ scenarios: { cached: boolean }[] }>(await cli(r, ["list", "--json"], { PROOFED_BUILD: "node build.cjs", PROOFED_SERVE: "must-not-run-the-web-server" }));
+    assert.equal(listed.scenarios[0]!.cached, false);
+    const second = json(await cli(r, ["check", "--json", ...flags]));
+    assert.equal(second.exitCode, 0);
+    assert.equal(second.scenarios[0]!.cached, false);
+    assert.equal(runs(r).length, 2);
+    assert.equal(readFileSync(join(r.dir, "tmp/app.apk"), "utf8"), "export const price = 2;\n");
+  } finally { r.cleanup(); }
+});
+
+test("mixed web and native checks build once before running, including with --reuse", { skip: noChrome }, async () => {
+  for (const reuse of [true, false]) {
+    const r = repo({ web: { mode: "pass" }, counter: { mode: "pass" } });
+    const server = createHttpServer((_req, res) => res.end("<h1>Shop</h1>"));
+    const port = await freePort();
+    try {
+      if (reuse) await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
+      writeFileSync(join(r.dir, ".proofed/scenarios/counter.md"), "---\ntarget: android\nexecution: cloud\napp: tmp/app.apk\npaths: [src/**]\n---\nAssert counter is 1. [fake:pass] [delay:1]\n");
+      writeFileSync(join(r.dir, "build.cjs"), "const fs = require('node:fs'); fs.appendFileSync('tmp/builds', 'build\\n'); fs.writeFileSync('tmp/app.apk', fs.readFileSync('src/app.js'));\n");
+      const ran = await cli(r, ["check", "--json", "--url", `http://127.0.0.1:${port}`, "--build", "node build.cjs", "--serve", `node server.cjs ${port}`, ...(reuse ? ["--reuse"] : [])]);
+      assert.equal(ran.code, 0, ran.stderr);
+      const doc = json(ran);
+      assert.equal(doc.app, reuse ? "reused" : "started");
+      assert.equal(doc.counts.passed, 2);
+      assert.equal(readFileSync(join(r.dir, "tmp/app.apk"), "utf8"), "export const price = 2;\n");
+      assert.equal(readFileSync(join(r.dir, "tmp/builds"), "utf8"), "build\n");
+      assert.equal(runs(r).length, 2);
+    } finally {
+      if (server.listening) await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      r.cleanup();
+    }
+  }
+});
+
+test("a cached web pass does not require a server for the uncached native check", { skip: noChrome }, async () => {
+  const r = repo({ web: { mode: "pass" }, counter: { mode: "pass" } });
+  const port = await freePort();
+  const url = `http://127.0.0.1:${port}`;
+  try {
+    writeFileSync(join(r.dir, ".proofed/scenarios/counter.md"), "---\ntarget: android\nexecution: cloud\napp: APP123\n---\nAssert counter is 1. [fake:pass] [delay:1]\n");
+    const initial = await cli(r, ["check", "--only", "web", "--json", "--url", url, "--serve", `node server.cjs ${port}`]);
+    assert.equal(initial.code, 0, initial.stderr);
+    assert.equal(await portFree(port), true);
+
+    const ran = await cli(r, ["check", "--all", "--json", "--url", url]);
+    assert.equal(ran.code, 0, ran.stderr);
+    assert.deepEqual(json(ran).scenarios.map(({ id, cached }) => [id, !!cached]), [["counter", false], ["web", true]]);
+    assert.equal(runs(r).length, 2);
+  } finally { r.cleanup(); }
+});
+
+test("ad hoc native checks use the target selected by CLI flags in Kane's objective", async () => {
+  const r = repo({});
+  try {
+    const ran = await cli(r, ["check", "the counter increments", "--json", "--target", "android", "--execution", "cloud", "--app", "APP123"], { FAKE_KANE_DELAY_MS: "1" });
+    assert.equal(ran.code, 0, ran.stderr);
+    assert.equal(runs(r).length, 1);
+    assert.match(runs(r)[0]!.args![1]!, /check exactly that on an Android device/);
+    assert.doesNotMatch(runs(r)[0]!.args![1]!, /in the browser|the page loading/);
+  } finally { r.cleanup(); }
 });

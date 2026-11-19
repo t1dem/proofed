@@ -1,0 +1,126 @@
+import { executableCommand } from "../process.ts";
+import { execFile } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
+import { promisify } from "node:util";
+import { cdpUrl } from "./cdp.ts";
+import type { Target } from "./target.ts";
+
+const exec = promisify(execFile);
+export type TargetCheck = { name: string; status: "ok" | "warn" | "fail"; detail: string; fix: string };
+export const kaneTarget = (target: Target) => target.kind === "ios" ? (target.execution === "local" ? "simulator" : "ios") : target.kind === "android" ? (target.execution === "local" ? "emulator" : "android") : "desktop";
+
+export async function command(bin: string, args: string[], env = process.env, timeout = 20_000) {
+  try {
+    const cmd = executableCommand(bin, args, env);
+    const { stdout, stderr } = await exec(cmd.file, cmd.args, { env, windowsHide: true, timeout, maxBuffer: 4 * 1024 * 1024 });
+    return { ok: true as const, stdout, text: `${stdout}\n${stderr}`.trim() };
+  } catch (error) {
+    const e = error as { stdout?: string; stderr?: string; message?: string };
+    const detail = e.stderr?.trim() ? e.stderr : e.message || "Command failed";
+    return { ok: false as const, text: `${e.stdout?.trimEnd() ?? ""}\n${detail}`.trim() };
+  }
+}
+
+export const isAppBundle = (app: string) => /\.app$/i.test(app);
+
+export async function cdpOccupied(endpoint: string) {
+  return fetch(cdpUrl(endpoint, "version"), { signal: AbortSignal.timeout(1000) }).then(() => true, () => false);
+}
+
+export async function renderer(endpoint: string) {
+  const version = await fetch(cdpUrl(endpoint, "version"), { signal: AbortSignal.timeout(1500) });
+  if (!version.ok || !(await version.json() as { webSocketDebuggerUrl?: string }).webSocketDebuggerUrl) throw new Error("CDP /json/version has no browser websocket");
+  const response = await fetch(cdpUrl(endpoint, "list"), { signal: AbortSignal.timeout(1500) });
+  const pages = (await response.json() as { id: string; type: string; url: string }[]).filter((p) => p.type === "page");
+  if (pages.length !== 1) throw new Error(`Expected one page renderer, found ${pages.length}`);
+  return pages[0]!;
+}
+
+export async function localDevice(target: Extract<Target, { kind: "ios" | "android" }>, env = process.env) {
+  if (!target.device || !target.os_version) throw new Error("Local mobile requires device and os_version");
+  if (target.kind === "ios") {
+    const result = await command("xcrun", ["simctl", "list", "devices", "available", "--json"], env);
+    if (!result.ok) throw new Error(result.text);
+    const data = JSON.parse(result.stdout) as { devices: Record<string, { name: string; udid: string; state: string }[]> };
+    const matches = Object.entries(data.devices).filter(([runtime]) => runtime.endsWith(`iOS-${target.os_version!.replaceAll(".", "-")}`)).flatMap(([, devices]) => devices).filter((d) => d.name === target.device && d.state === "Booted");
+    if (matches.length !== 1) throw new Error(`Expected one booted ${target.device} iOS ${target.os_version}, found ${matches.length}`);
+    return matches[0]!.udid;
+  }
+  const devices = await command("adb", ["devices"], env);
+  if (!devices.ok) throw new Error(devices.text);
+  const matches: string[] = [];
+  for (const line of devices.stdout.split(/\r?\n/)) {
+    const serial = /^(emulator-\S+)\s+device\s*$/.exec(line)?.[1];
+    if (!serial) continue;
+    const name = await command("adb", ["-s", serial, "emu", "avd", "name"], env);
+    const model = await command("adb", ["-s", serial, "shell", "getprop", "ro.product.model"], env);
+    const os = await command("adb", ["-s", serial, "shell", "getprop", "ro.build.version.release"], env);
+    // `adb emu avd name` answers "Pixel_8_API_34\r\nOK\r\n".
+    if (!os.ok || os.stdout.trim() !== target.os_version) continue;
+    if ((name.ok && name.stdout.split(/\r?\n/)[0]?.trim() === target.device) ||
+        (model.ok && model.stdout.trim() === target.device)) matches.push(serial);
+  }
+  if (matches.length !== 1) throw new Error(`Expected one online ${target.device} Android ${target.os_version}, found ${matches.length}`);
+  return matches[0]!;
+}
+
+export async function targetChecks(target: Target, options: { env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; arch?: string; pendingBuild?: boolean; launchPending?: boolean } = {}): Promise<TargetCheck[]> {
+  const env = options.env ?? process.env;
+  const checks: TargetCheck[] = [];
+  const add = (name: string, ok: boolean, detail: string, fix: string) => checks.push({ name, status: ok ? "ok" : "fail", detail, fix });
+  if (target.kind === "web") return checks;
+  if (target.kind === "desktop") {
+    if (!target.cdp_endpoint) add("Desktop CDP", false, "No cdp_endpoint", "Set --cdp-endpoint http://127.0.0.1:<port> and --launch, or --reuse for an existing app.");
+    else {
+      try {
+        if (target.launch || target.app) {
+          if (await cdpOccupied(target.cdp_endpoint)) {
+            add("Desktop CDP", false, "CDP endpoint already answers", "Stop the running app, or omit launch and app and pass --reuse.");
+          } else {
+            add("Desktop CDP", !!options.launchPending, options.launchPending ? "not running, as expected: proofed check launches it" : "CDP endpoint is not running", "proofed check will launch the app; doctor never launches it.");
+          }
+        } else {
+          const page = await renderer(target.cdp_endpoint);
+          add("Desktop CDP", true, `Experimental Electron renderer: ${page.url}`, "Keep exactly one page renderer.");
+        }
+      } catch (e) {
+        add("Desktop CDP", false, String(e), target.launch || target.app ? "Set a valid CDP endpoint for the app to launch." : "Start the app with remote debugging and exactly one page renderer.");
+      }
+    }
+    if (!target.launch && !target.app && !target.reuse) add("Desktop ownership", false, "Existing endpoints require --reuse", "Pass --reuse; Proofed will not close the existing app.");
+    if (target.app && !target.launch) {
+      add("Desktop app", existsSync(target.app) || !!options.pendingBuild, target.app, "Build the desktop app, or set launch to its launch command.");
+    }
+    return checks;
+  }
+  const app = target.app;
+  const validType = !!app && (/^APP[\w-]+$/.test(app) ||
+    (target.kind === "ios"
+      ? target.execution === "local" ? isAppBundle(app) || /\.zip$/i.test(app) : /\.ipa$/i.test(app)
+      : (target.execution === "local" ? /\.apk$/i : /\.(apk|aab)$/i).test(app)));
+  add("App artifact type", validType, app ?? "No app artifact", `Set --app to ${target.kind === "ios" ? target.execution === "local" ? "a simulator .app or .zip" : "a device .ipa" : target.execution === "local" ? "an .apk" : "an .apk or .aab"}, or an APP ID.`);
+  if (app && !/^APP[\w-]+$/.test(app)) {
+    const present = existsSync(app) && (isAppBundle(app) ? statSync(app).isDirectory() : statSync(app).isFile());
+    checks.push({ name: "App artifact", status: present || options.pendingBuild ? "ok" : "fail", detail: present ? app : options.pendingBuild ? `artifact_pending_build: proofed check builds ${app} first` : `Missing ${app}`, fix: "Build the app before running the check." });
+  }
+  if (target.execution === "cloud") {
+    checks.push({ name: "Cloud recording", status: "ok", detail: "screenshots only, no video clip; local execution records MP4", fix: "Use local execution for MP4 recording." });
+    return checks;
+  }
+  if ((options.platform ?? process.platform) !== "darwin" || (options.arch ?? process.arch) !== "arm64") {
+    add(`${target.kind === "ios" ? "iOS" : "Android"} host`, false, "Kane local Android emulators and iOS simulators require macOS on Apple Silicon (arm64)", "Use an Apple Silicon Mac for local mobile, or select cloud execution with an .apk/.aab (Android) or .ipa (iOS).");
+    return checks;
+  }
+  if (target.kind === "ios") {
+    for (const [name, bin, args] of [["Xcode", "xcodebuild", ["-version"]], ["simctl", "xcrun", ["simctl", "list", "devices", "available", "--json"]]] as const) {
+      const result = await command(bin, [...args], env);
+      add(name, result.ok, result.text, "Install full Xcode and a matching iOS runtime; select Xcode with xcode-select. Doctor never installs or boots devices.");
+    }
+  }
+  const deps = await command(env.KANE_CLI ?? "kane-cli", ["doctor", "--target", kaneTarget(target)], env);
+  // Only doctor's own check lines count: kane-cli also prints notices such as "Skill update available: not installed".
+  add("Kane managed mobile dependencies", deps.ok && !/^\s*[✗✘]/m.test(deps.text), deps.text, `Run kane-cli doctor --target ${kaneTarget(target)} and explicitly set up the listed managed dependencies before check.`);
+  try { const id = await localDevice(target, env); add("Recording device", true, id, "Keep this device online and booted."); }
+  catch (e) { add("Recording device", false, String(e), "Set --device and --os-version to exactly one booted simulator or online emulator; boot it yourself."); }
+  return checks;
+}

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export type Packed = {
@@ -14,7 +14,7 @@ export type Packed = {
 
 export function checkContents(packed: Packed, modules: string[]) {
   assert.ok(modules.includes("proofed.js"), "dist/proofed.js is missing");
-  assert.ok(modules.every((file) => /^[\w-]+\.js$/.test(file) && !file.includes(".test.")), "dist must contain only runtime JavaScript");
+  assert.ok(modules.every((file) => /^(?:[\w-]+\/)*[\w-]+\.js$/.test(file) && !file.startsWith("testing/")), "dist must contain only runtime JavaScript");
   // npm includes a license automatically once the owner chooses one.
   const licenses = packed.files.filter((file) => /^licen[cs]e(?:\.(?:md|txt))?$/i.test(file.path)).map((file) => file.path);
   const expected = [...licenses, "README.md", "package.json", "bin/proofed.cjs", "bin/node-version.cjs", ...modules.map((file) => `dist/${file}`)].sort();
@@ -47,7 +47,11 @@ export function checkPackage() {
     mkdirSync(env.HOME, { recursive: true });
     const [packed] = JSON.parse(run("npm", ["pack", "--json", "--pack-destination", temp])) as Packed[];
     assert.ok(packed, "npm pack returned no tarball");
-    checkContents(packed, readdirSync(join(root, "dist")));
+    const dist = join(root, "dist");
+    const modules = readdirSync(dist, { recursive: true, withFileTypes: true })
+      .filter((entry) => !entry.isDirectory())
+      .map((entry) => relative(dist, join(entry.parentPath, entry.name)).split(sep).join("/"));
+    checkContents(packed, modules);
     run("npm", ["install", "--global", "--ignore-scripts", "--prefix", prefix, join(temp, packed.filename)], temp);
     const launcher = join(prefix, "lib/node_modules/proofed-cli/bin/proofed.cjs");
     const manifest = JSON.parse(readFileSync(join(prefix, "lib/node_modules/proofed-cli/package.json"), "utf8")) as { version: string; scripts: Record<string, string>; dependencies?: object };

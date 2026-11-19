@@ -1,31 +1,64 @@
 name: Proofed fix
-description: When "Fix with Claude" is ticked in the Proofed comment, Claude Code fixes the broken scenario and Kane checks the fix in Chrome before it is pushed.
+description: When the fix checkbox is ticked in the Proofed comment, the selected agent fixes the broken scenario and Kane checks the rebuild before it is pushed.
 
 inputs:
   url:
-    description: Where the app runs once served, e.g. http://localhost:4173
-    required: true
+    description: Required for web scenarios, e.g. http://localhost:4173
+    required: false
+  target:
+    description: web, ios, android or experimental desktop
+    default: ""
+  execution:
+    description: local, or cloud for ios/android (requires a TestMu real-device automation plan)
+    default: ""
+  app:
+    description: Rebuilt mobile artifact path or desktop executable
+    default: ""
+  device:
+    description: Exact device name
+    default: ""
+  os-version:
+    description: Device OS version
+    default: ""
+  launch:
+    description: Owned desktop launch command with remote debugging
+    default: ""
+  cdp-endpoint:
+    description: Desktop browser CDP endpoint
+    default: ""
+  working-directory:
+    description: Folder for install, build and serve, and relative app paths
+    default: "."
   install:
     description: Command that installs dependencies (runs once)
     required: true
   build:
-    description: Command that builds the app (runs after every fix attempt)
+    description: Command that builds the app before verification; skipped when final results can be reused
     required: true
   serve:
-    description: Command that serves the built app on `url` (Proofed starts and stops it)
-    required: true
+    description: Command that serves the built web app on `url` (required for web scenarios)
+    required: false
   lt-username:
     required: true
   lt-access-key:
     required: true
   claude-code-oauth-token:
     description: From `claude setup-token`
-    required: true
+    default: ""
+  codex-api-key:
+    description: OpenAI API key for Codex (secrets.CODEX_API_KEY)
+    default: ""
+  codex-auth-json:
+    description: Contents of ~/.codex/auth.json after `codex login` with a ChatGPT plan (secrets.CODEX_AUTH_JSON), used when codex-api-key is empty
+    default: ""
+  provider:
+    description: Fixer provider (claude or codex); inferred from model when empty
+    default: ""
   model:
-    description: Model Claude Code fixes with
-    default: claude-haiku-5-5
+    description: Model the fixer uses
+    default: ""
   effort:
-    description: Claude Code effort level (low, medium, high, xhigh, max)
+    description: Reasoning effort supported by the selected model
     default: xhigh
   scenarios:
     default: .proofed/scenarios
@@ -37,31 +70,115 @@ inputs:
 runs:
   using: composite
   steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+
     - name: Find the pull request
       id: pr
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
-      run: |
-        gh api "repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}" \
-          --jq '"base=\(.base.sha)\nbase_ref=\(.base.ref)\nhead_ref=\(.head.ref)"' >> "$GITHUB_OUTPUT"
+        PROOFED_NUMBER: ${{ github.event.issue.number }}
+      run: node "$GITHUB_ACTION_PATH/../src/action/pr.ts"
 
     - uses: actions/checkout@v4
       with:
         ref: ${{ steps.pr.outputs.head_ref }}
         fetch-depth: 0
         token: ${{ inputs.github-token }}
+        # The agent can read the checkout. src/fix/push.ts passes the token to git push itself.
+        persist-credentials: false
 
-    - uses: actions/setup-node@v4
-      with:
-        node-version: 24
-
-    - name: Install Kane CLI, Claude Code and ffmpeg
+    - name: Select tools and cache keys
+      id: tool-plan
       shell: bash
-      run: |
-        npm install -g "@testmuai/kane-cli@${{ inputs.kane-version }}" @anthropic-ai/claude-code >/dev/null
-        command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null)
-        ${{ inputs.install }}
+      env:
+        PROOFED_LEGACY_FIX: "true"
+        PROOFED_PROVIDER: ${{ inputs.provider }}
+        PROOFED_MODEL: ${{ inputs.model }}
+        PROOFED_KANE_VERSION: ${{ inputs.kane-version }}
+      run: node "$GITHUB_ACTION_PATH/../src/action/tools.ts" select
+
+    - name: Restore Kane CLI
+      uses: actions/cache/restore@v4
+      if: steps.tool-plan.outputs.kane_key != ''
+      with:
+        path: ${{ steps.tool-plan.outputs.kane_dir }}
+        key: ${{ steps.tool-plan.outputs.kane_key }}
+
+    - name: Restore Codex CLI
+      uses: actions/cache/restore@v4
+      if: steps.tool-plan.outputs.codex_key != ''
+      with:
+        path: ${{ steps.tool-plan.outputs.codex_dir }}
+        key: ${{ steps.tool-plan.outputs.codex_key }}
+
+    - name: Install Kane CLI and ffmpeg, plus the fixer if needed
+      id: tools
+      shell: bash
+      env:
+        PROOFED_LEGACY_FIX: "true"
+        PROOFED_KANE_VERSION: ${{ inputs.kane-version }}
+        PROOFED_KANE_DIR: ${{ steps.tool-plan.outputs.kane_dir }}
+        PROOFED_CODEX_DIR: ${{ steps.tool-plan.outputs.codex_dir }}
+        PROOFED_SYNC_PROVIDER: ${{ steps.tool-plan.outputs.sync_provider }}
+      run: node "$GITHUB_ACTION_PATH/../src/action/tools.ts" install
+
+    - name: Save Kane CLI
+      uses: actions/cache/save@v4
+      if: steps.tools.outputs.kane_installed == 'true' && steps.tool-plan.outputs.kane_key != ''
+      with:
+        path: ${{ steps.tool-plan.outputs.kane_dir }}
+        key: ${{ steps.tool-plan.outputs.kane_key }}
+
+    - name: Save Codex CLI
+      uses: actions/cache/save@v4
+      if: steps.tools.outputs.codex_installed == 'true' && steps.tool-plan.outputs.codex_key != ''
+      with:
+        path: ${{ steps.tool-plan.outputs.codex_dir }}
+        key: ${{ steps.tool-plan.outputs.codex_key }}
+
+    - name: Find package stores and cache keys
+      id: stores
+      shell: bash
+      env:
+        PROOFED_DIR: ${{ inputs.working-directory }}
+        PROOFED_DISCOVER_CACHE: "true"
+      run: node "$GITHUB_ACTION_PATH/../src/action/dependencies.ts"
+
+    - name: Restore the package store
+      id: package-cache
+      if: steps.stores.outputs.package_key != ''
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.stores.outputs.package_path }}
+        key: ${{ steps.stores.outputs.package_key }}
+        restore-keys: ${{ steps.stores.outputs.package_restore }}
+
+    - name: Restore Gradle caches and wrapper
+      id: gradle-cache
+      if: steps.stores.outputs.gradle_key != ''
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.stores.outputs.gradle_path }}
+        key: ${{ steps.stores.outputs.gradle_key }}
+
+    - name: Install the app's dependencies
+      id: deps
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PROOFED_LEGACY_FIX: "true"
+        PROOFED_INSTALL: ${{ inputs.install }}
+      run: node "$GITHUB_ACTION_PATH/../src/action/app.ts" install
+
+    - name: Save the package store
+      if: steps.deps.outcome == 'success' && steps.stores.outputs.package_key != '' && steps.package-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ steps.stores.outputs.package_path }}
+        key: ${{ steps.stores.outputs.package_key }}
 
     - name: Log Kane in
       shell: bash
@@ -70,11 +187,27 @@ runs:
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
       # Logging in once sets up the TestMu project and folder before the parallel runs start;
       # otherwise the first runs race to create them and fail.
-      run: kane-cli login --username "$LT_USERNAME" --access-key "$LT_ACCESS_KEY" </dev/null
+      run: node "$GITHUB_ACTION_PATH/../src/action/runtime.ts" login
 
-    - name: Fix with Claude, verify with Kane
+    - name: Prepare Codex subscription credentials
+      id: codex-auth
+      if: steps.tool-plan.outputs.provider == 'codex' && inputs.codex-api-key == '' && inputs.codex-auth-json != ''
       shell: bash
       env:
+        CODEX_AUTH_JSON: ${{ inputs.codex-auth-json }}
+      run: node "$GITHUB_ACTION_PATH/../src/action/runtime.ts" write-auth
+
+    - name: Fix, verify with Kane
+      shell: bash
+      env:
+        PROOFED_TARGET: ${{ inputs.target }}
+        PROOFED_EXECUTION: ${{ inputs.execution }}
+        PROOFED_APP: ${{ inputs.app }}
+        PROOFED_DEVICE: ${{ inputs.device }}
+        PROOFED_OS_VERSION: ${{ inputs.os-version }}
+        PROOFED_LAUNCH: ${{ inputs.launch }}
+        PROOFED_CDP_ENDPOINT: ${{ inputs.cdp-endpoint }}
+        PROOFED_DIR: ${{ inputs.working-directory }}
         PROOFED_URL: ${{ inputs.url }}
         PROOFED_BUILD: ${{ inputs.build }}
         PROOFED_SERVE: ${{ inputs.serve }}
@@ -82,14 +215,27 @@ runs:
         PROOFED_BASE_SHA: ${{ steps.pr.outputs.base }}
         PROOFED_HEAD_REF: ${{ steps.pr.outputs.head_ref }}
         PROOFED_BASE_REF: ${{ steps.pr.outputs.base_ref }}
-        PROOFED_OUT: ${{ runner.temp }}/proofed
         LT_USERNAME: ${{ inputs.lt-username }}
         LT_ACCESS_KEY: ${{ inputs.lt-access-key }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
-        PROOFED_CLAUDE_MODEL: ${{ inputs.model }}
-        PROOFED_CLAUDE_EFFORT: ${{ inputs.effort }}
-        KANE_CLI_CDP_TIMEOUT_MS: "60000"
-        KANE_CLI_CDP_RETRIES: "2"
-        KANE_CLI_USER_AGENT: github-action
+        CODEX_API_KEY: ${{ inputs.codex-api-key }}
+        PROOFED_CODEX_HOME: ${{ steps.codex-auth.outputs.dir }}
+        PROOFED_PROVIDER: ${{ inputs.provider }}
+        PROOFED_MODEL: ${{ inputs.model }}
+        PROOFED_EFFORT: ${{ inputs.effort }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
-      run: node "$GITHUB_ACTION_PATH/../src/fix.ts"
+      run: node "$GITHUB_ACTION_PATH/../src/action/runtime.ts" fix
+
+    - name: Save Gradle caches and wrapper
+      if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.stores.outputs.gradle_key != '' && steps.gradle-cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ steps.stores.outputs.gradle_path }}
+        key: ${{ steps.stores.outputs.gradle_key }}
+
+    - name: Remove Codex subscription credentials
+      if: always() && steps.codex-auth.outputs.dir != ''
+      shell: bash
+      env:
+        PROOFED_CODEX_HOME: ${{ steps.codex-auth.outputs.dir }}
+      run: node "$GITHUB_ACTION_PATH/../src/action/runtime.ts" remove-auth

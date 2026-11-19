@@ -4,12 +4,15 @@
 // - the changes are prepared branches of the demo store (`try/<id>`); a visitor picks one, never writes one;
 // - one run at a time, a few per visitor and per day: each costs Kane credits and Claude's time;
 // - reading is limited to the demo store, which is a public repository anyway.
-import { CLIP_PATH, serveClip } from "./api";
+import { CLIP_PATH, repoFixer, serveClip } from "./api";
+import { readJsonObject } from "./body";
 import { appRequest, gh, GitHubError, installationToken } from "./github";
 import type { Env } from "./index";
 import { getLive, liveFrame } from "./live";
+import { providerLabel, providerOf } from "./models";
 import { memo } from "./memo";
-import { getPull, type PullState } from "./runs";
+import { fixedSummary, latestScenarios } from "../run-summary";
+import { getPull, getPulls, type PullDetail, type PullState } from "./runs";
 
 // What the visitor picks from. `title` and `says` are the pull request's own title and description:
 // each reads like an ordinary small change. What it breaks is for Kane to find.
@@ -22,9 +25,10 @@ const BUGS = [
 
 export type TryBug = { id: string; title: string; says: string };
 // `unsure`: nothing broke in the last run, but Kane didn't confirm a scenario either.
-export type TryRun = { pr: number; bug: string; title: string; startedAt: number; finishedAt?: number; state: PullState; fixed: boolean; unsure: boolean };
+export type TryRun = { pr: number; bug: string; title: string; startedAt: number; finishedAt?: number; state: PullState; fixed: boolean; unsure: boolean; model?: string; result?: string };
 export type TryView = {
   repo: string;
+  provider?: string;
   bugs: TryBug[];
   // The run that's going: yours or someone else's. Nothing else starts until it's over.
   current: TryRun | null;
@@ -57,8 +61,7 @@ async function visitorOf(request: Request, env: Env) {
 }
 
 // A run as the page shows it. `over` is when nothing more will happen on the pull request by itself.
-async function describe(env: Env, row: TryRow & { pr: number }): Promise<TryRun & { over: boolean }> {
-  const detail = await getPull(env, env.TRY_REPO, row.pr, "/api/try");
+function describe(row: TryRow & { pr: number }, detail?: PullDetail): TryRun & { over: boolean } {
   const state = detail?.pull.state ?? "running";
   const fix = detail?.runs[0]?.fix;
   const over =
@@ -75,14 +78,19 @@ async function describe(env: Env, row: TryRow & { pr: number }): Promise<TryRun 
     ...(row.finished_at && { finishedAt: row.finished_at }),
     state,
     fixed: fix?.status === "fixed",
-    unsure: state === "passing" && !!detail?.pull.scenarios.some((s) => s.outcome === "unsure"),
+    model: detail?.pull.live?.fix?.model || fix?.model,
+    unsure: state === "passing" && !!detail && latestScenarios(detail.runs).some((s) => s.outcome !== "passed"),
+    ...(fix?.status === "fixed" && detail && { result: fixedSummary(detail.runs, providerLabel(providerOf(fix.model))) }),
     over,
   };
 }
 
 async function view(env: Env): Promise<TryView> {
-  const { results } = await env.DB.prepare("SELECT * FROM tries ORDER BY started_at DESC LIMIT 8").all<TryRow>();
-  const today = await env.DB.prepare("SELECT COUNT(*) AS n FROM tries WHERE started_at > ?1").bind(Date.now() - DAY).first<{ n: number }>();
+  const [{ results }, today] = await Promise.all([
+    env.DB.prepare("SELECT * FROM tries ORDER BY started_at DESC LIMIT 8").all<TryRow>(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM tries WHERE started_at > ?1").bind(Date.now() - DAY).first<{ n: number }>(),
+  ]);
+  const details = await getPulls(env, env.TRY_REPO, results.flatMap((row) => row.pr === null ? [] : [row.pr]), "/api/try");
   let current: TryRun | null = null;
   const recent: TryRun[] = [];
   for (const row of results) {
@@ -91,7 +99,7 @@ async function view(env: Env): Promise<TryView> {
       if (Date.now() - row.started_at > 60_000) await env.DB.prepare("DELETE FROM tries WHERE id = ?1").bind(row.id).run();
       continue;
     }
-    const { over, ...run } = await describe(env, { ...row, pr: row.pr });
+    const { over, ...run } = describe({ ...row, pr: row.pr }, details.get(row.pr));
     if (row.finished_at === null && over) {
       const at = Date.now();
       await env.DB.prepare("UPDATE tries SET finished_at = ?2 WHERE id = ?1").bind(row.id, at).run();
@@ -100,7 +108,8 @@ async function view(env: Env): Promise<TryView> {
     else recent.push(run);
   }
   const daily = Number(env.TRY_DAILY) || 15;
-  return { repo: env.TRY_REPO, bugs: [...BUGS], current, recent: recent.slice(0, 5), left: Math.max(0, daily - (today?.n ?? 0)) };
+  const fixer = await repoToken(env, env.TRY_REPO).then((token) => repoFixer(token, env.TRY_REPO)).catch(() => null);
+  return { repo: env.TRY_REPO, provider: providerLabel(providerOf(fixer?.model || "")), bugs: [...BUGS], current, recent: recent.slice(0, 5), left: Math.max(0, daily - (today?.n ?? 0)) };
 }
 
 // The pull requests of runs that are over are closed and their branches deleted when the next one
@@ -123,7 +132,7 @@ async function start(request: Request, env: Env) {
   // A form on another site can't post JSON here without the browser saying where it came from.
   const origin = request.headers.get("origin");
   if (origin && origin !== new URL(request.url).origin) return json({ error: "Start it from the Proofed site." }, 403);
-  const { bug: id } = (await request.json().catch(() => ({}))) as { bug?: unknown };
+  const id = (await readJsonObject(request))?.bug;
   const bug = BUGS.find((b) => b.id === id);
   if (!bug) return json({ error: "Pick one of the listed pull requests." }, 400);
 
@@ -155,7 +164,7 @@ async function start(request: Request, env: Env) {
       title: bug.title,
       head: branch,
       base: "main",
-      body: `${bug.says}\n\n---\nOpened by a visitor of [Proofed's "Break it yourself" page](${new URL("/try", request.url).href}), from the prepared branch \`try/${bug.id}\`. Proofed checks it like any pull request: Kane runs the affected scenarios in Chrome, and Claude fixes what breaks.`,
+      body: `${bug.says}\n\n---\nOpened by a visitor of [Proofed's "Break it yourself" page](${new URL("/try", request.url).href}), from the prepared branch \`try/${bug.id}\`. Proofed checks it like any pull request: Kane runs the affected scenarios in Chrome, and the selected fixer repairs what breaks.`,
     });
     await env.DB.batch([
       env.DB.prepare("UPDATE tries SET pr = ?2, branch = ?3 WHERE id = ?1").bind(slot, pull.number, branch),
@@ -194,7 +203,8 @@ export async function handleTry(request: Request, env: Env, path: string) {
     if (pull[4]) return liveFrame(env, env.TRY_REPO, number, decodeURIComponent(pull[4]));
     if (pull[3]) return json(await getLive(env, env.TRY_REPO, number, "/api/try"));
     const detail = await getPull(env, env.TRY_REPO, number, "/api/try");
-    return detail ? json(detail) : json({ error: "Proofed hasn't reported on that pull request." }, 404);
+    const fixer = await repoToken(env, env.TRY_REPO).then((token) => repoFixer(token, env.TRY_REPO)).catch(() => null);
+    return detail ? json({ ...detail, pull: { ...detail.pull, fixer: fixer ?? undefined } }) : json({ error: "Proofed hasn't reported on that pull request." }, 404);
   }
   return json({ error: "not_found" }, 404);
 }

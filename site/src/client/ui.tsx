@@ -53,7 +53,7 @@ export const marks: Record<Kind, { icon: LucideIcon; text: string; fill: string;
   failed: { icon: CircleX, text: "text-bad", fill: "bg-bad", label: "Broke" },
   unsure: { icon: CircleQuestionMark, text: "text-busy", fill: "bg-busy", label: "Not confirmed" },
   error: { icon: CircleExclamationPoint, text: "text-dim", fill: "bg-faint", label: "Kane couldn't finish" },
-  fixing: { icon: LoaderCircle, text: "text-work", fill: "bg-work", label: "Claude is fixing" },
+  fixing: { icon: LoaderCircle, text: "text-work", fill: "bg-work", label: "Fix in progress" },
   running: { icon: LoaderCircle, text: "text-busy", fill: "bg-busy", label: "Kane is checking" },
   skipped: { icon: CircleMinus, text: "text-faint", fill: "bg-edge", label: "Not run" },
   waiting: { icon: CircleDashed, text: "text-faint", fill: "bg-edge", label: "Waiting" },
@@ -166,14 +166,16 @@ export function Backdrop({ onClose }: { onClose: () => void }) {
 
 // A sheet follows a finger dragging it down from its top (when it isn't scrolled) and closes past
 // a third of its height or on a quick flick; otherwise it springs back.
-export function useSheetDrag<T extends HTMLElement = HTMLDivElement>(close: () => void) {
+export function useSheetDrag<T extends HTMLElement = HTMLDivElement>(open: boolean, close: () => void) {
   const ref = useRef<T>(null);
   useEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!open || !el) return;
     let start: { y: number; t: number } | undefined;
     let dy = 0;
+    let closeTimer: ReturnType<typeof setTimeout> | undefined;
     const down = (e: TouchEvent) => {
+      if (closeTimer !== undefined) return;
       start = el.scrollTop <= 0 ? { y: e.touches[0]!.clientY, t: e.timeStamp } : undefined;
       dy = 0;
     };
@@ -191,7 +193,7 @@ export function useSheetDrag<T extends HTMLElement = HTMLDivElement>(close: () =
       el.style.transition = "transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1)";
       if (dy > el.offsetHeight / 3 || flick) {
         el.style.transform = "translateY(100%)";
-        setTimeout(close, 200);
+        closeTimer = setTimeout(close, 200);
       } else el.style.transform = "";
       start = undefined;
     };
@@ -199,11 +201,12 @@ export function useSheetDrag<T extends HTMLElement = HTMLDivElement>(close: () =
     el.addEventListener("touchmove", move, { passive: false });
     el.addEventListener("touchend", up);
     return () => {
+      clearTimeout(closeTimer);
       el.removeEventListener("touchstart", down);
       el.removeEventListener("touchmove", move);
       el.removeEventListener("touchend", up);
     };
-  }, [close]);
+  }, [open, close]);
   return ref;
 }
 

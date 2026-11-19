@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { Live, LiveScenario } from "../../../src/livefile";
+import type { Live, LiveScenario } from "../../../src/report/livefile";
 import type { LiveView } from "../worker/live";
-import { modelLabel } from "../worker/models";
+import { modelLabel, providerLabel, providerOf } from "../worker/models";
 import { useLoad } from "./lib";
 import { focus, link, Mark, panel, plain, soft, type Kind } from "./ui";
 
@@ -28,21 +28,22 @@ const kindOf = (s: LiveScenario): Kind => s.status;
 function headline(live: Live): [string, string] {
   const fix = live.fix;
   if (live.kind === "fix" && fix) {
+    const provider = providerLabel(providerOf(fix.model));
     const attempt = `Attempt ${fix.attempt} of ${fix.of} · ${modelLabel(fix.model)}${fix.effort ? `, ${fix.effort} effort` : ""}`;
-    if (fix.doing === "writing") return ["Claude is writing a fix", `${attempt}. It has Kane's steps, what went wrong and the diff.`];
-    if (fix.doing === "building") return ["Building the app with Claude's change", attempt];
+    if (fix.doing === "writing") return [`${provider} is writing a fix`, `${attempt}. It has Kane's steps, what went wrong and the diff.`];
+    if (fix.doing === "building") return [`Building the app with ${provider}'s change`, attempt];
     if (fix.doing === "pushing") return ["Kane saw it pass. Pushing the fix", attempt];
-    return ["Kane is checking Claude's fix", `${attempt}. Nothing is pushed until it passes.`];
+    return [`Kane is checking ${provider}'s fix`, `${attempt}. Nothing is pushed until it passes.`];
   }
   const done = live.scenarios.filter((s) => s.status !== "waiting" && s.status !== "running").length;
   const total = live.scenarios.length;
   if (total > 0 && done === total) return ["Kane is done. Posting the report", "The clips go up and the comment on GitHub is updated."];
   const what = total === 1 ? live.scenarios[0]!.name : `${total} scenarios`;
-  const sub = done > 0 ? `${done} of ${total} done` : total > 3 ? "Three at a time, each in its own Chrome" : total > 1 ? "Side by side, each in its own Chrome" : "In a real Chrome";
+  const sub = done > 0 ? `${done} of ${total} done` : "Running on the scenarios’ configured targets";
   return [`Kane is checking ${what}`, sub];
 }
 
-// The clip's cursor (src/clip.ts), its tip on the point where Kane clicked or typed. It glides from
+// The clip's cursor (src/targets/clip.ts), its tip on the point where Kane clicked or typed. It glides from
 // one point to the next as the clip's does; a cursor that wasn't on the last frame appears in place,
 // and one that isn't on this frame fades out where it was.
 function Cursor({ at, gone }: { at: NonNullable<Frame["cursor"]>; gone?: boolean }) {
@@ -94,11 +95,11 @@ function LiveFrame({ frame, on, now, startedAt }: { frame: Frame | undefined; on
           // Covers the 16:9 box the way object-cover with the top kept would: full width and cut at the
           // bottom, or full height and cut on both sides. The cursor's fractions then land on the picture.
           <div className="absolute top-0 left-1/2 -translate-x-1/2" style={{ aspectRatio: shown.aspect, width: `max(100%, ${(shown.aspect / (16 / 9)) * 100}%)` }}>
-            <img src={shown.url} alt="What Kane's Chrome shows now" className="block size-full" />
+            <img src={shown.url} alt="Latest live frame" className="block size-full" />
             {shown.cursor && <Cursor key={shown.cursor.n} at={shown.cursor} gone={shown.gone} />}
           </div>
         ) : (
-          <figcaption className="grid size-full place-items-center bg-bg px-6 text-center text-[13px] text-faint">Kane's Chrome shows here once it opens the page.</figcaption>
+          <figcaption className="grid size-full place-items-center bg-bg px-6 text-center text-[13px] text-faint">Live frames appear here when available.</figcaption>
         )}
       </div>
       {/* A live stream's bar, under the picture as the recording's controls are: always at the end. */}
@@ -120,8 +121,10 @@ function LiveFrame({ frame, on, now, startedAt }: { frame: Frame | undefined; on
 
 // Kane's steps as they come: the one it's on turns, the rest are done or broke.
 function LiveSteps({ scenario }: { scenario: LiveScenario }) {
-  if (scenario.status === "waiting") return <p className="text-dim">Waiting for a free Chrome. Kane runs three scenarios at a time.</p>;
-  if (scenario.steps.length === 0) return <p className="text-dim">Kane is opening the page.</p>;
+  if (scenario.status === "waiting") return <p className="text-dim">Waiting for this scenario to start.</p>;
+  if (scenario.steps.length === 0) {
+    return <p className="text-dim">{scenario.status === "running" ? "Kane is starting the check." : "No steps were recorded."}</p>;
+  }
   const shown = scenario.steps.flatMap((step, i) => {
     // Kane doesn't always say a step ended before it starts the next: only the last one can be going.
     const running = step.status === "running" && i === scenario.steps.length - 1;
@@ -153,7 +156,7 @@ function LiveSteps({ scenario }: { scenario: LiveScenario }) {
   );
 }
 
-// The run on this pull request as it goes (src/live.ts in the action): what Kane or Claude is doing
+// The run on this pull request as it goes (src/report/live.ts in the action): what Kane or Claude is doing
 // now, Kane's steps as they happen and a frame of its Chrome every couple of seconds.
 export function LiveRun({ repo, pr }: { repo: string; pr: number }) {
   const [load] = useLoad<LiveView>(`/api/pulls/${repo}/${pr}/live`, 1500);
@@ -169,7 +172,7 @@ export function LiveRun({ repo, pr }: { repo: string; pr: number }) {
     return (
       <section className={`${panel} px-4 py-4 sm:px-6`}>
         <p className="font-medium">Waiting for GitHub Actions to start the run</p>
-        <p className="mt-1 text-[13px] text-dim">Kane's steps and what its Chrome shows appear here as it works.</p>
+        <p className="mt-1 text-[13px] text-dim">Kane's steps and available live frames appear here as it works.</p>
       </section>
     );
   }

@@ -1,13 +1,10 @@
 #!/usr/bin/env node
-// `proofed` in a terminal: the PR check (src/cli.ts) for the change on this machine, for a person
+// `proofed` in a terminal: the PR check (src/action/cli.ts) for the change on this machine, for a person
 // or a coding agent that wants to see a UI change work before calling it done.
 import { readFileSync } from "node:fs";
-import { parse, UsageError } from "./args.ts";
-import { check } from "./check.ts";
+import { parse, UsageError } from "./check/args.ts";
 import { killChildren, stopChildren } from "./children.ts";
-import { doctor } from "./doctor.ts";
-import { helpText } from "./help.ts";
-import { list } from "./list.ts";
+import { helpText } from "./check/help.ts";
 
 const argv = process.argv.slice(2);
 const io = { stdout: process.stdout, stderr: process.stderr, env: process.env, cwd: process.cwd() };
@@ -25,7 +22,7 @@ async function main(): Promise<number> {
   } catch (e) {
     if (!(e instanceof UsageError)) throw e;
     if (argv.includes("--json")) {
-      io.stdout.write(`${JSON.stringify({ ok: false, exitCode: 3, error: { code: "usage", message: e.message, fix: "See proofed --help." } }, null, 2)}\n`);
+      io.stdout.write(`${JSON.stringify({ ok: false, exitCode: 3, error: { code: "usage", message: e.message, fix: "See proofed --help." } })}\n`);
     } else {
       io.stderr.write(`proofed: ${e.message}\n`);
     }
@@ -45,9 +42,9 @@ async function main(): Promise<number> {
     io.stdout.write(`${helpText(command)}\n`);
     return 0;
   }
-  if (command === "check") return check(flags, text, io);
-  if (command === "list") return list(flags, io);
-  return doctor(flags, io);
+  if (command === "check") return (await import("./check/check.ts")).check(flags, text, io);
+  if (command === "list") return (await import("./check/list.ts")).list(flags, io);
+  return (await import("./check/doctor.ts")).doctor(flags, io);
 }
 
 // Exit 1 is "a scenario failed", so a crash must not end that way: 3, with the error where the
@@ -55,7 +52,7 @@ async function main(): Promise<number> {
 const code = await main().catch((e: unknown) => {
   const message = `Proofed hit an unexpected error: ${e instanceof Error ? e.message : String(e)}`;
   if (argv.includes("--json")) {
-    io.stdout.write(`${JSON.stringify({ ok: false, exitCode: 3, error: { code: "internal", message, fix: "Run it again with --verbose; nothing was checked." } }, null, 2)}\n`);
+    io.stdout.write(`${JSON.stringify({ ok: false, exitCode: 3, error: { code: "internal", message, fix: "Run it again with --verbose; nothing was checked." } })}\n`);
   } else {
     io.stderr.write(`proofed: ${message}\n`);
   }

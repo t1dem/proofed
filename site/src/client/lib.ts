@@ -1,8 +1,22 @@
+import { providerLabel, providerOf } from "../worker/models";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { PullDetail, PullView } from "../worker/runs";
 
+export const fixerName = (pull?: Pick<PullView, "fixer" | "fix" | "live">) =>
+  providerLabel(providerOf(pull?.live?.fix?.model || pull?.fixer?.model || pull?.fix?.model || ""));
+
+export const fixLabel = ({ fixer }: Pick<PullView, "fixer">) =>
+  fixer ? `Fix with ${providerLabel(fixer.provider ?? providerOf(fixer.model))}` : "Fix";
+
 export class SignedOut extends Error {}
+class RequestError extends Error {
+  readonly retryable: boolean;
+  constructor(message: string, retryable: boolean, options?: ErrorOptions) {
+    super(message, options);
+    this.retryable = retryable;
+  }
+}
 
 // /app?demo: the app runs on sample data (demo.ts, its own chunk), in `pnpm dev` and in the built
 // site alike. No sign-in, no request to the API, and nothing stored: a signed-in user's cached
@@ -14,13 +28,18 @@ const PUBLIC = location.pathname === "/try" || location.pathname.startsWith("/tr
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (DEMO) return (await import("./demo")).demo(path, init) as T;
-  const res = await fetch(PUBLIC ? path.replace(/^\/api\/pulls\//, "/api/try/pulls/") : path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
-  const body = (await res.json().catch(() => ({}))) as T & { error?: string };
+  const res = await fetch(PUBLIC ? path.replace(/^\/api\/pulls\//, "/api/try/pulls/") : path, { ...init, headers: { "content-type": "application/json", ...init?.headers } }).catch((e: unknown) => {
+    throw new RequestError(message(e), true, { cause: e });
+  });
+  const body = (await res.json().catch(() => ({}))) as T & { error?: string; retryable?: boolean };
   if (res.status === 401) {
     forgetAll();
     throw new SignedOut();
   }
-  if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
+  if (!res.ok) {
+    const error = body?.error ?? `Request failed (${res.status})`;
+    throw new RequestError(error, res.status >= 500 || body?.retryable === true);
+  }
   return body;
 }
 
@@ -28,15 +47,18 @@ export const message = (e: unknown) => (e instanceof Error ? e.message : String(
 
 export type Load<T> = { status: "loading" } | { status: "signed-out" } | { status: "error"; message: string } | { status: "ok"; data: T };
 
-// The last answer for each GET path, kept in memory and in localStorage: a page opens on what it
-// showed last time and the fresh answer replaces it when it arrives, so "Loading…" shows only once.
-const STORE_KEY = "proofed-cache:";
+// Keep dashboard data in this document. Public demo responses can survive a reload.
+const STORE_KEY = "proofed-public-cache:";
 const memory = new Map<string, unknown>();
 const watchers = new Map<string, Set<(data: unknown) => void>>();
-const inFlight = new Map<string, Promise<unknown>>();
+const inFlight = new Map<string, { request: Promise<unknown>; changes: ((data: unknown) => unknown)[] }>();
+const persistent = PUBLIC && !DEMO;
+
+// Older builds cached authenticated responses without scoping them to the signed-in user.
+if (!DEMO && !PUBLIC) clearStorage("proofed-cache:");
 
 function cached<T>(path: string): T | undefined {
-  if (!memory.has(path) && !DEMO) {
+  if (!memory.has(path) && persistent) {
     try {
       const saved = localStorage.getItem(STORE_KEY + path);
       if (saved) memory.set(path, JSON.parse(saved));
@@ -50,33 +72,40 @@ function cached<T>(path: string): T | undefined {
 function store(path: string, data: unknown) {
   memory.set(path, data);
   try {
-    if (!DEMO) localStorage.setItem(STORE_KEY + path, JSON.stringify(data));
+    if (persistent) localStorage.setItem(STORE_KEY + path, JSON.stringify(data));
   } catch {
     // Full or blocked storage only costs the next cold start its instant paint.
   }
   for (const watch of watchers.get(path) ?? []) watch(data);
 }
 
-function forgetAll() {
-  memory.clear();
+function clearStorage(prefix: string) {
   try {
-    for (const key of Object.keys(localStorage)) if (key.startsWith(STORE_KEY)) localStorage.removeItem(key);
+    for (const key of Object.keys(localStorage)) if (key.startsWith(prefix)) localStorage.removeItem(key);
   } catch {
-    // Nothing stored.
+    // Storage may be blocked.
   }
 }
 
+function forgetAll() {
+  memory.clear();
+  if (persistent) clearStorage(STORE_KEY);
+}
+
 // One request per path at a time; everyone showing that path gets the answer.
-export function fetchInto<T>(path: string): Promise<T> {
+export function fetchInto<T>(path: string, { afterInFlight = false } = {}): Promise<T> {
   const running = inFlight.get(path);
-  if (running) return running as Promise<T>;
-  const request = api<T>(path).then(
-    (data) => {
-      store(path, data);
-      return data;
-    },
-  );
-  inFlight.set(path, request);
+  if (running) {
+    if (afterInFlight) return running.request.catch(() => {}).then(() => fetchInto<T>(path));
+    return running.request as Promise<T>;
+  }
+  const changes: ((data: unknown) => unknown)[] = [];
+  const request = api<T>(path).then((data) => {
+    const updated = changes.reduce<unknown>((value, change) => change(value), data) as T;
+    store(path, updated);
+    return updated;
+  });
+  inFlight.set(path, { request, changes });
   void request.finally(() => inFlight.delete(path)).catch(() => {});
   return request;
 }
@@ -87,7 +116,9 @@ export const prefetch = (path: string) => {
 };
 
 // Changes what's on screen for `path` right away, ahead of the server's answer.
-export function mutate<T>(path: string, change: (data: T) => T) {
+export function mutate<T>(path: string, change: (data: T) => T, { preserveDuringRefresh = false } = {}) {
+  // The response may reflect an earlier snapshot. Keep the changed fields if it arrives later.
+  if (preserveDuringRefresh) inFlight.get(path)?.changes.push((data) => change(data as T));
   const data = cached<T>(path);
   if (data !== undefined) store(path, change(data));
 }
@@ -219,7 +250,8 @@ export function ago(ts: number) {
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-type Asked = "sending" | { error: string };
+type Asked = "sending" | { error: string; retryable: boolean };
+export const canAskAgain = (state: Asked | undefined) => !state || (typeof state === "object" && state.retryable);
 // "check": Kane checks `what`, as a "/proofed <what to check>" comment would have it.
 export type Ask = (pull: { repo: string; pr: number }, action: "fix" | "rerun" | "check", what?: string) => void;
 
@@ -239,7 +271,7 @@ export function useAsk(reload: () => void) {
     set("sending");
     api(`${detail}/${action}`, { method: "POST", ...(what && { body: JSON.stringify({ what }) }) }).then(
       () => set(undefined),
-      (e: unknown) => set({ error: message(e) }),
+      (e: unknown) => set({ error: message(e), retryable: e instanceof RequestError && e.retryable }),
     ).finally(() => {
       reload();
       fetchInto(detail).catch(() => {});

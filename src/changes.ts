@@ -1,3 +1,4 @@
+import { gitPath } from "./paths.ts";
 // What the local change is, for `proofed check`: every file that differs between the merge base
 // with the base branch and the working tree (committed, staged or not) plus new files git doesn't
 // ignore. A coding agent's edits are usually uncommitted, so the PR check's base...HEAD isn't enough.
@@ -17,6 +18,14 @@ const tries = (fn: () => string) => {
     return undefined;
   }
 };
+
+export const changedFiles = (base: string, head = "HEAD") =>
+  git(process.cwd(), "diff", "--name-only", "--no-renames", "-z", `${base}...${head}`).split("\0").filter(Boolean);
+
+// Use the runner's current remote-tracking commit for both the diff and fallback scenarios.
+export function baseRev(base: { ref: string; sha: string }) {
+  return tries(() => git(process.cwd(), "rev-parse", "--verify", "--quiet", `refs/remotes/origin/${base.ref}^{commit}`)) ?? base.sha;
+}
 
 export const BASES = ["origin/HEAD", "origin/main", "origin/master", "main", "master"];
 
@@ -63,5 +72,5 @@ export function localChanges(cwd: string, base: string) {
     ...names(git(root, "diff", "--name-only", "--no-renames", "-z", mergeBaseOf(cwd, base))),
     ...names(git(root, "ls-files", "--others", "--exclude-standard", "--full-name", "-z")),
   ]);
-  return [...files].map((f) => relative(here, join(root, f))).sort();
+  return [...files].map((f) => gitPath(relative(here, join(root, f)))).sort();
 }

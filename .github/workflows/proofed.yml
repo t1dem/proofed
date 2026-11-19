@@ -3,7 +3,7 @@ name: Proofed
 # One workflow for everything Proofed does on a PR:
 # - every push to a PR: Kane checks the affected scenarios in Chrome;
 # - "/proofed" in a comment: check again; "/proofed <what to check>": check just that;
-# - "/proofed fix [model] [effort]", or ticking "Fix with Claude" in the report: Claude fixes it.
+# - "/proofed fix [model] [effort]", or ticking the fix checkbox in the report: the selected provider fixes it.
 on:
   pull_request:
   issue_comment:
@@ -14,7 +14,7 @@ permissions:
   pull-requests: write
   issues: write
   statuses: write
-  # Traded for a push token of the Proofed app, so the workflows on Claude's fix commit run without an approval.
+  # Traded for a push token of the Proofed app, so the workflows on the fix commit run without an approval.
   id-token: write
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
           github.event.action == 'edited' &&
           github.event.comment.user.type == 'Bot' &&
           contains(github.event.comment.body, '<!-- proofed -->') &&
-          contains(github.event.comment.body, '- [x] **Fix with Claude**')
+          (contains(github.event.comment.body, '- [x] **Fix with Claude**') || contains(github.event.comment.body, '- [x] **Fix with Codex**'))
         ))
       )
     runs-on: ubuntu-latest
@@ -40,7 +40,7 @@ jobs:
     concurrency:
       group: proofed-${{ github.event.pull_request.number || github.event.issue.number }}
       # A new push makes the running check stale; a comment waits for the run in progress. So does the run
-      # on Claude's fix, pushed by the Proofed app: the fix run is still reporting on that commit.
+      # on the fix, pushed by the Proofed app: the fix run is still reporting on that commit.
       cancel-in-progress: ${{ github.event_name == 'pull_request' && github.actor != 'proofed-by-kane[bot]' }}
     steps:
       - uses: pnpm/action-setup@v4
@@ -58,5 +58,6 @@ jobs:
           lt-username: ${{ secrets.LT_USERNAME }}
           lt-access-key: ${{ secrets.LT_ACCESS_KEY }}
           claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Settings from the Proofed dashboard, such as the model Claude fixes with.
+          codex-api-key: ${{ secrets.CODEX_API_KEY }}
+          # Settings from the Proofed dashboard, such as the model the fixer fixes with.
           vars: ${{ toJSON(vars) }}

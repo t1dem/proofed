@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -8,8 +9,8 @@ import { test } from "node:test";
 import { checkContents, checkPackage, type Packed } from "../scripts/check-package.ts";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
-const launcher = new URL("../bin/proofed.cjs", import.meta.url).pathname;
-const launcherVersion = new URL("../bin/node-version.cjs", import.meta.url).pathname;
+const launcher = fileURLToPath(new URL("../bin/proofed.cjs", import.meta.url));
+const launcherVersion = fileURLToPath(new URL("../bin/node-version.cjs", import.meta.url));
 const require = createRequire(import.meta.url);
 
 test("the checkout launcher runs the CLI version and help", () => {
@@ -63,20 +64,23 @@ test("the launcher uses source over a stale build, and dist when installed", () 
 });
 
 test("the package file check rejects source, tests, extra files, missing entries and oversized archives", () => {
-  const modules = ["proofed.js", "help.js"];
+  const modules = ["proofed.js", "check/help.js"];
   const files = ["README.md", "package.json", "bin/proofed.cjs", "bin/node-version.cjs", ...modules.map((file) => `dist/${file}`)].map((path) => ({ path, size: 100, mode: 0o755 }));
   const packed: Packed = { filename: "proofed-cli-0.1.0.tgz", size: 200, unpackedSize: 600, files };
   checkContents(packed, modules);
   checkContents({ ...packed, files: [...files, { path: "LICENSE", size: 100, mode: 0o644 }] }, modules);
-  for (const path of ["src/proofed.ts", "dist/install.test.js", "dist/testing/fake-kane.js", "site/index.html", "action.yml"]) {
+  for (const path of ["src/proofed.ts", "site/index.html", "action.yml"]) {
     assert.throws(() => checkContents({ ...packed, files: [...files, { path, size: 1, mode: 0o644 }] }, modules));
   }
   assert.throws(() => checkContents({ ...packed, files: files.slice(1) }, modules));
   assert.throws(() => checkContents({ ...packed, size: 128 * 1024 }, modules));
   assert.throws(() => checkContents({ ...packed, unpackedSize: 1024 * 1024 }, modules));
-  assert.throws(() => checkContents(packed, [...modules, "install.test.js"]));
+  for (const module of ["check/install.test.js", "testing/fake-kane.js"]) {
+    const extra = { path: `dist/${module}`, size: 1, mode: 0o644 };
+    assert.throws(() => checkContents({ ...packed, files: [...files, extra] }, [...modules, module]), /dist must contain only runtime JavaScript/);
+  }
 });
 
-test("the packed CLI installs and runs without consumer scripts", { timeout: 120_000 }, () => {
+test("the packed CLI installs and runs without consumer scripts", { timeout: 120_000, skip: process.platform === "win32" ? "scripts/check-package.ts assumes POSIX npm/global-bin paths; source and dist launchers are tested above" : false }, () => {
   checkPackage();
 });

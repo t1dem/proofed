@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { env } from "./env.ts";
 
 export type Repo = { owner: string; name: string; token: string };
 
@@ -7,20 +8,48 @@ export const repoFromEnv = (token: string): Repo => {
   return { owner, name, token };
 };
 
-async function api<T>(repo: Repo, method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.name}${path}`, {
+export function readEvent<T>(): Partial<T> {
+  return process.env.GITHUB_EVENT_PATH ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")) : {};
+}
+
+export const ctx = () => {
+  const token = process.env.GITHUB_TOKEN;
+  return {
+    repo: token && process.env.GITHUB_REPOSITORY ? repoFromEnv(token) : undefined,
+    runUrl: process.env.GITHUB_RUN_ID
+      ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
+      : undefined,
+    outDir: env("PROOFED_OUT", ".proofed-out"),
+  };
+};
+
+async function request<T>(token: string, method: string, path: string, body?: unknown): Promise<T> {
+  const send = () => fetch(`https://api.github.com${path}`, {
     method,
     headers: {
-      authorization: `Bearer ${repo.token}`,
+      authorization: `Bearer ${token}`,
       accept: "application/vnd.github+json",
       "x-github-api-version": "2022-11-28",
       ...(body !== undefined && { "content-type": "application/json" }),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!res.ok) throw new GitHubError(res.status, `${method} ${path}: ${res.status} ${await res.text()}`);
-  return (res.status === 204 ? undefined : await res.json()) as T;
+  // A dropped connection ("fetch failed") ended a whole run after Kane had finished. Requests that
+  // are safe to repeat get two more tries; a POST might already have landed, so it doesn't.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const res = await send();
+      if (!res.ok) throw new GitHubError(res.status, `${method} ${path}: ${res.status} ${await res.text()}`);
+      return (res.status === 204 ? undefined : await res.json()) as T;
+    } catch (e) {
+      if (method === "POST" || attempt === 3 || !(e instanceof TypeError)) throw e;
+      await new Promise((r) => setTimeout(r, 2000 * attempt));
+    }
+  }
 }
+
+const api = <T>(repo: Repo, method: string, path: string, body?: unknown) =>
+  request<T>(repo.token, method, `/repos/${repo.owner}/${repo.name}${path}`, body);
 
 export type PullRequest = {
   number: number;
@@ -71,13 +100,27 @@ export const MARKER = "<!-- proofed -->";
 // nor the dashboard's webhook matches it, so an edit of an old report is never read as the PR's report.
 export const OLD_MARKER = "<!-- proofed:old -->";
 
-export type Comment = { id: number; node_id: string; html_url: string; body?: string; user?: { type: string } };
+export type Comment = { id: number; node_id: string; html_url: string; body?: string; user?: { type: string; id?: number } };
 
-// Proofed's reports on the PR, oldest first: the newest is the report. Only a bot's comment counts,
-// since anyone can paste the marker. `older` are reports that weren't retired, as when an edit failed.
-export function reportsIn(comments: Comment[]) {
-  const reports = comments.filter((c) => c.user?.type === "Bot" && c.body?.includes(MARKER));
+// The marker is public; report authors must be bots or the user whose token posts the report.
+export function reportsIn(comments: Comment[], userId?: number) {
+  const reports = comments.filter((c) => c.body?.includes(MARKER) && (c.user?.type === "Bot" || (userId !== undefined && c.user?.id === userId)));
   return { current: reports.at(-1), older: reports.slice(0, -1) };
+}
+
+const identities = new WeakMap<Repo, Promise<number | undefined>>();
+
+function authenticatedUser(repo: Repo) {
+  const known = identities.get(repo);
+  if (known) return known;
+  const identity = request<{ id: number }>(repo.token, "GET", "/user").then(({ id }) => id).catch((e: unknown) => {
+    // App and installation tokens have no user endpoint.
+    if (e instanceof GitHubError && (e.status === 401 || e.status === 403 || e.status === 404)) return undefined;
+    identities.delete(repo);
+    throw e;
+  });
+  identities.set(repo, identity);
+  return identity;
 }
 
 // Every page: a report is posted afresh further down a long thread, past the first hundred comments.
@@ -86,7 +129,12 @@ export async function listReports(repo: Repo, pr: number) {
   for (let page = 1; ; page++) {
     const batch = await api<Comment[]>(repo, "GET", `/issues/${pr}/comments?per_page=100&page=${page}`);
     comments.push(...batch);
-    if (batch.length < 100) return reportsIn(comments);
+    if (batch.length < 100) {
+      const userId = comments.some((c) => c.user?.type !== "Bot" && c.user?.id !== undefined && c.body?.includes(MARKER))
+        ? await authenticatedUser(repo)
+        : undefined;
+      return reportsIn(comments, userId);
+    }
   }
 }
 
@@ -138,8 +186,12 @@ const CLIPS_BRANCH = "proofed-clips";
 // Clips go to an orphan branch of the same repo, so the repo needs no storage of its own.
 // Links go through github.com/…/raw/…, not raw.githubusercontent.com: for a private repo GitHub
 // redirects a signed-in viewer to a tokened raw URL, so the GIF still renders in the PR comment.
+export function clipUrl(repo: Repo, path: string) {
+  return `https://github.com/${repo.owner}/${repo.name}/raw/${CLIPS_BRANCH}/${path}`;
+}
+
 export async function publishClips(repo: Repo, files: { path: string; local: string }[]) {
-  if (files.length === 0) return new Map<string, string>();
+  if (files.length === 0) return;
 
   for (let attempt = 0; ; attempt++) {
     const parent = await api<{ object: { sha: string } }>(repo, "GET", `/git/ref/heads/${CLIPS_BRANCH}`).catch(
@@ -181,8 +233,4 @@ export async function publishClips(repo: Repo, files: { path: string; local: str
       throw e;
     }
   }
-
-  return new Map(
-    files.map((f) => [f.path, `https://github.com/${repo.owner}/${repo.name}/raw/${CLIPS_BRANCH}/${f.path}`]),
-  );
 }

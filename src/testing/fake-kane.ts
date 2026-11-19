@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// A stand-in for kane-cli in tests, pointed to by KANE_CLI: takes the arguments src/kane.ts passes
+// A stand-in for kane-cli in tests, pointed to by KANE_CLI: takes the arguments src/kane/kane.ts passes
 // and prints the NDJSON of `kane-cli run --agent`, at no credits. It opens --url in the Chrome at
 // --cdp-endpoint, so the recording is of a real page.
 //
@@ -18,14 +18,15 @@
 // credits it reports. Every call is appended to FAKE_KANE_LOG as a JSON line.
 import { spawn } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
-import { connectCdp } from "../cdp.ts";
+import { connectCdp } from "../targets/cdp.ts";
 
 const args = process.argv.slice(2);
 const record = (entry: object) => process.env.FAKE_KANE_LOG && appendFileSync(process.env.FAKE_KANE_LOG, `${JSON.stringify({ pid: process.pid, ...entry })}\n`);
 record({ args });
 
 if (args[0] === "--version") {
-  console.log("0.10.4");
+  if (process.env.FAKE_KANE_VERSION_WARNING) console.error(process.env.FAKE_KANE_VERSION_WARNING);
+  console.log(process.env.FAKE_KANE_VERSION ?? "0.10.4");
   process.exit(0);
 }
 if (args[0] === "balance") {
@@ -39,7 +40,7 @@ if (args[0] === "balance") {
     console.error('Not authenticated [prod]. Run "kane-cli login" first.');
     process.exit(2);
   }
-  console.log("Available credits: 1234.5");
+  console.log(`Available credits: ${process.env.FAKE_KANE_BALANCE_FILE ? readFileSync(process.env.FAKE_KANE_BALANCE_FILE, "utf8").trim() : "1234.5"}`);
   process.exit(0);
 }
 if (args[0] !== "run") {
@@ -111,6 +112,9 @@ if (mode === "hang") {
   await step("analyze: looking at the page");
   console.error("fake kane-cli: the session ended unexpectedly");
   process.exit(1);
+} else if (mode === "text") {
+  await step(`assert: ${objective.split("\n")[0]}`);
+  end({ status: "passed", reason: "Objective completed" });
 } else if (mode === "noassert") {
   await step("wait: Waiting for the page to settle");
   end({ status: "passed", reason: "Objective completed", final_state: {} });

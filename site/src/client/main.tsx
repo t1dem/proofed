@@ -1,8 +1,6 @@
-import { StrictMode } from "react";
+import { StrictMode, type ComponentType } from "react";
 import { createRoot } from "react-dom/client";
-import { App, storedTheme } from "./App";
-import { Landing } from "./Landing";
-import { Try } from "./Try";
+import { storedTheme } from "./theme";
 import "./index.css";
 
 const path = window.location.pathname;
@@ -15,4 +13,8 @@ if (app) {
   document.documentElement.dataset.theme = storedTheme();
 }
 
-createRoot(document.getElementById("root")!).render(<StrictMode>{tryIt ? <Try /> : app ? <App /> : <Landing />}</StrictMode>);
+const root = createRoot(document.getElementById("root")!);
+const render = (Page: ComponentType) => root.render(<StrictMode><Page /></StrictMode>);
+if (tryIt) void import("./Try").then(({ Try }) => render(Try));
+else if (app) void import("./App").then(({ App }) => render(App));
+else void import("./Landing").then(({ Landing }) => render(Landing));

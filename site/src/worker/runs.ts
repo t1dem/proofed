@@ -1,8 +1,9 @@
 // What the dashboard knows about a pull request beyond the comment's headline: the run file the
-// action commits next to its clips (see src/runfile.ts at the repo root). The webhook reads it
+// action commits next to its clips (see src/report/runfile.ts at the repo root). The webhook reads it
 // when the comment that names it arrives.
-import { summarize, type Live, type LiveSummary } from "../../../src/livefile";
-import { readRunKey, RUN_FILE, type RunFile, type RunFix, type RunScenario } from "../../../src/runfile";
+import type { Fixer } from "./models";
+import { summarize, type Live, type LiveSummary } from "../../../src/report/livefile";
+import { readRunKey, RUN_FILE, type RunFile, type RunFix, type RunScenario } from "../../../src/report/runfile";
 import { gh } from "./github";
 import type { Env } from "./index";
 
@@ -23,12 +24,13 @@ export type PullView = {
   updatedAt: number;
   // From the latest run; empty for reports posted before run files existed.
   scenarios: Pick<RunScenario, "name" | "outcome" | "reason">[];
+  fixer?: Fixer;
   fix?: Pick<RunFix, "status" | "model" | "effort" | "commit"> & { attempts: number };
   // The repo's workflow is switched off: nothing would answer "Fix with Claude" or "Run again". Set by the API.
   paused?: boolean;
   // The signed-in user can't push to the repo, so the workflow wouldn't answer their /proofed. Set by the API.
   readOnly?: boolean;
-  // Where the run is now, while Kane or Claude is at work and the action reports it (src/live.ts).
+  // Where the run is now, while Kane or Claude is at work and the action reports it (src/report/live.ts).
   live?: LiveSummary;
   // The commit Kane or Claude is at work on, before its run reports.
   checking?: { sha: string; at: number };
@@ -154,7 +156,7 @@ export async function listPulls(env: Env, repos: string[]): Promise<PullView[]> 
       .all<ReportRow>(),
     env.DB.prepare(
       `SELECT * FROM runs r WHERE repo IN (${marks}) AND created_at > ?${names.length + 1}
-       AND created_at = (SELECT MAX(created_at) FROM runs WHERE repo = r.repo AND pr = r.pr)`,
+       AND key = (SELECT key FROM runs WHERE repo = r.repo AND pr = r.pr ORDER BY created_at DESC, key DESC LIMIT 1)`,
     )
       .bind(...names, since)
       .all<RunRow>(),
@@ -173,9 +175,37 @@ export type PullDetail = { pull: PullView; runs: Run[] };
 export async function getPull(env: Env, repo: string, pr: number, api = "/api"): Promise<PullDetail | undefined> {
   const [report, runs] = await Promise.all([
     env.DB.prepare("SELECT * FROM reports WHERE repo = ?1 AND pr = ?2").bind(repo, pr).first<ReportRow>(),
-    env.DB.prepare("SELECT * FROM runs WHERE repo = ?1 AND pr = ?2 ORDER BY created_at DESC LIMIT 20").bind(repo, pr).all<RunRow>(),
+    env.DB.prepare("SELECT * FROM runs WHERE repo = ?1 AND pr = ?2 ORDER BY created_at DESC, key DESC LIMIT 20").bind(repo, pr).all<RunRow>(),
   ]);
   if (!report) return undefined;
   const all = runs.results.map((r) => toRun(r, api));
   return { pull: toPull(report, all[0]), runs: all };
+}
+
+// The demo reads several pull requests at once. Keep the same 20-run history per pull.
+export async function getPulls(env: Env, repo: string, prs: number[], api: string) {
+  const details = new Map<number, PullDetail>();
+  if (!prs.length) return details;
+  const marks = prs.map(() => "?").join(", ");
+  const [reports, rows] = await Promise.all([
+    env.DB.prepare(`SELECT * FROM reports WHERE repo = ? AND pr IN (${marks})`)
+      .bind(repo, ...prs).all<ReportRow>(),
+    env.DB.prepare(
+      `SELECT * FROM (
+         SELECT runs.*, ROW_NUMBER() OVER (PARTITION BY pr ORDER BY created_at DESC, key DESC) AS position
+         FROM runs WHERE repo = ? AND pr IN (${marks})
+       ) WHERE position <= 20 ORDER BY pr, position`,
+    ).bind(repo, ...prs).all<RunRow>(),
+  ]);
+  const runs = new Map<number, RunRow[]>();
+  for (const row of rows.results) {
+    const history = runs.get(row.pr);
+    if (history) history.push(row);
+    else runs.set(row.pr, [row]);
+  }
+  for (const report of reports.results) {
+    const all = (runs.get(report.pr) ?? []).map((row) => toRun(row, api));
+    details.set(report.pr, { pull: toPull(report, all[0]), runs: all });
+  }
+  return details;
 }

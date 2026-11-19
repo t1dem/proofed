@@ -5,8 +5,10 @@ import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import type { PullDetail, PullState } from "../worker/runs";
 import type { TryRun, TryView } from "../worker/try";
-import { ago, api, message, useLoad } from "./lib";
+import { providerLabel, providerOf } from "../worker/models";
+import { ago, api, fixerName, message, useLoad } from "./lib";
 import { LiveRun } from "./Live";
+import { fixedSummary, latestScenarios } from "../run-summary";
 import { GitHubMark, RunMeta, Scenarios } from "./Pull";
 import { bone, focus, kindOf, link, Mark, outline, panel, soft, solid, type Kind } from "./ui";
 
@@ -23,7 +25,7 @@ function useTryRoute() {
     return () => removeEventListener("popstate", onPop);
   }, []);
   const go = useCallback((next?: number) => {
-    history.pushState(null, "", next ? `/try/${next}` : "/try");
+    history.pushState(null, "", (next ? `/try/${next}` : "/try") + location.search);
     setPr(next);
     scrollTo({ top: 0, behavior: "instant" });
   }, []);
@@ -40,7 +42,7 @@ function To({ pr, go, className, children }: { pr?: number; go: Go; className?: 
     go(pr);
   };
   return (
-    <a href={pr ? `/try/${pr}` : "/try"} onClick={onClick} className={`${focus} ${className ?? ""}`}>
+    <a href={(pr ? `/try/${pr}` : "/try") + location.search} onClick={onClick} className={`${focus} ${className ?? ""}`}>
       {children}
     </a>
   );
@@ -65,15 +67,15 @@ function Top() {
 }
 
 const kindOfRun = (run: TryRun): Kind =>
-  run.fixed ? "passed" : run.state === "fixing" ? "fixing" : run.state === "running" ? "running" : run.state === "failing" ? "failed" : run.state === "blocked" ? "error" : run.unsure ? "unsure" : "passed";
+  run.fixed ? (run.unsure ? "unsure" : "passed") : run.state === "fixing" ? "fixing" : run.state === "running" ? "running" : run.state === "failing" ? "failed" : run.state === "blocked" ? "error" : run.unsure ? "unsure" : "passed";
 
 const saysOf = (run: TryRun) =>
   run.fixed
-    ? "Kane caught it, Claude fixed it"
+    ? run.result ?? `${providerLabel(providerOf(run.model || ""))} fixed it${run.unsure ? "; some scenarios unconfirmed" : ", Kane confirmed"}`
     : run.state === "running"
       ? "Kane is checking"
       : run.state === "fixing"
-        ? "Claude is fixing"
+        ? `${providerLabel(providerOf(run.model || ""))} is fixing`
         : run.state === "failing"
           ? "Kane caught it"
           : run.state === "blocked"
@@ -109,7 +111,7 @@ function Picker({ view, go, reload }: { view: TryView; go: Go; reload: () => Pro
         <a href={`https://github.com/${view.repo}`} className={link}>
           {view.repo}
         </a>
-        , a real repository. Kane runs the flows it touches in Chrome while you watch, and Claude fixes what breaks. No account needed.
+        , a real repository. Kane runs the flows it touches in Chrome while you watch, and {view.provider ?? "the fixer"} fixes what breaks. No account needed.
       </p>
 
       {view.current && (
@@ -173,14 +175,14 @@ function Picker({ view, go, reload }: { view: TryView; go: Go; reload: () => Pro
 }
 
 // Where the pull request is on its way from opened to fixed.
-function Track({ state, fixed, gaveUp, reported, unsure }: { state: PullState; fixed: boolean; gaveUp: boolean; reported: boolean; unsure: boolean }) {
+function Track({ state, fixed, gaveUp, reported, unsure, provider, result }: { provider: string; result?: string; state: PullState; fixed: boolean; gaveUp: boolean; reported: boolean; unsure: boolean }) {
   const check: Kind =
     state === "running" && !reported ? "running" : state === "blocked" && !reported ? "error" : state === "passing" && !fixed ? (unsure ? "unsure" : "passed") : "failed";
-  const fix: Kind = fixed ? "passed" : gaveUp ? "error" : state === "fixing" ? "fixing" : "waiting";
+  const fix: Kind = fixed ? (unsure ? "unsure" : "passed") : gaveUp ? "error" : state === "fixing" ? "fixing" : "waiting";
   const steps: [Kind, string][] = [
     ["passed", "Pull request opened"],
     [check, check === "running" ? "Kane is checking it" : check === "failed" ? "Kane caught a break" : check === "error" ? "The run didn't finish" : check === "unsure" ? "Kane didn't confirm it either way" : "Kane found nothing broken"],
-    [fix, fix === "passed" ? "Claude fixed it, Kane confirmed" : fix === "error" ? "Claude couldn't fix it" : fix === "fixing" ? "Claude is fixing, Kane re-checks" : "Claude fixes, Kane re-checks"],
+    [fix, fixed ? result ?? `${provider} fixed it, Kane confirmed` : fix === "error" ? `${provider} couldn't fix it` : fix === "fixing" ? `${provider} is fixing, Kane re-checks` : `${provider} fixes, Kane re-checks`],
   ];
   return (
     <ol className="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-[13px]">
@@ -232,7 +234,7 @@ function Run({ repo, pr, go }: { repo: string; pr: number; go: Go }) {
         </a>
       </header>
 
-      {pull && <Track state={pull.state} fixed={fix?.status === "fixed"} gaveUp={fix?.status === "gave-up"} reported={runs.length > 0} unsure={kind === "unsure"} />}
+      {pull && <Track provider={fixerName(pull)} state={pull.state} fixed={fix?.status === "fixed"} gaveUp={fix?.status === "gave-up"} reported={runs.length > 0} unsure={latestScenarios(runs).some((s) => s.outcome !== "passed")} result={fixedSummary(runs, fixerName(pull))} />}
 
       {detail.status === "error" && <p className="mt-8 text-bad">{detail.message}</p>}
       {detail.status === "loading" && <span className={`${bone} mt-8 block aspect-video w-full rounded-lg`} />}
@@ -240,11 +242,11 @@ function Run({ repo, pr, go }: { repo: string; pr: number; go: Go }) {
         <section className="mt-6">
           {working && <LiveRun repo={repo} pr={pr} />}
           {waitingForFix && (
-            <p className="mb-6 text-dim">Kane caught it. Claude starts on a fix in a few seconds; the page follows along by itself.</p>
+            <p className="mb-6 text-dim">Kane caught it. {fixerName(pull)} starts on a fix in a few seconds; the page follows along by itself.</p>
           )}
           {kind === "failed" && !fix && !waitingForFix && (
             <p className="mb-6 text-dim">
-              No fix followed. When Claude can't run,{" "}
+              No fix followed. When {fixerName(pull)} can't run,{" "}
               <a href={pull?.url} className={link}>
                 the report on GitHub
               </a>{" "}
@@ -265,7 +267,7 @@ function Run({ repo, pr, go }: { repo: string; pr: number; go: Go }) {
         <p className="mt-10 text-dim">
           This ran on a real pull request:{" "}
           <a href={pull.url} className={link}>
-            the report, the clips and Claude's commit are on GitHub
+            the report, the clips and {fixerName(pull)}'s commit are on GitHub
           </a>
           .{" "}
           <To go={go} className={`rounded ${link}`}>

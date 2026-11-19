@@ -1,0 +1,266 @@
+import { gitPath } from "../paths.ts";
+// The setup PR's check, when mode.ts finds only the stock scenario there: The agent reads the app and
+// writes scenarios for its main flows, Kane runs each of them next to the stock one, and the
+// ones Kane saw pass are committed to the setup branch. The rest are deleted, so the PR carries no guess.
+import { execFileSync } from "node:child_process";
+import { cpSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { askAgent, configuredFixer } from "./agent.ts";
+import { env } from "../env.ts";
+import { scenarioTarget } from "./fixtarget.ts";
+import { diffPaths, untrackedPaths } from "./fixworkspace.ts";
+import { ctx, findReport, readEvent, setStatus, type PullRequest } from "../github.ts";
+import { providerLabel, providerOf } from "./models.ts";
+import { isBroken, publish, runAll } from "../check/pipeline.ts";
+import { pushHead } from "./push.ts";
+import { readReportData, type Written } from "../report/report.ts";
+import { creditsOf, unchecked } from "../report/runresult.ts";
+import { loadScenarios, parseScenario, type Scenario } from "../scenarios.ts";
+import { fileWithSecret } from "../secrets.ts";
+import { timed, timedAsync } from "../timing.ts";
+import type { ScenarioResult } from "../types.ts";
+
+const MAX_SCENARIOS = 5;
+// Reading an app and writing a few files takes the agent a few minutes; one that runs this long is stuck,
+// and the check still has Kane's runs ahead of it.
+const WRITE_TIMEOUT_MS = 10 * 60_000;
+
+const event = readEvent<{ pull_request: PullRequest }>();
+const { repo, runUrl, outDir } = ctx();
+const pr = event.pull_request;
+mkdirSync(outDir, { recursive: true });
+const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
+// Claude Code's permission rules take paths relative to where it runs: the repo root.
+const dir = relative(process.cwd(), resolve(env("PROOFED_SCENARIOS", ".proofed/scenarios")));
+const appDir = env("PROOFED_DIR", ".");
+const writer = configuredFixer();
+const provider = providerLabel(providerOf(writer.model));
+const agentName = provider === "Codex" ? "Codex" : "Claude Code";
+const headSha = git("rev-parse", "HEAD");
+const stock = loadScenarios(dir);
+const android = stock[0]?.target === "android";
+const where = android ? "on an Android cloud device" : "in Chrome";
+
+const example = `---
+name: Promo code total
+paths: [src/pricing.ts, src/cart.ts, src/pages/Cart.tsx, src/pages/Summary.tsx]
+url: /
+---
+Add Ethiopia Guji to the bag twice and the Hand Grinder once.
+Open the bag, type the promo code welcome10 and apply it.
+Check that the discount is "−€9.10" and shipping is "Free".
+Check that the total is "€81.90".`;
+
+const webPrompt = () => `Proofed checks every pull request of this repository in a real Chrome. It runs scenarios: Markdown files with plain-English steps that Kane CLI, an AI browser agent, follows on the running app. Kane sees only the page, never the code. This repository has one scenario so far, ${dir}/home.md:
+
+${readFileSync(`${dir}/home.md`, "utf8").trim()}
+
+Write up to ${MAX_SCENARIOS} more, for the flows a user of this app would miss most if a pull request broke them.
+
+Where the app runs: it is in \`${appDir}\`${appDir === "." ? " (the repository root)" : ""}, built with \`${env("PROOFED_BUILD", "")}\` and served with \`${env("PROOFED_SERVE", "")}\` at ${env("PROOFED_URL")}. Nothing else runs: no backend, database or API that this command doesn't start. A scenario's \`url\` is a path on that server.
+
+How to find the flows: read the README, the app's routes and its pages and components. Look for what a visitor can see and do: pages, navigation, buttons, forms, filters, anything that changes what's on the screen. If the app has a demo, preview or sample-data mode that works without signing in, its pages count too.
+
+Spread the scenarios over the app instead of spending them all on one page: start with the page most visitors open first, past the heading home.md already checks, then one scenario for each main area. Within a scenario, prefer a flow (press this, and that appears) over re-reading static text, and check the one or two things a user would notice if it broke. A scenario that checks ten texts fails on every copy change and proves little more. For the same reason, a check quotes a few words that tell the thing apart ("Paused", "€81.90"), not a whole sentence.
+
+Write a scenario only if Kane can run it on that server as is, every time:
+- No sign-in, no payment, no email, no third-party service. A page that needs a login or a backend that isn't running is out.
+- Nothing it does stays behind for the next run: no data created, changed or deleted on a server.
+- Every step names what the user sees: the exact labels of buttons and links, headings, and the texts and numbers a check expects, copied from the code. Copy only text the page shows as is, not variable names, translation keys, or values made at runtime (dates, counts, random ids).
+- A text a check expects goes in double quotes, so Kane knows where it ends: Check that the row says "Paused" again. Without them, Kane reads the words after it as part of the text.
+- It ends with checks of what is on the page. "Check that it works" checks nothing; 'Check that the heading reads "Pricing" and three plans are listed' does. Proofed compares the quoted text of the last check with the page, so end on one that quotes what the page shows.
+
+A scenario that fails because it was guessed is deleted anyway. If you can't find a flow that meets all of the above, write fewer, or none.
+
+The format, exactly. One file per scenario, in ${dir}/, named after the flow in kebab-case (pricing-plans.md). An example from another app, for the shape only:
+
+${example}
+
+- \`name\`: what a person reads in the report, a few words.
+- \`paths\`: the files, relative to the repository root, whose change could break this flow: the page, the components it renders, the data and styles it reads. Globs like \`src/pages/**\` work. A scenario runs on the pull requests that change one of them, so leave out what every change touches (package.json, lockfiles, configs).
+- \`url\`: the path the scenario starts at.
+- Then 4 to 8 short lines, one action or check per line. Kane does each step once, as written.
+
+Write only new files in ${dir}/. Don't change home.md. Do not run builds or other commands except reading the app code. Do not access the network or external services. Do not commit.
+
+End your answer with one line per scenario you wrote, most valuable first, in English:
+SCENARIO: <file name> - <what it checks, in one short sentence a person reads in the report>`;
+
+const androidPrompt = () => `Proofed uses Kane CLI to check pull requests on a real Android cloud device. The workflow builds the app with \`${env("PROOFED_BUILD", "")}\` and installs \`${env("PROOFED_APP", "")}\` on the device before each scenario. Kane can interact with the screens but cannot read the code. The stock scenario in ${dir}/home.md already checks that the app opens.
+
+Read the README, Android screens, navigation, and string resources. Write up to ${MAX_SCENARIOS} scenarios for distinct flows that users would notice if they broke. Use flows that work on a fresh installation and need no sign-in, payment, email, or external services. Avoid flows that leave changes on a server. Refer to controls and screens by their visible labels. End each scenario with one or two specific checks of what is visible, using double quotes around expected text. Use labels and behavior confirmed by the source. If the source does not show a flow you can test this way, write fewer scenarios or none.
+
+Write one Markdown file per scenario in ${dir}/ with a kebab-case name. Use this example for the format:
+
+---
+name: Counter increments
+target: android
+execution: cloud
+paths: [app/src/main/**]
+---
+Tap "Add" once.
+Check that the counter reads "1".
+
+Use repository-relative paths or globs that could break that flow. Set target and execution as shown and leave app, device, and OS version to the workflow. Write short steps, one action or check per line.
+
+Write only new files in ${dir}/. Don't change home.md. Do not run builds or other commands except reading the app code. Do not access the network or external services. Do not commit.
+
+End your answer with one line per scenario you wrote, most valuable first, in English:
+SCENARIO: <file name> - <what it checks, in one short sentence a person reads in the report>`;
+
+function writeScenarios(ask: () => ReturnType<typeof askAgent>) {
+  const index = git("rev-parse", "--git-path", "index");
+  const copyOptions = { recursive: true, verbatimSymlinks: true, preserveTimestamps: true };
+  const backup = mkdtempSync(join(tmpdir(), "proofed-scenario-writer-"));
+  try {
+    const before = new Set([...diffPaths("HEAD"), ...diffPaths("--cached"), ...untrackedPaths()]);
+    // Android's APK can be ignored by Git but is still an input to every candidate scenario.
+    for (const s of stock) {
+      const target = scenarioTarget(s);
+      if (target.kind !== "android" || !target.app || /^APP[\w-]+$/.test(target.app)) continue;
+      const file = gitPath(relative(process.cwd(), target.app));
+      if (file && file !== ".." && !file.startsWith("../") && !isAbsolute(file)) before.add(file);
+    }
+    const saved = new Map([...before].sort().map((file, i) => {
+      if (!lstatSync(file, { throwIfNoEntry: false })) return [file, undefined] as const;
+      const copy = join(backup, String(i));
+      cpSync(file, copy, copyOptions);
+      return [file, copy] as const;
+    }));
+    const savedIndex = readFileSync(index);
+    let answer: ReturnType<typeof askAgent>;
+    let files: string[] = [];
+    try {
+      answer = ask();
+    } finally {
+      if (!lstatSync(index, { throwIfNoEntry: false })?.isFile() || !readFileSync(index).equals(savedIndex)) {
+        rmSync(index, { force: true });
+        writeFileSync(index, savedIndex);
+      }
+      const changed = diffPaths("HEAD").filter((file) => !saved.has(file));
+      if (changed.length) git("--literal-pathspecs", "restore", "--worktree", "--", ...changed);
+      for (const [file, copy] of saved) {
+        const stat = lstatSync(file, { throwIfNoEntry: false });
+        if (copy || (stat && !stat.isDirectory())) rmSync(file, { force: true, recursive: true });
+        if (copy) {
+          mkdirSync(dirname(file), { recursive: true });
+          cpSync(copy, file, copyOptions);
+        }
+      }
+      const prefix = `${gitPath(dir).replace(/\/$/, "")}/`;
+      for (const file of untrackedPaths()) {
+        if (saved.has(file)) continue;
+        if (file.startsWith(prefix) && file.endsWith(".md") && lstatSync(file).isFile()) files.push(file);
+        else rmSync(file, { force: true, recursive: true });
+      }
+    }
+    return { answer, files };
+  } finally {
+    rmSync(backup, { recursive: true, force: true });
+  }
+}
+
+const why = (r: ScenarioResult) =>
+  r.outcome === "error"
+    ? `Kane couldn't finish the run: ${r.error ?? "no reason given"}`
+    : unchecked(r)
+      ? `Kane finished without checking anything on the ${android ? "screen" : "page"}.`
+      : r.outcome === "unsure"
+        ? `Kane thinks the test is wrong: ${r.end?.reason ?? ""}`
+        : (r.end?.reason ?? "It failed.");
+
+async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Written; sha: string }> {
+  console.log(`Asking ${writer.model} (${writer.effort}) to write scenarios in ${dir}/`);
+  const { answer, files: added } = writeScenarios(() => timed("scenario writer", () => askAgent(android ? androidPrompt() : webPrompt(), {
+    ...writer,
+    permissionMode: "default",
+    tools: ["Read", "Glob", "Grep", "Write", "Edit"],
+    allowedTools: ["Read", "Glob", "Grep", `Write(./${dir}/**)`, `Edit(./${dir}/**)`],
+    maxTurns: 60,
+    timeoutMs: WRITE_TIMEOUT_MS,
+  })));
+  // Scenarios go to Kane and into the PR, so one that holds a job credential is deleted unread.
+  const files = added.filter((file) => {
+    if (!fileWithSecret([file])) return true;
+    rmSync(file, { force: true });
+    console.log(`Deleted ${file}: it held a credential of this job.`);
+    return false;
+  });
+  if (!answer.ok) {
+    console.log(`${agentName} couldn't write scenarios: ${answer.message}`);
+    for (const file of files) rmSync(file, { force: true });
+    return { results: await runAll(stock, outDir), written: { status: "failed" }, sha: headSha };
+  }
+  console.log(answer.text);
+
+  const listed = [...answer.text.matchAll(/^SCENARIO:\s*`?([\w.-]+\.md)`?\s*(?:[-—–:]\s*(.*))?$/gm)];
+  const ranked = listed.map((m) => m[1]);
+  const rank = (file: string) => (ranked.indexOf(basename(file)) + 1 || Infinity);
+  const about = (s: Scenario) => listed.find((m) => m[1] === basename(s.file))?.[2]?.trim() || s.objective.split("\n")[0]!;
+  const dropped: { name: string; why: string }[] = [];
+  const candidates: Scenario[] = [];
+  for (const file of files.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))) {
+    try {
+      const scenario = parseScenario(file, readFileSync(file, "utf8"));
+      // The action filters Android scenarios by their declared target, so a missing target never runs.
+      if (android && (scenario.target !== "android" || scenario.execution !== "cloud"))
+        dropped.push({ name: scenario.name, why: "Set target: android and execution: cloud in the scenario frontmatter." });
+      else if (candidates.length < MAX_SCENARIOS) candidates.push(scenario);
+      else dropped.push({ name: scenario.name, why: `${provider} wrote more than ${MAX_SCENARIOS}; this one ranked lower.` });
+    } catch (e) {
+      dropped.push({ name: basename(file), why: `Not a scenario file: ${e instanceof Error ? e.message : e}` });
+    }
+  }
+  console.log(`${provider} wrote ${files.length} file(s); running ${candidates.map((s) => s.id).join(", ") || "none of them"} with the stock scenarios.`);
+
+  const results = await runAll([...stock, ...candidates], outDir);
+  const fresh = results.slice(stock.length);
+  const kept = fresh.filter((r) => r.outcome === "passed");
+  for (const r of fresh) if (r.outcome !== "passed") dropped.push({ name: r.scenario.name, why: why(r) });
+  for (const file of files) if (!kept.some((r) => r.scenario.file === file)) rmSync(file, { force: true });
+  const stockResults = results.slice(0, stock.length);
+  const credits = (rs: ScenarioResult[]) => Math.round(rs.reduce((sum, r) => sum + creditsOf(r), 0));
+  const droppedCredits = credits(fresh.filter((r) => r.outcome !== "passed"));
+  console.log(`Kane credits: ${credits(results)} in all, ${droppedCredits} of them on the dropped scenarios.`);
+  if (kept.length === 0) return { results: stockResults, written: { status: "written", kept: [], dropped, credits: droppedCredits }, sha: headSha };
+
+  const paths = kept.map((r) => r.scenario.file);
+  git("--literal-pathspecs", "add", "--", ...paths);
+  git("--literal-pathspecs", "-c", `user.name=${provider}`, "-c", `user.email=${provider === "Codex" ? "codex@openai.com" : "noreply@anthropic.com"}`, "commit", "--only", "--no-verify", "-m",
+    `Add scenarios: ${kept.map((r) => r.scenario.name).join(", ")}\n\nWritten by ${agentName} for the Proofed setup; Kane ran each one ${where} and saw it pass.\n\nWritten-by: ${writer.model} (${writer.effort} effort)`, "--", ...paths);
+  try {
+    // The app's push starts a check of the new commit. It waits for this job (the workflow's
+    // concurrency doesn't let that push cancel a run) and then skips Kane, since the report
+    // published below is already about that commit (mode.ts).
+    const asApp = await timedAsync("push", () => pushHead(env("PROOFED_HEAD_REF")));
+    console.log(`Pushed the scenarios to ${env("PROOFED_HEAD_REF")}${asApp ? " as the Proofed app" : ""}`);
+  } catch (e) {
+    console.log(`Couldn't push the scenarios: ${e instanceof Error ? e.message.split("\n")[0] : e}`);
+    return { results: stockResults, written: { status: "failed", credits: credits(fresh) }, sha: headSha };
+  }
+  const sha = git("rev-parse", "HEAD");
+  const repoUrl = repo && `https://github.com/${repo.owner}/${repo.name}`;
+  return {
+    results: [...stockResults, ...kept],
+    written: { status: "written", kept: kept.map((r) => ({ id: r.scenario.id, about: about(r.scenario) })), dropped, credits: droppedCredits, commit: sha, commitUrl: repoUrl ? `${repoUrl}/commit/${sha}` : undefined },
+    sha,
+  };
+}
+
+if (repo && pr) await setStatus(repo, headSha, "pending", `${provider} is writing scenarios; Kane will run them ${where}`, runUrl);
+try {
+  const { results, written, sha } = await writeAndProve();
+  written.provider = providerOf(writer.model);
+  const previous = repo && pr ? readReportData((await findReport(repo, pr.number))?.body ?? "") : undefined;
+  const broken = await publish({ repo, pr: pr?.number, sha, results, skipped: [], runUrl, outDir, previous, written });
+  // The report is about the new commit; the one it was written on would otherwise stay pending.
+  if (repo && pr && sha !== headSha) {
+    await setStatus(repo, headSha, broken.length > 0 ? "failure" : "success", `Checked on ${sha.slice(0, 7)}, which adds the scenarios`, runUrl);
+  }
+  console.log(`\n${results.some(isBroken) ? "✗" : "✓"} ${results.filter((r) => r.outcome === "passed").length}/${results.length} passed`);
+  process.exitCode = broken.length > 0 ? 1 : 0;
+} catch (e) {
+  if (repo && pr) await setStatus(repo, headSha, "error", "Proofed itself failed; see the logs", runUrl).catch(() => {});
+  throw e;
+}
