@@ -10,7 +10,13 @@ export const fixLabel = ({ fixer }: Pick<PullView, "fixer">) =>
   fixer ? `Fix with ${providerLabel(fixer.provider ?? providerOf(fixer.model))}` : "Fix";
 
 export class SignedOut extends Error {}
-class CommentRejected extends Error {}
+class RequestError extends Error {
+  readonly retryable: boolean;
+  constructor(message: string, retryable: boolean, options?: ErrorOptions) {
+    super(message, options);
+    this.retryable = retryable;
+  }
+}
 
 // /app?demo: the app runs on sample data (demo.ts, its own chunk), in `pnpm dev` and in the built
 // site alike. No sign-in, no request to the API, and nothing stored: a signed-in user's cached
@@ -22,15 +28,17 @@ const PUBLIC = location.pathname === "/try" || location.pathname.startsWith("/tr
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (DEMO) return (await import("./demo")).demo(path, init) as T;
-  const res = await fetch(PUBLIC ? path.replace(/^\/api\/pulls\//, "/api/try/pulls/") : path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
+  const res = await fetch(PUBLIC ? path.replace(/^\/api\/pulls\//, "/api/try/pulls/") : path, { ...init, headers: { "content-type": "application/json", ...init?.headers } }).catch((e: unknown) => {
+    throw new RequestError(message(e), true, { cause: e });
+  });
   const body = (await res.json().catch(() => ({}))) as T & { error?: string; retryable?: boolean };
   if (res.status === 401) {
     forgetAll();
     throw new SignedOut();
   }
   if (!res.ok) {
-    const error = body.error ?? `Request failed (${res.status})`;
-    throw body.retryable === true ? new CommentRejected(error) : new Error(error);
+    const error = body?.error ?? `Request failed (${res.status})`;
+    throw new RequestError(error, res.status >= 500 || body?.retryable === true);
   }
   return body;
 }
@@ -85,9 +93,12 @@ function forgetAll() {
 }
 
 // One request per path at a time; everyone showing that path gets the answer.
-export function fetchInto<T>(path: string): Promise<T> {
+export function fetchInto<T>(path: string, { afterInFlight = false } = {}): Promise<T> {
   const running = inFlight.get(path);
-  if (running) return running.request as Promise<T>;
+  if (running) {
+    if (afterInFlight) return running.request.catch(() => {}).then(() => fetchInto<T>(path));
+    return running.request as Promise<T>;
+  }
   const changes: ((data: unknown) => unknown)[] = [];
   const request = api<T>(path).then((data) => {
     const updated = changes.reduce<unknown>((value, change) => change(value), data) as T;
@@ -260,7 +271,7 @@ export function useAsk(reload: () => void) {
     set("sending");
     api(`${detail}/${action}`, { method: "POST", ...(what && { body: JSON.stringify({ what }) }) }).then(
       () => set(undefined),
-      (e: unknown) => set({ error: message(e), retryable: e instanceof CommentRejected }),
+      (e: unknown) => set({ error: message(e), retryable: e instanceof RequestError && e.retryable }),
     ).finally(() => {
       reload();
       fetchInto(detail).catch(() => {});

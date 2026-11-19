@@ -207,7 +207,10 @@ export function Scenarios({ runs, at, scenario }: ScenariosProps) {
   // Open on a requested scenario, then a repaired flow after a successful fix.
   // Manual tab choices stay selected as new reports arrive.
   const scenarios = latestScenarios(view);
-  const [picked, setPicked] = useState<string>();
+  const [selection, setSelection] = useState<{ scenario: string | undefined; picked?: string }>({ scenario });
+  const navigated = selection.scenario !== scenario;
+  if (navigated) setSelection({ scenario });
+  const picked = navigated ? undefined : selection.picked;
   const current = scenarios.find((s) => s.id === picked) ?? defaultScenario(view, scenario);
   // The tabs are drawn anew with each scenario (ScenarioView is keyed by it), so the strip keeps its
   // sideways scroll here and shows the picked tab, instead of jumping back to the first one.
@@ -246,7 +249,7 @@ export function Scenarios({ runs, at, scenario }: ScenariosProps) {
             type="button"
             role="tab"
             aria-selected={on}
-            onClick={() => setPicked(s.id)}
+            onClick={() => setSelection({ scenario, picked: s.id })}
             className={`-mb-px flex h-11 shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 ${soft} ${focus} focus-visible:ring-inset ${on ? "border-fg font-medium text-fg" : "border-transparent text-dim hover:text-fg"}`}
           >
             <Mark kind={story(view, s.id)?.now.scenario.outcome ?? s.outcome} /> {s.name}

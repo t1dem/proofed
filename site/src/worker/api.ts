@@ -4,7 +4,7 @@ import { decrypt, encrypt, sealForGitHub } from "./crypto";
 import { gh, GitHubError, installationToken } from "./github";
 import type { Env } from "./index";
 import { forget, memo } from "./memo";
-import { DEFAULT_FIXER, isProvider, resolveFixer, type Fixer } from "./models";
+import { DEFAULT_FIXER, effortsFor, isProvider, resolveFixer, type Fixer } from "./models";
 import { getLive, liveFrame } from "./live";
 import { getPull, listPulls, markAsked } from "./runs";
 import { openSetupPr } from "./setup";
@@ -246,28 +246,37 @@ async function selectCodex(token: string, repoName: string) {
   }
 }
 
-// The workflow reads vars.PROOFED_MODEL / PROOFED_EFFORT / PROOFED_AUTOFIX; a default is stored as no variable at all.
+// The workflow reads these Actions variables. Defaults are stored as absent variables.
 async function setFixer(token: string, repoName: string, fixer: FixerView) {
-  const vars = [
-    ["PROOFED_PROVIDER", fixer.provider || "claude", "claude"],
-    ["PROOFED_MODEL", fixer.model, DEFAULT_FIXER.model],
-    ["PROOFED_EFFORT", fixer.effort, DEFAULT_FIXER.effort],
-    ["PROOFED_AUTOFIX", fixer.auto ? "true" : "", ""],
-  ] as const;
-  for (const [name, value, fallback] of vars) {
-    const path = `/repos/${repoName}/actions/variables`;
-    const missing = (e: unknown) => e instanceof GitHubError && e.status === 404;
-    if (value === fallback) {
+  const current = new Map((await repoVariables(token, repoName)).map(({ name, value }) => [name, value]));
+  const path = `/repos/${repoName}/actions/variables`;
+  const missing = (e: unknown) => e instanceof GitHubError && e.status === 404;
+  const write = async (name: string, value?: string) => {
+    if (current.get(name) === value) return;
+    if (value === undefined) {
       await gh(token, "DELETE", `${path}/${name}`).catch((e: unknown) => {
         if (!missing(e)) throw e;
       });
+      current.delete(name);
     } else {
       await gh(token, "PATCH", `${path}/${name}`, { name, value }).catch((e: unknown) => {
         if (missing(e)) return gh(token, "POST", path, { name, value });
         throw e;
       });
+      current.set(name, value);
     }
-  }
+  };
+
+  // With no provider override the workflow infers it from the model. Clear incompatible
+  // overrides before changing models so a failed write leaves a usable configuration.
+  const provider = fixer.provider === "codex" ? "codex" : undefined;
+  const effort = current.get("PROOFED_EFFORT");
+  if (effort && !effortsFor(fixer.model).some((e) => e === effort)) await write("PROOFED_EFFORT");
+  if (current.get("PROOFED_PROVIDER")?.trim().toLowerCase() !== provider) await write("PROOFED_PROVIDER");
+  await write("PROOFED_MODEL", fixer.model !== DEFAULT_FIXER.model ? fixer.model : undefined);
+  await write("PROOFED_PROVIDER", provider);
+  await write("PROOFED_EFFORT", fixer.effort !== DEFAULT_FIXER.effort ? fixer.effort : undefined);
+  await write("PROOFED_AUTOFIX", fixer.auto ? "true" : undefined);
 }
 
 async function testmuKeyWorks(username: string, key: string) {

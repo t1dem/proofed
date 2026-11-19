@@ -29,8 +29,8 @@ function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange:
       const r = await api<{ paused: boolean }>(`/api/repos/${repo.name}/${action}`, { method: "POST" });
       setPaused(r.paused);
       // The inbox and this list open on their cached copies; keep both in step.
-      mutate<RepoView[]>("/api/repos", (all) => all.map((x) => (x.name === repo.name ? { ...x, paused: r.paused } : x)));
-      mutate<PullView[]>("/api/pulls", (all) => all.map((p) => (p.repo === repo.name ? { ...p, paused: r.paused } : p)));
+      mutate<RepoView[]>("/api/repos", (all) => all.map((x) => (x.name === repo.name ? { ...x, paused: r.paused } : x)), { preserveDuringRefresh: true });
+      mutate<PullView[]>("/api/pulls", (all) => all.map((p) => (p.repo === repo.name ? { ...p, paused: r.paused } : p)), { preserveDuringRefresh: true });
     } catch (e) {
       setNote(<span className="text-bad">{message(e)}</span>);
     } finally {

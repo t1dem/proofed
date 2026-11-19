@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight, RotateCw } from "lucide-react";
 import { useState } from "react";
 import type { PullDetail, PullView } from "../worker/runs";
-import { fixLabel, movingName, titleName, useLoad, type Ask, type Route, type useAsk } from "./lib";
+import { canAskAgain, fixLabel, movingName, titleName, useLoad, type Ask, type Route, type useAsk } from "./lib";
 import { LiveRun } from "./Live";
 import { RunMeta } from "./PullRunMeta";
 import { Scenarios } from "./PullScenarios";
@@ -55,7 +55,7 @@ export function Pull({ repo, pr, scenario, listed, go, asked, ask }: PullProps) 
 
   const canRerun = kind !== "fixing" && kind !== "running" && !pull?.paused;
   const fixable = canFix && !pull?.paused;
-  const locked = { disabled: state === "sending" || !!pull?.readOnly, title: pull?.readOnly ? NEEDS_WRITE : undefined };
+  const locked = { disabled: !canAskAgain(state) || !!pull?.readOnly, title: pull?.readOnly ? NEEDS_WRITE : undefined };
 
   return (
     <main className="mx-auto max-w-6xl px-4 pb-8 sm:px-8 md:py-7">

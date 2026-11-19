@@ -3,7 +3,7 @@ import { useCallback, useLayoutEffect, useRef, useState, type FormEvent } from "
 import type { FixerView, RepoView } from "../worker/api";
 import { defaultModel, effortsFor, modelLabel, MODELS, PROVIDERS, providerLabel, providerOf, type Provider } from "../worker/models";
 import type { PullDetail, PullView } from "../worker/runs";
-import { api, message, mutate } from "./lib";
+import { api, fetchInto, message, mutate } from "./lib";
 import { ClaudeMark, CodexMark } from "./SettingsMarks";
 import { Backdrop, focus, NEEDS_WRITE, outline, popover, soft, useDismiss, useSheetDrag } from "./ui";
 
@@ -37,7 +37,7 @@ export function FixerMenu({ repo }: { repo: RepoView }) {
   const sheet = useSheetDrag(open && !!fixer, close);
 
   if (!fixer) {
-    return (
+    const permission = (
       <a
         href={`https://github.com/settings/installations/${repo.installationId}`}
         className={outline}
@@ -46,17 +46,26 @@ export function FixerMenu({ repo }: { repo: RepoView }) {
         Allow model choice
       </a>
     );
+    if (!error) return permission;
+    return (
+      <div>
+        {permission}
+        <p className="mt-2 text-[13px] text-bad">{error}</p>
+      </div>
+    );
   }
 
   const providerName = providerLabel(providerOf(fixer.model));
   const custom = !MODELS.some((m) => m.id === fixer.model);
-  const setFixer = (next: FixerView, preserveDuringRefresh = false) => {
-    mutate<RepoView[]>("/api/repos", (all) => all.map((r) => (r.name === repo.name ? { ...r, fixer: next } : r)), { preserveDuringRefresh });
+  const setFixer = (next: FixerView | null, preserveDuringRefresh = false) => {
+    const options = { preserveDuringRefresh };
+    mutate<RepoView[]>("/api/repos", (all) => all.map((r) => (r.name === repo.name ? { ...r, fixer: next } : r)), options);
     mutate<PullView[]>("/api/pulls", (all) => all.map((p) => {
       if (p.repo !== repo.name) return p;
-      mutate<PullDetail>(`/api/pulls/${p.repo}/${p.pr}`, (detail) => ({ ...detail, pull: { ...detail.pull, fixer: next } }));
-      return { ...p, fixer: next };
-    }));
+      const fixer = next ?? undefined;
+      mutate<PullDetail>(`/api/pulls/${p.repo}/${p.pr}`, (detail) => ({ ...detail, pull: { ...detail.pull, fixer } }), options);
+      return { ...p, fixer };
+    }), options);
   };
   const save = (next: FixerView, what: "model" | "effort" | "auto") => {
     const id = ++latestSave.current;
@@ -73,9 +82,15 @@ export function FixerMenu({ repo }: { repo: RepoView }) {
         if (id === latestSave.current) setFixer(saved, true);
       } catch (e) {
         if (id === latestSave.current) {
-          const previous = confirmed.current ?? fixer;
-          setFixer(previous);
           setError(message(e));
+          // A refresh already underway can still contain the settings from before the save.
+          const repos = await fetchInto<RepoView[]>("/api/repos", { afterInFlight: true }).catch(() => undefined);
+          if (id === latestSave.current) {
+            const fresh = repos?.find((r) => r.name === repo.name);
+            const reconciled = fresh ? fresh.fixer : confirmed.current;
+            confirmed.current = reconciled;
+            setFixer(reconciled, !!fresh);
+          }
         }
       } finally {
         if (id === latestSave.current) {

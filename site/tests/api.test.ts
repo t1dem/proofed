@@ -4,6 +4,7 @@ import { extname } from "node:path";
 import { test } from "node:test";
 import type { UserRow } from "../src/worker/auth.ts";
 import type { Env } from "../src/worker/index.ts";
+import { resolveFixer } from "../../src/fix/models.ts";
 
 // The Worker uses extensionless imports that Vite resolves for it.
 const source = new URL("../src/", import.meta.url).href;
@@ -59,7 +60,7 @@ test("malformed demo and account requests return 400 before changing anything", 
   assert.equal(reads, 13, "only authenticated requests read a session");
 });
 
-test("a rejected GitHub comment can be retried but an uncertain result cannot", async (t) => {
+test("GitHub comment rejections explain what to post and upstream failures propagate", async (t) => {
   const secret = Buffer.alloc(32, 1).toString("base64");
   const user = { token: await encrypt(secret, "comment-fixture"), token_expires: null };
   const env = {
@@ -197,7 +198,7 @@ test("syncing a Codex-only key selects Codex for repositories without a configur
   assert.deepEqual(writes, [{ path: "/repos/fixture/codex-only/actions/variables", variable: { name: "PROOFED_PROVIDER", value: "codex" } }]);
 });
 
-test("a partial settings save invalidates the cached fixer", async (t) => {
+test("a partial settings save keeps the fixer coherent and invalidates its cache", async (t) => {
   const secret = Buffer.alloc(32, 1).toString("base64");
   const user = { token: await encrypt(secret, "fixer-save-fixture"), token_expires: null };
   const env = {
@@ -211,7 +212,9 @@ test("a partial settings save invalidates the cached fixer", async (t) => {
     forget(`installation:${installationId}`);
     forget(`fixer:${repo}`);
   });
-  let provider = "claude";
+  const variables = new Map([["PROOFED_PROVIDER", "claude"], ["PROOFED_MODEL", "claude-opus-5-1"]]);
+  let fail: string | undefined = "PROOFED_MODEL";
+  let reads = 0;
   t.mock.method(globalThis, "fetch", async (input: string, init: RequestInit) => {
     const path = new URL(input).pathname;
     if (path === "/user/installations") return Response.json({ installations: [{ id: installationId }] });
@@ -219,22 +222,50 @@ test("a partial settings save invalidates the cached fixer", async (t) => {
       return Response.json({ repositories: [{ full_name: repo, permissions: { push: true } }] });
     }
     const vars = `/repos/${repo}/actions/variables`;
-    if (path === vars) return Response.json({ total_count: 1, variables: [{ name: "PROOFED_PROVIDER", value: provider }] });
-    assert.equal(init.method, "PATCH");
-    if (path === `${vars}/PROOFED_PROVIDER`) {
-      provider = (JSON.parse(String(init.body)) as { value: string }).value;
-      return new Response(null, { status: 204 });
+    if (path === vars && init.method === "GET") {
+      reads++;
+      return Response.json({ total_count: variables.size, variables: [...variables].map(([name, value]) => ({ name, value })) });
     }
-    assert.equal(path, `${vars}/PROOFED_MODEL`);
-    return new Response(null, { status: 403 });
+    assert.ok(path === vars || path.startsWith(`${vars}/`));
+    const name = path === vars ? (JSON.parse(String(init.body)) as { name: string }).name : path.slice(vars.length + 1);
+    if (name === fail && init.method !== "DELETE") return new Response(null, { status: 403 });
+    if (init.method === "PATCH" && !variables.has(name)) return new Response(null, { status: 404 });
+    if (init.method === "DELETE") variables.delete(name);
+    else {
+      assert.ok(init.method === "PATCH" || init.method === "POST");
+      variables.set(name, (JSON.parse(String(init.body)) as { value: string }).value);
+    }
+    const choice = resolveFixer({
+      provider: variables.get("PROOFED_PROVIDER"),
+      model: variables.get("PROOFED_MODEL"),
+      effort: variables.get("PROOFED_EFFORT"),
+    });
+    assert.ok(!("error" in choice), JSON.stringify(Object.fromEntries(variables)));
+    return init.method === "POST" ? Response.json({}, { status: 201 }) : new Response(null, { status: 204 });
   });
-  assert.equal((await repoFixer("fixture", repo))?.provider, "claude");
   const path = `/api/repos/${repo}/fixer`;
-  const res = await handleApi(new Request("https://example.test" + path, {
-    method: "POST", headers: { cookie: "proofed_session=fixture" }, body: '{"model":"gpt-6.1-sol","effort":"high"}',
+  const save = (model: string, effort: string) => handleApi(new Request("https://example.test" + path, {
+    method: "POST", headers: { cookie: "proofed_session=fixture" }, body: JSON.stringify({ model, effort }),
   }), env, path);
-  assert.equal(res.status, 403);
-  assert.equal((await repoFixer("fixture", repo))?.provider, "codex");
+  const read = () => repoFixer("fixture", repo);
+  const initial = await read();
+  assert.equal(initial?.model, "claude-opus-5-1");
+  assert.equal((await save("gpt-6.1-sol", "ultra")).status, 403);
+  const beforeRefresh = reads;
+  assert.deepEqual(await read(), initial);
+  assert.equal(reads, beforeRefresh + 1);
+  assert.equal(variables.get("PROOFED_MODEL"), "claude-opus-5-1");
+
+  fail = undefined;
+  const saved = await save("gpt-6.1-sol", "ultra");
+  assert.equal(saved.status, 200);
+  assert.deepEqual(await saved.json(), { fixer: { provider: "codex", model: "gpt-6.1-sol", effort: "ultra", auto: false } });
+  assert.equal((await read())?.effort, "ultra");
+
+  fail = "PROOFED_EFFORT";
+  // The incompatible effort is cleared before the switch. Reject only its replacement.
+  assert.equal((await save("claude-opus-5-1", "high")).status, 403);
+  assert.deepEqual(await read(), { provider: "claude", model: "claude-opus-5-1", effort: "xhigh", auto: false });
 });
 
 test("an in-flight read cannot restore a forgotten fixer", async (t) => {
