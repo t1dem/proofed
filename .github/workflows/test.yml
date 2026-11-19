@@ -53,7 +53,8 @@ jobs:
       - run: npm run typecheck
       # All Kane invocations in the suite use src/testing/fake-kane.ts or a fixture.
       # No Kane installation, login or paid scenarios are needed.
-      - run: npm test
+      # macOS runners have 3 cores: test files running side by side starve each other's Chrome.
+      - run: npm test -- ${{ runner.os == 'macOS' && '--test-concurrency=1' || '' }}
       - name: Compile and smoke-test the installed entry
         run: |
           pnpm exec tsc -p tsconfig.build.json
