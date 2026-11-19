@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
 import { closeSync, openSync, writeFileSync } from "node:fs";
+import { createConnection } from "node:net";
 import { setTimeout } from "node:timers/promises";
-import { findGitBash } from "../process.ts";
+import { findGitBash, killTree } from "../process.ts";
 import { timedAsync } from "../timing.ts";
-import { actionError, capture, quiet, run, runBash, runnerFile } from "./command.ts";
+import { actionError, capture, run, runBash, runnerFile } from "./command.ts";
 
 const bash = () => findGitBash();
 const stage = (name: string) => writeFileSync(runnerFile("proofed-stage"), `${name}\n`);
@@ -16,18 +17,48 @@ async function appCommand(command: string, record: boolean) {
 }
 
 async function serve(command: string) {
+  const url = process.env.PROOFED_URL ?? "";
   const fd = openSync(runnerFile("proofed-app.log"), "w");
   try {
+    if (await portOccupied(url)) throw new Error(`The port for ${url} is already in use or could not be checked.`);
     const child = spawn(bash(), ["-c", command], { detached: true, stdio: ["ignore", fd, fd], windowsHide: true });
-    child.once("error", () => {});
-    child.unref();
+    const exitedEarly = () => new Error(`The serve command exited before ${url} was ready (${child.signalCode ?? `code ${child.exitCode}`}).`);
+    const exited = new Promise<never>((_resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", () => reject(exitedEarly()));
+    });
+    const waiting = new AbortController();
+    try {
+      await Promise.race([exited, runBash("npx", ["--yes", "wait-on@8", "-t", "60000", url], {
+        signal: waiting.signal, stdio: ["ignore", fd, fd],
+      })]);
+      if (child.exitCode !== null || child.signalCode !== null) throw exitedEarly();
+    } catch (error) {
+      killTree(child.pid);
+      throw error;
+    } finally {
+      waiting.abort();
+      child.unref();
+    }
   } finally { closeSync(fd); }
-  await runBash("npx", ["--yes", "wait-on@8", "-t", "60000", process.env.PROOFED_URL ?? ""]);
 }
 
 export function appPort(url: string) {
   const parsed = new URL(url);
   return parsed.port || (parsed.protocol === "https:" ? "443" : "80");
+}
+
+function portOccupied(url: string, timeout = 500) {
+  const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
+  return new Promise<boolean>((resolve) => {
+    const socket = createConnection({ host, port: Number(appPort(url)), signal: AbortSignal.timeout(timeout) });
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    // Only a refused connection confirms that no server accepted it.
+    socket.once("error", (error) => resolve(!("code" in error && error.code === "ECONNREFUSED")));
+  });
 }
 
 export async function stopCheckServer(url: string) {
@@ -46,11 +77,12 @@ export async function stopCheckServer(url: string) {
       }
     }
   }
-  for (let i = 0; i < 20; i++) {
-    const answering = await runBash("curl", ["-s", "-o", "/dev/null", url], { stdio: quiet }).then(() => true, () => false);
-    if (!answering) break;
-    await setTimeout(500);
+  const deadline = Date.now() + 10_000;
+  for (let remaining = deadline - Date.now(); remaining > 0; remaining = deadline - Date.now()) {
+    if (!(await portOccupied(url, Math.min(500, remaining)))) return;
+    await setTimeout(Math.min(500, Math.max(0, deadline - Date.now())));
   }
+  throw new Error(`The check server did not release the port for ${url}.`);
 }
 
 if (import.meta.main) {

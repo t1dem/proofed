@@ -1,9 +1,11 @@
+import { baseRev } from "../changes.ts";
+import { env } from "../env.ts";
 import { effortsFor, isEffort, parseModel, type Effort } from "../fix/models.ts";
 import { scenarioDoubted } from "../report/runresult.ts";
 import type { ScenarioResult } from "../types.ts";
-import type { Scenario } from "../scenarios.ts";
-import { checkedAt } from "../fix/fixtarget.ts";
-import { resolveScenarioTarget, type Target } from "../targets/target.ts";
+import { loadScenariosOr, type Scenario } from "../scenarios.ts";
+import { checkedAt, scenarioTarget } from "../fix/fixtarget.ts";
+import { resolveScenarioTarget, TARGET_KEYS, type Target } from "../targets/target.ts";
 
 // "/proofed" in a PR comment re-runs the check, which also gives a PR opened before Proofed was
 // added its first run. "/proofed <what to check>" has Kane check just that. A slash command,
@@ -85,16 +87,32 @@ export function askedScenario(where: keyof typeof NAMES, text: string, target: T
   return scenario;
 }
 
+type AskedScenario = Scenario & { targetScenarioId?: string };
+
+export function askedScenarioFromFile(where: "description" | "comment", text: string, source: Scenario): AskedScenario {
+  const scenario: AskedScenario = { ...askedScenario(where, text, scenarioTarget(source)), targetScenarioId: source.id };
+  for (const key of TARGET_KEYS) if (source[key]) scenario[key] = source[key];
+  return scenario;
+}
+
 // Reports store the generated objective. Recover the original request only if the check's
 // generator can reproduce that objective with the current target settings.
-export function replayAskedScenario(stored: Scenario): Scenario | undefined {
+export function replayAskedScenario(stored: AskedScenario): Scenario | undefined {
   const where = stored.id === "asked-in-description" ? "description" : stored.id === "asked-in-comment" ? "comment" : undefined;
   if (!where || stored.file !== "" || stored.url !== "/" || typeof stored.objective !== "string") return;
-  const template = askedScenario(where, "").objective;
-  const boundary = template.indexOf("\n\n") + 2;
-  const prefix = template.slice(0, boundary);
-  const suffix = template.slice(boundary);
+  let template: Scenario;
+  if (stored.targetScenarioId !== undefined) {
+    const { PROOFED_BASE_REF: ref, PROOFED_BASE_SHA: sha } = process.env;
+    const rev = ref && sha ? baseRev({ ref, sha }) : sha;
+    // Read target settings from the checkout before replaying a request from a report.
+    const source = loadScenariosOr(env("PROOFED_SCENARIOS", ".proofed/scenarios"), rev).find((s) => s.id === stored.targetScenarioId);
+    if (!source) return;
+    template = askedScenarioFromFile(where, "", source);
+  } else template = askedScenario(where, "");
+  const boundary = template.objective.indexOf("\n\n") + 2;
+  const prefix = template.objective.slice(0, boundary);
+  const suffix = template.objective.slice(boundary);
   if (!stored.objective.startsWith(prefix) || !stored.objective.endsWith(suffix)) return;
   const request = stored.objective.slice(prefix.length, -suffix.length);
-  if (request.trim()) return askedScenario(where, request);
+  if (request.trim()) return { ...template, objective: `${prefix}${request}${suffix}` };
 }

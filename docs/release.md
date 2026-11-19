@@ -6,6 +6,7 @@ Run these commands from a clean checkout with Node 22.18+.
 
 ```sh
 pnpm install --frozen-lockfile
+pnpm --dir site install --frozen-lockfile
 npm login --registry=https://registry.npmjs.org/
 npm whoami --registry=https://registry.npmjs.org/
 npm publish --access public --registry=https://registry.npmjs.org/

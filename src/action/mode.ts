@@ -140,7 +140,7 @@ if (badSetting && mode === "fix") await refuse(badSetting);
 if (badSetting) console.log(`::warning::${badSetting} The check runs; fixing and writing scenarios are off until it is corrected.`);
 const fixer = resolveFixer(asked, "error" in configured ? DEFAULT_FIXER : configured);
 if ("error" in fixer) {
-  if (event.comment) await reply(repo, number, fixer.error);
+  if (event.comment) await refuse(fixer.error);
   skip(fixer.error);
 }
 const credential = fixer.provider === "codex" ? process.env.PROOFED_CODEX === "true" : process.env.PROOFED_CLAUDE === "true";

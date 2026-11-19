@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
-import { askedScenario, descriptionRequest, parseCommand, parseFix } from "./requests.ts";
+import { askedScenario, descriptionRequest, parseCommand, parseFix, replayAskedScenario } from "./requests.ts";
 import { cacheKey } from "../check/cache.ts";
+import { scenarioTarget } from "../fix/fixtarget.ts";
 import { resolveScenarioTarget } from "../targets/target.ts";
+import { checkSelection } from "./checkselection.ts";
 
 test("/proofed alone re-runs the check; with text it asks for that", () => {
   assert.equal(parseCommand("/proofed"), "");
@@ -78,6 +83,44 @@ test("PR requests resolve the target from the environment", () => {
     if (before.target === undefined) delete process.env.PROOFED_TARGET; else process.env.PROOFED_TARGET = before.target;
     if (before.execution === undefined) delete process.env.PROOFED_EXECUTION; else process.env.PROOFED_EXECUTION = before.execution;
   }
+});
+
+test("PR requests inherit one picked target and the fixer reloads its settings from the scenario", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "proofed-request-target-"));
+  const env = { PROOFED_SCENARIOS: dir, PROOFED_BASE_SHA: "HEAD", PROOFED_ONLY: "mobile,tablet", PROOFED_TARGET: "", PROOFED_EXECUTION: "", PROOFED_APP: "", PROOFED_URL: "" };
+  const before = Object.entries(env).map(([name]) => [name, process.env[name]] as const);
+  Object.assign(process.env, env);
+  t.after(() => {
+    for (const [name, value] of before) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+  writeFileSync(join(dir, "mobile.md"), "---\ntarget: android\nexecution: cloud\napp: app.apk\npaths: [app/**]\n---\nCheck the counter.\n");
+  writeFileSync(join(dir, "tablet.md"), "---\ntarget: android\nexecution: cloud\napp: ./app.apk\npaths: [app/**]\n---\nCheck the menu.\n");
+  writeFileSync(join(dir, "desktop.md"), "---\ntarget: desktop\npaths: [desktop/**]\n---\nCheck the menu.\n");
+  const pr = { number: 1, body: "Check the counter.", head: { ref: "feature", sha: "HEAD" }, base: { ref: "main", sha: "HEAD" } };
+
+  const description = checkSelection(pr, undefined, "HEAD").asked[0]!;
+  const comment = checkSelection(pr, "Check the counter.", "HEAD");
+  assert.equal(comment.selected.length, 1);
+  for (const request of [description, comment.selected[0]!]) {
+    assert.match(request.objective, /on an Android device/);
+    assert.equal(scenarioTarget(request).kind, "android");
+    assert.deepEqual(replayAskedScenario({ ...request, app: "untrusted.apk" }), request);
+  }
+
+  process.env.PROOFED_ONLY = "mobile,desktop";
+  process.env.PROOFED_URL = "http://localhost:4173";
+  const mixed = checkSelection(pr, undefined, "HEAD");
+  assert.deepEqual(mixed.selected.map((s) => s.id), ["desktop", "mobile"]);
+  assert.equal(scenarioTarget(checkSelection(pr, "Check the counter.", "HEAD").selected[0]!).kind, "web");
+
+  process.env.PROOFED_ONLY = "";
+  assert.equal(checkSelection(pr, undefined, "HEAD").asked.length, 1);
+  process.env.PROOFED_URL = "";
+  assert.equal(checkSelection(pr, undefined, "HEAD").asked.length, 0);
 });
 
 test("fix accepts a Codex provider, aliases and full IDs with per-model efforts", () => {

@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { test, type TestContext } from "node:test";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { appPort } from "./app.ts";
 import { waitForCodex } from "./background.ts";
 import { gradleCache, packageCache, packageProject, storePath } from "./dependencies.ts";
@@ -185,4 +189,25 @@ test("autofix resolves the original port and checkbox fixes use only same-repo b
   const base = ref("main", "base-sha", "owner/repo");
   assert.deepEqual(fixRefs({ base, head: ref("feature", "head-sha", "owner/repo") }), { base: "base-sha", base_ref: "main", head_ref: "feature" });
   assert.equal(fixRefs({ base, head: ref("feature", "head-sha", "fork/repo") }), undefined);
+});
+
+test("app startup refuses an occupied port and detects a serve command that exits early", async (t) => {
+  const dir = fixture(t);
+  writeFileSync(join(dir, "npx"), "#!/usr/bin/env bash\nexec sleep 5\n", { mode: 0o755 });
+  const listener = createServer((socket) => socket.destroy());
+  await new Promise<void>((resolve, reject) => listener.once("error", reject).listen(0, "127.0.0.1", resolve));
+  const address = listener.address();
+  assert.ok(address && typeof address === "object");
+  const app = fileURLToPath(new URL("./app.ts", import.meta.url));
+  const exec = promisify(execFile);
+  const build = () => exec(process.execPath, [app, "build"], { timeout: 4000, env: {
+    ...process.env, PATH: `${dir}${delimiter}${process.env.PATH}`, RUNNER_TEMP: dir, PROOFED_BUILD: "",
+    PROOFED_SERVE: "exit 42", PROOFED_WEB: "true", PROOFED_URL: `http://127.0.0.1:${address.port}`,
+  } });
+  try {
+    await assert.rejects(build, { code: 1, stderr: /already in use/ });
+  } finally {
+    await new Promise<void>((resolve) => listener.close(() => resolve()));
+  }
+  await assert.rejects(build, { code: 1, stderr: /serve command exited before .* was ready \(code 42\)/ });
 });

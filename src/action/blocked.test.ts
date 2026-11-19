@@ -19,10 +19,12 @@ test("a blocked report carries the run history on and leaves nothing to fix", ()
 test("raw app logs cannot copy the job token into the PR comment", () => {
   const before = process.env.GITHUB_TOKEN;
   const token = "proofed-test-secret-not-a-real-token";
+  const encoded = Buffer.from(`x-access-token:${token}`).toString("base64");
   process.env.GITHUB_TOKEN = token;
   try {
-    const body = blockedReport({ stage:"build", command:"pnpm build", dir:".", url:"http://localhost:5400", log:`Build failed: ${token} ${Buffer.from(`x-access-token:${token}`).toString("base64")}`, sha:"abc123" });
+    const body = blockedReport({ stage:"build", command:"pnpm build", dir:".", url:"http://localhost:5400", log:`Build failed: ${token} ${encoded}`, sha:"abc123" });
     assert.ok(!body.includes(token));
+    assert.ok(!body.includes(encoded));
     assert.ok(body.includes("Build failed: ***"));
   } finally {
     if (before === undefined) delete process.env.GITHUB_TOKEN;

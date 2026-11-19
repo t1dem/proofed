@@ -130,10 +130,16 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         PROOFED_URL: ${{ inputs.url }}
         PROOFED_TARGET: ${{ inputs.target }}
+        PROOFED_EXECUTION: ${{ inputs.execution }}
+        PROOFED_APP: ${{ inputs.app }}
+        PROOFED_DEVICE: ${{ inputs.device }}
+        PROOFED_OS_VERSION: ${{ inputs.os-version }}
+        PROOFED_LAUNCH: ${{ inputs.launch }}
+        PROOFED_CDP_ENDPOINT: ${{ inputs.cdp-endpoint }}
+        PROOFED_DIR: ${{ inputs.working-directory }}
         PROOFED_SCENARIOS: ${{ inputs.scenarios }}
         PROOFED_ONLY: ${{ inputs.only }}
         PROOFED_SHA: ${{ steps.mode.outputs.head_sha }}
-        PROOFED_BASE_SHA: ${{ steps.mode.outputs.base_sha }}
       run: node "$GITHUB_ACTION_PATH/src/action/actiontarget.ts"
 
     - name: Find package stores and cache keys
@@ -362,7 +368,7 @@ runs:
       if: ${{ !cancelled() && steps.mode.outputs.autofix == 'true' && steps.run.outputs.fixable == 'true' && steps.codex-auth.outcome != 'failure' }}
       shell: bash
       env:
-        PROOFED_URL: ${{ inputs.url }}
+        PROOFED_URL: ${{ steps.targets.outputs.web == 'true' && inputs.serve != '' && inputs.url || '' }}
         PROOFED_PROVIDER: ${{ steps.mode.outputs.provider }}
         PROOFED_CODEX_DIR: ${{ steps.tool-plan.outputs.codex_dir }}
         PROOFED_CODEX_BACKGROUND: ${{ steps.codex-background.outputs.dir }}

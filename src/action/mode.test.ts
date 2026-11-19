@@ -153,8 +153,9 @@ test("mode resolves Codex aliases, provider variables and effort before installi
   assert.match(command, /^effort=high$/m);
   const provider = run(comment("created","/proofed fix codex"),"write",false,{});
   assert.match(provider, /^model=gpt-6\.2-sol$/m);
-  const invalid = run(comment("created","/proofed fix ultra"),"write",false,{});
+  const invalid = run(comment("created","/proofed fix ultra"),"write",true,{});
   assert.match(invalid, /^mode=none$/m);
+  assert.match(invalid, /Couldn't reply.*403/);
   assert.match(invalid, /doesn't support/);
 });
 

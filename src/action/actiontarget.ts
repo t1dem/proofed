@@ -11,7 +11,7 @@ const event = readEvent<Event>();
 const { repo } = ctx();
 const pr = event.pull_request ?? (repo && event.issue?.pull_request ? await getPullRequest(repo, event.issue.number) : undefined);
 const { selected } = checkSelection(pr, event.comment ? parseCommand(event.comment.body) : undefined,
-  process.env.PROOFED_SHA || pr?.head.sha || "local", process.env.PROOFED_BASE_SHA);
+  env("PROOFED_SHA", pr?.head.sha ?? process.env.GITHUB_SHA ?? "local"));
 const web = needsWeb(targetScenarios(selected));
 if (web && !process.env.PROOFED_URL?.trim()) throw new Error("url is required for web checks.");
 const line = `web=${web}\n`;

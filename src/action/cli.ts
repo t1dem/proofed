@@ -4,7 +4,6 @@
 import { checkSelection } from "./checkselection.ts";
 import { checkedWhere, targetScenarios } from "../fix/fixtarget.ts";
 import { appendFileSync, mkdirSync } from "node:fs";
-import { baseRev } from "../changes.ts";
 import { env } from "../env.ts";
 import { acknowledge, ctx, findReport, getPullRequest, readEvent, reply, setStatus, type PullRequest } from "../github.ts";
 import { live } from "../report/live.ts";
@@ -41,11 +40,10 @@ if (command !== undefined && parseFix(command)) {
 }
 
 const pr = event.pull_request ?? (repo && event.issue?.pull_request ? await getPullRequest(repo, event.issue.number) : undefined);
-// The action pins the checkout and comparison SHAs before the PR metadata lookup.
+// The action pins the checkout head before the PR metadata lookup.
 const sha = env("PROOFED_SHA", pr?.head.sha ?? process.env.GITHUB_SHA ?? "local");
-const base = process.env.PROOFED_BASE_SHA || (pr && baseRev(pr.base));
 
-let { selected, skipped, asked } = checkSelection(pr, command, sha, base);
+let { selected, skipped, asked } = checkSelection(pr, command, sha);
 
 selected = targetScenarios(selected);
 console.log(`Running ${selected.length} scenario(s)${asked.length ? `, including what the ${command ? "comment" : "PR description"} asks` : ""}.`);
