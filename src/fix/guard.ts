@@ -4,9 +4,10 @@ import { gitPath } from "../paths.ts";
 // test was edited proves nothing.
 import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
+import { relative } from "node:path";
 
 export const offLimits = (file: string, scenarios: string) =>
-  [".proofed", ".github", gitPath(scenarios).replace(/\/+$/, "")].some((dir) => gitPath(file) === dir || gitPath(file).startsWith(`${dir}/`));
+  [".proofed", ".github", gitPath(relative(process.cwd(), scenarios))].some((dir) => gitPath(file) === dir || gitPath(file).startsWith(`${dir}/`));
 
 // Puts every off-limits file the working tree changed back as the commit has it, and says which.
 export function putBack(scenarios: string) {

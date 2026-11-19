@@ -118,7 +118,7 @@ test("a neighbour that was failing already, or that Kane can't confirm, doesn't 
   const { set, claude, input } = await setup(t);
   set({ shipping: "fail", promo: "fail", checkout: "pass" });
   const end = await fixLoop(
-    input({ failures: [failure(shipping)], open: ["shipping", "promo"], ask: claude({ shipping: "pass", checkout: "automation" }) }),
+    input({ failures: [failure(shipping)], previouslyFailed: ["shipping", "promo"], open: ["shipping", "promo"], ask: claude({ shipping: "pass", checkout: "automation" }) }),
   );
 
   assert.equal(end.status, "fixed");

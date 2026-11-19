@@ -47,8 +47,14 @@ export const fixRequested = (body: string) => /^- \[x\] \*\*Fix with (?:Claude|C
 export const WORKING = "⏳ **Claude is working on a fix**";
 
 export const FIX_BOX_LINE = /^- \[[ x]\] \*\*Fix with (?:Claude|Codex)\*\*[^\n]*/m;
+// The event and current comment may differ by the checkbox tick itself.
+export const sameFixRequest = (current: string | undefined, requested: string) => {
+  const untick = (body: string) => body.replace(FIX_BOX_LINE, (line) => line.replace("[x]", "[ ]"));
+  return current !== undefined && untick(current) === untick(requested);
+};
 const LIVE_LINES = /\n\n(?:- \[[ x]\] \*\*Fix with (?:Claude|Codex)\*\*|⏳ \*\*(?:Claude|Codex) is working on a fix\*\*)[^\n]*/g;
 const OMISSION_NOTE = "_Some report details were omitted to fit GitHub's comment limit._";
+const OMITTED_REQUEST = "Proofed couldn't keep the failed ad hoc request in this report. Run the check again to retry it.";
 
 // A report a newer one replaced: without the fix box, so nobody ticks a stale one, or a "working" line
 // that would never end, and with a marker that nothing reads as the PR's report.
@@ -381,10 +387,13 @@ function compose(
   if (storedSteps > 0 || body.length <= COMMENT_LIMIT) return body;
 
   for (const compact of compactReportData(data)) {
-    const hint = canFix && compact.failures.some((f) => f.file)
-      ? "\n\nComment `/proofed fix` to fix the file-backed scenarios."
-      : "";
-    const tail = `\n\n${OMISSION_NOTE}${hint}\n${dataComment(compact)}${marker}`;
+    const hasRequest = (id: string) => compact.asked?.some((s) => s.id === id);
+    const notes = [OMISSION_NOTE];
+    if (data.failures.some((f) => !f.file && !hasRequest(f.id))) notes.push(OMITTED_REQUEST);
+    if (canFix && compact.failures.some((f) => f.file || hasRequest(f.id))) {
+      notes.push("Comment `/proofed fix` to fix the scenarios kept in this report.");
+    }
+    const tail = `\n\n${notes.join("\n\n")}\n${dataComment(compact)}${marker}`;
     const remaining = COMMENT_LIMIT - tail.length;
     if (remaining >= summary[0]!.length) {
       const visible = summary.join("\n\n");
@@ -392,5 +401,5 @@ function compose(
       return visible.slice(0, Math.max(cut, summary[0]!.length)).trimEnd() + tail;
     }
   }
-  return `${summary[0]}\n\n${OMISSION_NOTE}`;
+  return [summary[0], OMISSION_NOTE, ...(data.failures.some((f) => !f.file) ? [OMITTED_REQUEST] : [])].join("\n\n");
 }

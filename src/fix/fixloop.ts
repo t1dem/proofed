@@ -31,9 +31,9 @@ export type Answer = { ok: true; summary: string } | { ok: false; message: strin
 
 export type FixLoopInput = {
   fixer: Fixer;
-  // What the report says broke, and the ids of every scenario that didn't pass in it (failed, not
-  // confirmed, couldn't finish) and of every scenario its check ran.
+  // Only confirmed failures are exempt from regression checks. Open and checked describe the prior run.
   failures: FailureData[];
+  previouslyFailed?: string[];
   open: string[];
   checked: string[];
   ask: (failures: FailureData[], feedback: string) => Answer;
@@ -68,6 +68,8 @@ export type FixLoopEnd = {
 export async function fixLoop(o: FixLoopInput): Promise<FixLoopEnd> {
   const max = o.maxAttempts ?? MAX_ATTEMPTS;
   const ids = o.failures.map((f) => f.id);
+  const previouslyFailed = new Set(o.previouslyFailed ?? ids);
+  const previouslyPassed = (id: string) => o.checked.includes(id) && !o.open.includes(id);
   let failures = o.failures;
   let feedback = "";
   let summary = "";
@@ -128,20 +130,22 @@ export async function fixLoop(o: FixLoopInput): Promise<FixLoopEnd> {
     const missing = [...o.failures, ...neighbours].filter((s) => !returned.has(s.id));
     const missingLines = missing.map((s) => `Kane returned no result for "${s.name}" (${s.id}).`);
     fixing = results.filter((r) => ids.includes(r.scenario.id));
-    broke = results.filter((r) => !ids.includes(r.scenario.id) && r.outcome === "failed" && !o.open.includes(r.scenario.id));
+    broke = results.filter((r) => !ids.includes(r.scenario.id) && r.outcome === "failed" && !previouslyFailed.has(r.scenario.id));
     const fixed = missing.length === 0 && fixing.length === ids.length && fixing.some((r) => r.outcome === "passed") && fixing.every(settled) && broke.length === 0;
     tries.push({
       summary,
-      result: fixed ? "Kane saw it pass." : [...notPassing(fixing), ...missingLines, ...broke.map((r) => `It broke "${r.scenario.name}", which passed before.`)].join("; "),
+      result: fixed ? "Kane saw it pass." : [...notPassing(fixing), ...missingLines, ...broke.map((r) =>
+        `It broke "${r.scenario.name}", which ${previouslyPassed(r.scenario.id) ? "passed" : "hadn't failed"} before.`
+      )].join("; "),
     });
     if (fixed) return end("fixed", attempt);
 
     const brokeLines = broke.map((r) => {
       const edited = files.filter((f) => touches(r.scenario, f)).join(", ");
       const why = `${r.end?.reason ?? r.error}`;
-      return o.checked.includes(r.scenario.id)
+      return previouslyPassed(r.scenario.id)
         ? `"${r.scenario.name}" passed before your change and fails now: ${why} It covers ${edited}, which you changed.`
-        : `"${r.scenario.name}" fails now: ${why} The pull request alone doesn't touch it; it covers ${edited}, which you changed.`;
+        : `"${r.scenario.name}" fails now: ${why} It covers ${edited}, which you changed.`;
     });
     const still = o.failures.filter((f) => fixing.some((r) => r.scenario.id === f.id && !settled(r)));
     const unresolved = o.failures.filter((f) => !returned.has(f.id) || still.includes(f));

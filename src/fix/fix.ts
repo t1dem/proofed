@@ -1,6 +1,7 @@
 // A report checkbox, /proofed fix, or an automatic fix starts this job. Only a tree Kane checked can be pushed.
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { configuredFixer } from "./agent.ts";
 import { changedFiles } from "../changes.ts";
 import { env } from "../env.ts";
@@ -12,12 +13,13 @@ import { changesLfsFiles, diffPaths, discardLeak, fileStates, fixChanges, git, i
 import { ctx, editComment, findReport, readEvent, setStatus, type Comment } from "../github.ts";
 import { putBack } from "./guard.ts";
 import { live } from "../report/live.ts";
+import { COMMENT_LIMIT } from "../report/reportdata.ts";
 import { describeFixer, providerLabel, providerOf, type Fixer } from "./models.ts";
 import { publish, putReport, runAll } from "../check/pipeline.ts";
 import { pushHead } from "./push.ts";
-import { FIX_BOX_LINE, fixRequested, readReportData, WORKING, type FileChange, type FixNote, type ReportData } from "../report/report.ts";
-import { descriptionCheckNote, isDescriptionScenario, replayAskedScenario } from "../action/requests.ts";
-import { pickScenarios, type Scenario } from "../scenarios.ts";
+import { FIX_BOX_LINE, fixRequested, readReportData, readRunKey, sameFixRequest, WORKING, type FileChange, type FixNote, type ReportData } from "../report/report.ts";
+import { avoidFileId, descriptionCheckNote, isDescriptionScenario, replayAskedScenario } from "../action/requests.ts";
+import { affectedBy, pickScenarios, type Scenario } from "../scenarios.ts";
 import { maskSecrets } from "../secrets.ts";
 import { targetChecks } from "../targets/targetchecks.ts";
 import { timedAsync } from "../timing.ts";
@@ -30,15 +32,17 @@ type FixRequest = ReturnType<typeof ctx> & {
   body: string;
   data: ReportData;
 };
-type FixContext = FixRequest & {
+type FixReport = FixRequest & {
   brokenSha: string;
-  fixer: Fixer;
   provider: ReturnType<typeof providerLabel>;
+};
+type FixContext = FixReport & {
+  fixer: Fixer;
   agentName: string;
 };
 type Restore = {
   kind: "restore";
-  request: FixContext;
+  request: FixReport;
   log?: string;
   repost?: boolean;
   status?: string | null;
@@ -53,7 +57,6 @@ type Phase<T> = { value: T } | { outcome: FixOutcome };
 // Puts a line where the checkbox is, or under the headline when there's none.
 const withLine = (text: string, line: string) =>
   FIX_BOX_LINE.test(text) ? text.replace(FIX_BOX_LINE, () => line) : text.replace(/(### Proofed\n\n[^\n]*\n)/, (_, headline: string) => `${headline}\n${line}\n`);
-const untick = (body: string) => body.replace(FIX_BOX_LINE, (line) => line.replace("[x]", "[ ]"));
 const uniqueScenarios = (scenarios: Scenario[]) => [...new Map(scenarios.map((s) => [s.id, s])).values()];
 
 async function loadRequest(): Promise<FixRequest | undefined> {
@@ -66,7 +69,7 @@ async function loadRequest(): Promise<FixRequest | undefined> {
   const body = (ticked ? event.comment?.body : report?.body) ?? "";
   const data = readReportData(body);
   // A new check can update the same comment while this checkbox event is waiting.
-  const replaced = ticked && !!context.repo && (!report?.body || report.id !== event.comment?.id || untick(report.body) !== untick(body));
+  const replaced = ticked && !!context.repo && (report?.id !== event.comment?.id || !sameFixRequest(report?.body, body));
   if (!pr || !(auto || event.issue?.pull_request) || !data?.failures.length || (ticked && !fixRequested(body)) || replaced) return undefined;
   return { ...context, pr, report, body, data };
 }
@@ -103,8 +106,8 @@ async function validateRequest(request: FixContext): Promise<Phase<FixPlan>> {
     return { outcome: { kind: "restore", request, note, log: note, status: null, code: 0 } };
   }
   // Older reports may count a best-effort description check as a failure.
-  const reported = data.failures.filter((f) => !(isDescriptionScenario(f) && f.failedCheck === "scenario_doubted"));
-  if (!reported.length) return { outcome: { kind: "skip", note: "No fix requested. Kane couldn't verify what the PR description asks." } };
+  const fixable = (f: ReportData["failures"][number]) => !(isDescriptionScenario(f) && f.failedCheck === "scenario_doubted");
+  if (!data.failures.some(fixable)) return { outcome: { kind: "skip", note: "No fix requested. Kane couldn't verify what the PR description asks." } };
 
   const appDir = env("PROOFED_DIR", ".");
   mkdirSync(outDir, { recursive: true });
@@ -113,18 +116,23 @@ async function validateRequest(request: FixContext): Promise<Phase<FixPlan>> {
   const branch = env("PROOFED_HEAD_REF");
   // Fall back to the base for scenarios when the PR branch has none.
   const rev = process.env.PROOFED_BASE_REF ? `origin/${process.env.PROOFED_BASE_REF}` : base;
-  const checkedFiles = pickScenarios({ changed: changedFiles(base), rev }).selected;
-  const fileIds = reported.filter((f) => f.file).map((f) => f.id);
-  const failedFiles = fileIds.length ? pickScenarios({ only: fileIds, rev }).selected : [];
+  const allFiles = pickScenarios({ rev }).selected;
+  const checkedFiles = affectedBy(allFiles, changedFiles(base));
+  // Older reports may already share an ID with a file selected for the fix.
+  const originalFailures = data.failures.map((f) => avoidFileId(f, allFiles));
+  const reported = originalFailures.filter(fixable);
+  const failedIds = reported.filter((f) => f.file).map((f) => f.id);
+  const failedFiles = failedIds.length ? pickScenarios({ only: failedIds, rev }).selected : [];
   const refusal = await checkSetup(targetScenarios(uniqueScenarios([...checkedFiles, ...failedFiles])));
   if (refusal) return { outcome: { kind: "restore", request, note: refusal, log: refusal, status: refusal } };
 
   const asked: Scenario[] = [];
-  for (const stored of data.asked ?? []) {
+  for (const request of data.asked ?? []) {
+    const stored = avoidFileId(request, allFiles);
     if (reported.length !== data.failures.length && isDescriptionScenario(stored)) continue;
     const rebuilt = replayAskedScenario(stored);
     const failure = reported.find((f) => !f.file && f.id === stored.id);
-    if (!rebuilt || (failure && failure.objective !== rebuilt.objective)) continue;
+    if (!rebuilt || (failure?.objective && failure.objective !== rebuilt.objective)) continue;
     const targeted = targetScenarios([rebuilt]);
     if (!targeted.length) continue;
     const reason = await checkSetup(targeted);
@@ -145,7 +153,7 @@ async function validateRequest(request: FixContext): Promise<Phase<FixPlan>> {
     end: undefined,
     clip: undefined,
   }));
-  return { value: { ...request, appDir, base, branch, rev, checkedFiles, failedFiles, asked, failures, unverified } };
+  return { value: { ...request, data: { ...data, failures: originalFailures }, appDir, base, branch, rev, checkedFiles, failedFiles, asked, failures, unverified } };
 }
 
 function scenariosFor({ failedFiles, asked }: FixPlan, ids: string[]) {
@@ -155,11 +163,19 @@ function scenariosFor({ failedFiles, asked }: FixPlan, ids: string[]) {
 async function markFixing(plan: FixPlan) {
   const { repo, report, body, fixer, provider, runUrl, brokenSha, pr, failures } = plan;
   if (repo && report) {
-    await editComment(repo, report.id, withLine(body, `${WORKING.replace("Claude", provider)} with ${describeFixer(fixer)}. [Follow along](${runUrl})`));
+    const current = await findReport(repo, pr);
+    if (current?.id !== report.id || !sameFixRequest(current.body, body)) return false;
+    const working = withLine(body, `${WORKING.replace("Claude", provider)} with ${describeFixer(fixer)}. [Follow along](${runUrl})`);
+    if (working.length <= COMMENT_LIMIT) await editComment(repo, report.id, working);
     await setStatus(repo, brokenSha, "pending", `${provider} is fixing, Kane will re-check`, runUrl);
   }
   live.start({ kind: "fix", pr, sha: brokenSha, runUrl });
   live.track(scenariosFor(plan, failures.map((f) => f.id)));
+  return true;
+}
+
+function forgetMissingChanges(agentTouched: Set<string>, changed: { has(file: string): boolean }) {
+  for (const file of agentTouched) if (!changed.has(file)) agentTouched.delete(file);
 }
 
 async function runAttempts(plan: FixPlan, app: ReturnType<typeof prepareBuild>) {
@@ -171,10 +187,12 @@ async function runAttempts(plan: FixPlan, app: ReturnType<typeof prepareBuild>) 
   const loop = await fixLoop({
     fixer,
     failures,
+    previouslyFailed: data.failures.map((f) => f.id),
     open: data.open ?? data.failures.map((f) => f.id),
     checked: checkedFiles.map((s) => s.id),
     ask: (failures, feedback) => {
       beforeAnswer = fileStates();
+      forgetMissingChanges(agentTouched, beforeAnswer);
       const diff = git("diff", `${base}...HEAD`).slice(0, 40_000);
       const scenarios = scenariosFor(plan, failures.map((f) => f.id));
       const answer = askFixer(fixPrompt({ failures, feedback, diff, scenarios, base, appDir, buildCommand, buildInput }), fixer, buildCommand);
@@ -184,7 +202,9 @@ async function runAttempts(plan: FixPlan, app: ReturnType<typeof prepareBuild>) 
     putBack: () => {
       const undone = putBack(env("PROOFED_SCENARIOS", ".proofed/scenarios"));
       // A retry starts with files left by the previous build.
-      for (const [file, state] of fileStates()) {
+      const afterAnswer = fileStates();
+      forgetMissingChanges(agentTouched, afterAnswer);
+      for (const [file, state] of afterAnswer) {
         if (state !== beforeAnswer.get(file)) agentTouched.add(file);
       }
       return undone;
@@ -247,7 +267,7 @@ type VerifiedFix = {
 };
 
 async function verifyTree(
-  plan: FixPlan, { build, serve }: ReturnType<typeof prepareBuild>, { loop, lastAttemptTree }: Awaited<ReturnType<typeof runAttempts>>,
+  plan: FixPlan, { build, serve }: ReturnType<typeof prepareBuild>, { loop, lastAttemptTree, agentTouched }: Awaited<ReturnType<typeof runAttempts>>,
 ): Promise<Phase<VerifiedFix>> {
   const { base, rev, failedFiles, asked, outDir, data, failures, agentName } = plan;
   const refuse = (note: string, status: string): Phase<VerifiedFix> => {
@@ -256,8 +276,11 @@ async function verifyTree(
   };
   // Reuse the last attempt only when both the files and the build are still current.
   const pickFinal = () => {
-    const { selected, skipped } = pickScenarios({ changed: [...new Set([...changedFiles(base), ...fixChanges()])], rev });
-    return { final: targetScenarios(uniqueScenarios([...selected, ...failedFiles, ...asked])), skipped };
+    const allFiles = pickScenarios({ rev }).selected;
+    const selected = affectedBy(allFiles, [...new Set([...changedFiles(base), ...fixChanges()])]);
+    const final = targetScenarios(uniqueScenarios([...selected, ...failedFiles, ...asked]));
+    const included = new Set([...selected, ...final.filter((s) => s.file)].map((s) => s.id));
+    return { final, skipped: allFiles.filter((s) => !included.has(s.id)).map((s) => s.name) };
   };
   let final: Scenario[];
   let skipped: string[];
@@ -274,6 +297,7 @@ async function verifyTree(
     let byId = new Map(loop.results.map((r) => [r.scenario.id, r]));
     const canReuse = lastAttemptTree === verifiedFiles && final.every((s) => byId.has(s.id));
     if (!canReuse) {
+      forgetMissingChanges(agentTouched, new Set(fixChanges()));
       const buildError = build();
       if (buildError !== undefined) throw new Error(buildError);
       verifiedFiles = treeBeforeCheck();
@@ -299,7 +323,8 @@ async function verifyTree(
   }
   const fixedIds = new Set(failures.map((f) => f.id));
   const finalFixed = results.filter((r) => fixedIds.has(r.scenario.id));
-  const regressed = results.filter((r) => !fixedIds.has(r.scenario.id) && r.outcome === "failed" && !descriptionCheckNote(r) && !(data.open ?? []).includes(r.scenario.id));
+  const previouslyFailed = new Set(data.failures.map((f) => f.id));
+  const regressed = results.filter((r) => r.outcome === "failed" && !descriptionCheckNote(r) && !previouslyFailed.has(r.scenario.id));
   const verified = finalFixed.filter((r) => r.outcome === "passed");
   if (!verified.length || finalFixed.length !== fixedIds.size || !finalFixed.every(settled) || regressed.length) {
     return refuse("Kane couldn't confirm the fix in the final check. Nothing was pushed.", "The final check didn't pass; nothing was pushed");
@@ -358,6 +383,7 @@ async function pushFix(plan: FixPlan, verified: VerifiedFix, committed: Committe
   const { branch, repo, report, pr, runUrl, outDir, asked, data, fixer, unverified, brokenSha } = plan;
   const { results, skipped, finalFixed } = verified;
   const { names, changes } = committed;
+  const sha = git("rev-parse", "HEAD");
   let asApp: boolean;
   try {
     asApp = await timedAsync("push", () => pushHead(branch));
@@ -366,7 +392,6 @@ async function pushFix(plan: FixPlan, verified: VerifiedFix, committed: Committe
     const note = "Proofed couldn't push the fix to the branch.";
     return { kind: "restore", request: plan, note, status: note, log: `${note} ${maskSecrets(e instanceof Error ? e.message : String(e))}` };
   }
-  const sha = git("rev-parse", "HEAD");
   console.log(`Pushed ${sha} to ${branch}${asApp ? " as the Proofed app" : ""}`);
   const description = unverified.length || finalFixed.some(descriptionCheckNote)
     ? `${names} fixed in ${sha.slice(0, 7)}; a request wasn't verified`
@@ -385,18 +410,10 @@ async function pushFix(plan: FixPlan, verified: VerifiedFix, committed: Committe
   };
 }
 
-export async function runFix(): Promise<FixOutcome> {
-  const request = await loadRequest();
-  if (!request) return { kind: "skip", note: "No fix requested." };
-  const brokenSha = git("rev-parse", "HEAD");
-  const fixer = configuredFixer();
-  const provider = providerLabel(providerOf(fixer.model));
-  const validation = await validateRequest({ ...request, brokenSha, fixer, provider, agentName: provider === "Codex" ? "Codex" : "Claude Code" });
-  if ("outcome" in validation) return validation.outcome;
-  const plan = validation.value;
+async function executeFix(plan: FixPlan): Promise<FixOutcome> {
   const app = prepareBuild(plan.appDir);
   try {
-    await markFixing(plan);
+    if (!(await markFixing(plan))) return { kind: "skip", note: "A newer report has replaced the one this fix was requested for." };
     const attempt = await runAttempts(plan, app);
     if (attempt.loop.status !== "fixed") return stopAfterAttempts(plan, attempt.loop);
     const verification = await verifyTree(plan, app, attempt);
@@ -413,7 +430,28 @@ export async function runFix(): Promise<FixOutcome> {
     if ("outcome" in commit) return commit.outcome;
     return await pushFix(plan, verified, commit.value, attempt.loop);
   } finally {
-    app.cleanup();
+    try {
+      app.cleanup();
+    } catch (e) {
+      console.log(`Couldn't remove the fix build script. ${maskSecrets(String(e))}`);
+    }
+  }
+}
+
+export async function runFix(): Promise<FixOutcome> {
+  const request = await loadRequest();
+  if (!request) return { kind: "skip", note: "No fix requested." };
+  let provider: FixReport["provider"] = FIX_BOX_LINE.exec(request.body)?.[0].includes("Fix with Codex") ? "Codex" : "Claude";
+  try {
+    const brokenSha = git("rev-parse", "HEAD");
+    const fixer = configuredFixer();
+    provider = providerLabel(providerOf(fixer.model));
+    const validation = await validateRequest({ ...request, brokenSha, fixer, provider, agentName: provider === "Codex" ? "Codex" : "Claude Code" });
+    return "outcome" in validation ? validation.outcome : await executeFix(validation.value);
+  } catch (e) {
+    const note = "Proofed couldn't finish the fix. See the workflow logs and try again.";
+    const diagnostic = e instanceof Error ? e.stack ?? e.message : String(e);
+    return { kind: "restore", request: { ...request, brokenSha: request.data.sha, provider }, note, status: note, log: `${note} ${maskSecrets(diagnostic)}` };
   }
 }
 
@@ -434,10 +472,16 @@ async function finalize(outcome: FixOutcome): Promise<number> {
         const original = body.replace(/- \[x\] \*\*Fix with (?:Claude|Codex)\*\*/, box);
         const quoted = `> ${outcome.note}`;
         restored = original.includes(box) ? original.replace(box, () => `${quoted}\n\n${box}`) : withLine(original, quoted);
+        if (restored.length > COMMENT_LIMIT) restored = original;
       }
       if (repo && report) {
         try {
-          await (outcome.repost ? putReport(repo, pr, restored, true) : editComment(repo, report.id, restored));
+          const current = await findReport(repo, pr);
+          // The working line may have changed, while a newer run changes the report data or archive.
+          if (current?.id === report.id && current.body && readRunKey(current.body) === readRunKey(body) &&
+              isDeepStrictEqual(readReportData(current.body), readReportData(body))) {
+            await (outcome.repost ? putReport(repo, pr, restored, true) : editComment(repo, report.id, restored));
+          }
         } finally {
           const status = outcome.status === undefined ? "Fix didn't run; the original failure stands" : outcome.status;
           if (status !== null) await setStatus(repo, brokenSha, "failure", status, runUrl);

@@ -27,10 +27,28 @@ test("an old workflow gets a note instead of a fix box that would do nothing", (
     assert.equal(noKey?.comment, false);
     assert.match(noKey!.note, /To fix with Codex, add `codex-api-key: \$\{\{ secrets\.CODEX_API_KEY \}\}` or `codex-auth-json: \$\{\{ secrets\.CODEX_AUTH_JSON \}\}`/);
     const onlyClaude = fixSetup("codex", { ...env, PROOFED_CODEX: "true" });
-    assert.equal(onlyClaude?.comment, true);
-    assert.match(onlyClaude!.note, /only when \*\*Fix with Claude\*\* is ticked/);
+    assert.equal(onlyClaude?.comment, false);
+    assert.match(onlyClaude!.note, /To show the Codex box, add/);
+    assert.doesNotMatch(onlyClaude!.note, /\/proofed fix/);
     assert.equal(fixSetup("claude", { ...env, PROOFED_CLAUDE: "true" }), undefined);
     assert.equal(fixSetup("claude", { ...env, PROOFED_CLAUDE: "false" })?.comment, false);
+    workflow(`jobs:
+  proofed:
+    if: >-
+      (github.event.action == 'created' && contains(github.event.comment.body, '/proofed')) ||
+      contains(github.event.comment.body, '- [x] **Fix with Claude**')
+`);
+    const command = fixSetup("codex", { ...env, PROOFED_CODEX: "true" });
+    assert.equal(command?.comment, true);
+    assert.match(command!.note, /Comment \`\/proofed fix\`/);
+    workflow(`jobs:
+  proofed:
+    if: >-
+      (contains(github.event.comment.body, '/proofed') ||
+      contains(github.event.comment.body, '- [x] **Fix with Claude**')) &&
+      github.event.action == 'edited'
+`);
+    assert.equal(fixSetup("codex", { ...env, PROOFED_CODEX: "true" })?.comment, false);
     workflow(`jobs:
   proofed:
     if: >-

@@ -7,7 +7,7 @@ import { FAILED_CHECK_ACTION, FAILED_CHECK_REASON, NOTHING_CHECKED } from "./run
 import { blockedReport } from "../action/blocked.ts";
 import { addRun, alreadyReported, buildReport, fixRequested, outdated, postsNew, readReportData, WORKING, type ReportData } from "./report.ts";
 import { crashResult } from "../targets/precheck.ts";
-import { askedScenario } from "../action/requests.ts";
+import { askedScenario, replayAskedScenario } from "../action/requests.ts";
 import type { ScenarioResult } from "../types.ts";
 
 const failed: ScenarioResult = {
@@ -48,6 +48,24 @@ test("oversized reports keep valid metadata and omit stored objectives and steps
   assert.ok(huge.length <= 65_536);
   assert.match(huge, /1000 of 1000/);
   assert.equal(readReportData(huge)?.history?.at(-1)?.state, "failed");
+});
+
+test("a compact report keeps a failed ad hoc request when it fits", () => {
+  const request = askedScenario("comment", "Check whether the cart total updates.");
+  const long = { ...failed, scenario: { ...failed.scenario, objective: "step ".repeat(20_000) } };
+  const input = { sha: "abc1234def", skipped: [], clips: new Map(), fixEnabled: true };
+  const body = buildReport({ ...input, results: [long, { ...failed, scenario: request }], asked: [request] });
+  assert.ok(body.length <= 65_536);
+  const data = readReportData(body)!;
+  assert.deepEqual(replayAskedScenario(data.asked![0]!), request);
+  assert.equal(data.failures.find((f) => f.id === request.id)?.objective, "");
+  assert.match(body, /Comment `\/proofed fix`/);
+
+  const oversized = askedScenario("comment", "x".repeat(65_450));
+  const omitted = buildReport({ ...input, results: [{ ...failed, scenario: oversized }], asked: [oversized] });
+  assert.ok(omitted.length <= 65_536);
+  assert.match(omitted, /couldn't keep the failed ad hoc request/);
+  assert.doesNotMatch(omitted, /\/proofed fix/);
 });
 
 test("cloud reports describe screenshot-only evidence once", () => {

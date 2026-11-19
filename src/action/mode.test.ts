@@ -137,6 +137,17 @@ test("fix: false refuses a checked fix box", () => {
   assert.match(result, /"method":"POST","body":\{"body":"Fixing is turned off for this repository\."/);
 });
 
+test("a queued tick must still match the report data in the current comment", () => {
+  const tick = comment("edited");
+  const stale = { ...tick, comment: { ...report, body: report.body.replace('"head"', '"old"') } };
+  const result = run(stale, "write");
+  assert.match(result, /^mode=none$/m);
+  assert.match(result, /A newer report has replaced the one the box was ticked in/);
+  assert.match(run(tick, "write"), /^mode=fix$/m);
+  const unchecked = { ...tick, comment: { ...report, body: report.body.replace("[x]", "[ ]") } };
+  assert.match(run(unchecked, "write"), /^mode=none$/m);
+});
+
 test("mode resolves Codex aliases, provider variables and effort before installing", () => {
   const configured = { PROOFED_VARS: JSON.stringify({PROOFED_PROVIDER:"codex",PROOFED_MODEL:"gpt-6.1-terra",PROOFED_EFFORT:"ultra",PROOFED_AUTOFIX:"true"}), PROOFED_CODEX:"true" };
   const check = run({action:"opened",pull_request:pr,sender:{type:"User",login:"writer"}},"write",false,configured);

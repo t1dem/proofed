@@ -49,7 +49,8 @@ const MAY_ASK_NOTHING =
   "If the text above doesn't describe something a user can see or do in this app, stop right away " +
   "without clicking anything: there is nothing to check. Never sign in, and never leave the app's own pages to get there.";
 
-export const isDescriptionScenario = (s: Pick<Scenario, "id" | "file">) => !s.file && s.id === "asked-in-description";
+const descriptionId = /^asked-in-description(?:-\d+)?$/;
+export const isDescriptionScenario = (s: Pick<Scenario, "id" | "file">) => !s.file && descriptionId.test(s.id);
 export const DESCRIPTION_DOUBTED = "Kane couldn't verify what the PR description asks.";
 export const DESCRIPTION_UNCHECKED = "The PR description didn't name anything Kane could check.";
 
@@ -89,6 +90,17 @@ export function askedScenario(where: keyof typeof NAMES, text: string, target: T
 
 type AskedScenario = Scenario & { targetScenarioId?: string };
 
+// File scenarios and requests share the output directory, which may be case-insensitive.
+export function avoidFileId<T extends Pick<Scenario, "id" | "file">>(request: T, files: Scenario[]): T {
+  if (request.file) return request;
+  const fileIds = new Set(files.map((s) => s.id.toLowerCase()));
+  if (!fileIds.has(request.id)) return request;
+  const stem = request.id.replace(/-\d+$/, "");
+  let suffix = 2;
+  while (fileIds.has(`${stem}-${suffix}`)) suffix++;
+  return { ...request, id: `${stem}-${suffix}` };
+}
+
 export function askedScenarioFromFile(where: "description" | "comment", text: string, source: Scenario): AskedScenario {
   const scenario: AskedScenario = { ...askedScenario(where, text, scenarioTarget(source)), targetScenarioId: source.id };
   for (const key of TARGET_KEYS) if (source[key]) scenario[key] = source[key];
@@ -98,7 +110,7 @@ export function askedScenarioFromFile(where: "description" | "comment", text: st
 // Reports store the generated objective. Recover the original request only if the check's
 // generator can reproduce that objective with the current target settings.
 export function replayAskedScenario(stored: AskedScenario): Scenario | undefined {
-  const where = stored.id === "asked-in-description" ? "description" : stored.id === "asked-in-comment" ? "comment" : undefined;
+  const where = descriptionId.test(stored.id) ? "description" : /^asked-in-comment(?:-\d+)?$/.test(stored.id) ? "comment" : undefined;
   if (!where || stored.file !== "" || stored.url !== "/" || typeof stored.objective !== "string") return;
   let template: Scenario;
   if (stored.targetScenarioId !== undefined) {
@@ -114,5 +126,5 @@ export function replayAskedScenario(stored: AskedScenario): Scenario | undefined
   const suffix = template.objective.slice(boundary);
   if (!stored.objective.startsWith(prefix) || !stored.objective.endsWith(suffix)) return;
   const request = stored.objective.slice(prefix.length, -suffix.length);
-  if (request.trim()) return { ...template, objective: `${prefix}${request}${suffix}` };
+  if (request.trim()) return { ...template, id: stored.id, objective: `${prefix}${request}${suffix}` };
 }

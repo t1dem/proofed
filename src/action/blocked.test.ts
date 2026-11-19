@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { blockedReport } from "./blocked.ts";
 import { outcomeOf, readReportData } from "../report/report.ts";
 
@@ -14,6 +19,18 @@ test("a blocked report carries the run history on and leaves nothing to fix", ()
   const data = readReportData(blockedReport({ stage: "build", command: "pnpm build", dir: ".", url: "http://localhost:4173", log: "", sha: "2222222bbbb", previous }));
   assert.deepEqual(data, { sha: "2222222bbbb", failures: [], history: [{ sha: "1111111aaaa", state: "failed" }, { sha: "2222222bbbb", state: "error" }] });
   assert.deepEqual(outcomeOf(data!), { state: "blocked", open: [] });
+});
+
+test("a native build can report failure with no web URL", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "proofed-blocked-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, "proofed-stage"), "build\n");
+  const run = spawnSync(process.execPath, [fileURLToPath(new URL("./blocked.ts", import.meta.url))], {
+    encoding: "utf8",
+    env: { ...process.env, RUNNER_TEMP: dir, PROOFED_TARGET: "android", PROOFED_URL: "", PROOFED_NUMBER: "1", PROOFED_SHA: "abc123", GITHUB_TOKEN: "" },
+  });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(outcomeOf(readReportData(run.stdout)!).state, "blocked");
 });
 
 test("raw app logs cannot copy the job token into the PR comment", () => {

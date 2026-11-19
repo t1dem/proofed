@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { askedScenario, descriptionRequest, parseCommand, parseFix, replayAskedScenario } from "./requests.ts";
+import { askedScenario, descriptionRequest, isDescriptionScenario, parseCommand, parseFix, replayAskedScenario } from "./requests.ts";
 import { cacheKey } from "../check/cache.ts";
 import { scenarioTarget } from "../fix/fixtarget.ts";
 import { resolveScenarioTarget } from "../targets/target.ts";
@@ -121,6 +122,36 @@ test("PR requests inherit one picked target and the fixer reloads its settings f
   assert.equal(checkSelection(pr, undefined, "HEAD").asked.length, 1);
   process.env.PROOFED_URL = "";
   assert.equal(checkSelection(pr, undefined, "HEAD").asked.length, 0);
+
+  for (const id of ["asked-in-description", "asked-in-description-2"]) {
+    writeFileSync(join(dir, `${id}.md`), "---\ntarget: android\nexecution: cloud\napp: app.apk\n---\nCheck the profile.\n");
+  }
+  process.env.PROOFED_ONLY = "mobile,asked-in-description,asked-in-description-2";
+  const collision = checkSelection(pr, undefined, "HEAD");
+  assert.deepEqual(new Set(collision.selected.map((s) => s.id)), new Set(["asked-in-description", "asked-in-description-2", "mobile", "asked-in-description-3"]));
+  assert.equal(isDescriptionScenario(collision.selected[0]!), false);
+  assert.equal(isDescriptionScenario(collision.asked[0]!), true);
+  assert.deepEqual(replayAskedScenario(collision.asked[0]!), collision.asked[0]);
+});
+
+test("the Actions target selector includes scenarios that inherit the repository target", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "proofed-inherited-target-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(join(dir, ".proofed"));
+  writeFileSync(join(dir, ".proofed/config.json"), JSON.stringify({ target: "android" }));
+  const script = `
+    import { targetScenarios } from ${JSON.stringify(new URL("../fix/fixtarget.ts", import.meta.url).href)};
+    const selected = targetScenarios([
+      { id: "inherited", file: "inherited.md" },
+      { id: "web", file: "web.md", target: "web" },
+    ]);
+    console.log(JSON.stringify(selected.map((s) => [s.id, s.resolvedTarget.kind])));
+  `;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: dir, encoding: "utf8", env: { ...process.env, PROOFED_TARGET: " android ", PROOFED_EXECUTION: "local" },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), [["inherited", "android"]]);
 });
 
 test("fix accepts a Codex provider, aliases and full IDs with per-model efforts", () => {

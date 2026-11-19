@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import { baseRev, changedFiles } from "../changes.ts";
 import { scenarioTarget } from "../fix/fixtarget.ts";
 import { pickScenarios, type Scenario } from "../scenarios.ts";
-import { askedScenario, askedScenarioFromFile, descriptionRequest } from "./requests.ts";
+import { askedScenario, askedScenarioFromFile, avoidFileId, descriptionRequest } from "./requests.ts";
 import { APP_LOGIN, SETUP_BRANCH } from "./setup.ts";
 import type { PullRequest } from "../github.ts";
 
@@ -44,5 +44,6 @@ export function checkSelection(pr: PullRequest | undefined, command: string | un
     if (source) asked.push(askedScenarioFromFile("description", request, source));
     else if (globalTarget || (!picked.selected.length && process.env.PROOFED_URL?.trim())) asked.push(askedScenario("description", request));
   }
-  return { selected: [...picked.selected, ...asked], skipped: picked.skipped, asked };
+  const distinct = asked.map((s) => avoidFileId(s, picked.selected));
+  return { selected: [...picked.selected, ...distinct], skipped: picked.skipped, asked: distinct };
 }

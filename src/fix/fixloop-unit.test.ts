@@ -17,8 +17,14 @@ const options: FixLoopInput = {
 };
 
 test("the retry identifies a missing scenario result without treating it as a failed check", async () => {
+  const asks: { ids: string[]; feedback: string }[] = [];
   const end = await fixLoop({
     ...options,
+    maxAttempts: 2,
+    ask: (failures, feedback) => {
+      asks.push({ ids: failures.map((f) => f.id), feedback });
+      return { ok: true, summary: "Fix checkout" };
+    },
     check: async () => [{ scenario: scenarios[0]!, outcome: "passed", steps: [], end: undefined, clip: undefined }],
   });
   assert.equal(end.status, "gave-up");
@@ -26,6 +32,21 @@ test("the retry identifies a missing scenario result without treating it as a fa
   assert.match(end.feedback, /Kane returned no result for "Checkout"/);
   assert.doesNotMatch(end.feedback, /pass now|still fails/);
   assert.match(end.tries[0]!.result, /Kane returned no result for "Checkout"/);
+  assert.deepEqual(asks.map((ask) => ask.ids), [["cart", "checkout"], ["checkout"]]);
+  assert.match(asks[1]!.feedback, /Kane returned no result for "Checkout"/);
+});
+
+test("a previously unconfirmed neighbour that now fails blocks a fix", async () => {
+  const end = await fixLoop({
+    ...options,
+    failures: [options.failures[0]!],
+    scenariosFor: () => [scenarios[0]!],
+    check: async (selected) => selected.map((scenario) => ({
+      scenario, outcome: scenario.id === "cart" ? "passed" : "failed", steps: [], end: undefined, clip: undefined,
+    })),
+  });
+  assert.equal(end.status, "gave-up");
+  assert.deepEqual(end.broke.map((r) => r.scenario.id), ["checkout"]);
 });
 
 test("build diagnostics are masked before trimming and check failures keep their own stage", async (t) => {

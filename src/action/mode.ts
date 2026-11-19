@@ -5,7 +5,7 @@
 import { appendFileSync } from "node:fs";
 import { acknowledge, ctx, findReport, getPermission, getPullRequest, hasStatus, listFolder, readEvent, readFile, reply, setStatus, type PullRequest } from "../github.ts";
 import { DEFAULT_FIXER, resolveFixer } from "../fix/models.ts";
-import { alreadyReported, fixRequested, readReportData } from "../report/report.ts";
+import { alreadyReported, fixRequested, readReportData, sameFixRequest } from "../report/report.ts";
 import { parseCommand, parseFix, type FixCommand } from "./requests.ts";
 import { APP_LOGIN, FIRST_ANDROID_SCENARIO, FIRST_SCENARIO, onlyFirstScenario, SETUP_BRANCH } from "./setup.ts";
 
@@ -88,7 +88,8 @@ const fixingDisabled = process.env.PROOFED_FIX === "false";
 const fixingDisabledMessage = "Fixing is turned off for this repository.";
 if (checkbox) {
   // A tick that raced a newer report: the box was on a report that's no longer the one.
-  if ((await findReport(repo, number))?.id !== checkbox.id) skip("A newer report has replaced the one the box was ticked in.");
+  const report = await findReport(repo, number);
+  if (report?.id !== checkbox.id || !sameFixRequest(report.body, checkbox.body)) skip("A newer report has replaced the one the box was ticked in.");
   if (fixingDisabled) await refuse(fixingDisabledMessage);
   mode = "fix";
 } else if (event.comment && command !== undefined) {

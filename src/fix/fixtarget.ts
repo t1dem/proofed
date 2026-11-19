@@ -1,13 +1,16 @@
 import { resolveScenarioTarget } from "../targets/target.ts";
+import { targetFilter } from "../check/targetfilter.ts";
 import type { Scenario } from "../scenarios.ts";
 import { timedAsync } from "../timing.ts";
 
 export const scenarioTarget = (s: Scenario) => s.resolvedTarget ?? resolveScenarioTarget(s, {}, process.env, process.cwd());
 
 export function targetScenarios(scenarios: Scenario[]) {
-  const filter = process.env.PROOFED_TARGET;
+  const env = process.env;
+  const requested = env.PROOFED_TARGET?.trim();
+  const matchesTarget = targetFilter({}, { env, cwd: process.cwd() });
   return scenarios
-    .filter((s) => !filter || (s.resolvedTarget ? s.resolvedTarget.kind === filter : !s.file || (s.target ?? "web") === filter))
+    .filter((s) => !requested || (s.resolvedTarget ? s.resolvedTarget.kind === requested : !s.file || matchesTarget(s)))
     .map((s) => ({ ...s, resolvedTarget: scenarioTarget(s) }));
 }
 

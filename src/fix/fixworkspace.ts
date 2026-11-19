@@ -139,7 +139,7 @@ function build(buildScript: string) {
     const ignored = ignoredTrackedPaths();
     const changedOutputs = diffPaths("HEAD").filter((file) => ignored.has(file));
     if (changedOutputs.length) git("--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--worktree", "--", ...changedOutputs);
-    execFileSync(findGitBash(), [buildScript.replaceAll("\\", "/")], { stdio: "pipe", windowsHide: true });
+    execFileSync(findGitBash(), [buildScript.replaceAll("\\", "/")], { stdio: "pipe", windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
     const scenariosDir = env("PROOFED_SCENARIOS", ".proofed/scenarios");
     const protectedFiles = fixChanges().filter((file) => offLimits(file, scenariosDir));
     if (protectedFiles.length) return `The build changed protected files: ${protectedFiles.join(", ")}.`;

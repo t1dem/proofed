@@ -148,16 +148,21 @@ export function collectReportData({
 
 // Try these in order to keep as much metadata as the comment limit allows.
 export function compactReportData(data: ReportData): ReportData[] {
-  const { asked: _asked, failures, ...outcome } = data;
-  // The fixer can re-read file-backed objectives. Ad hoc objectives aren't stored anywhere else.
+  const { asked: requests, failures, ...outcome } = data;
+  // File objectives can be re-read. Keep the ad hoc objectives once, in the replay data.
+  const asked = requests?.filter((s) => failures.some((f) => !f.file && f.id === s.id && f.objective === s.objective)) ?? [];
+  const replay = asked.length ? { asked } : {};
   const compact = failures.map((f) => ({ ...f, objective: "", steps: [] }));
+  const bare = compact.map(({ id, name, file, failedCheck }) => ({
+    id, name, file, failedCheck, objective: "", steps: [], reason: "", diagnosis: "",
+  }));
   const { open: _open, ...historyOnly } = outcome;
   // Keep valid metadata for the whole report even when the failure records won't fit.
   return [
-    { ...outcome, failures: compact },
-    { ...outcome, failures: compact.filter((f) => f.file).map(({ id, name, file, failedCheck }) => ({
-      id, name, file, failedCheck, objective: "", steps: [], reason: "", diagnosis: "",
-    })) },
+    { ...outcome, ...replay, failures: compact },
+    { ...outcome, ...replay, failures: bare.filter((f) => f.file || asked.some((s) => s.id === f.id)) },
+    { ...outcome, failures: bare.filter((f) => f.file) },
+    ...(asked.length ? [{ ...historyOnly, asked, failures: bare.filter((f) => !f.file && asked.some((s) => s.id === f.id)) }] : []),
     { ...outcome, failures: [] },
     { ...historyOnly, failures: [] },
   ];

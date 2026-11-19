@@ -11,6 +11,7 @@ import { askedScenario } from "../action/requests.ts";
 import { kaneObjective } from "../check/run.ts";
 import type { RunFile } from "../report/runfile.ts";
 import { resolveScenarioTarget } from "../targets/target.ts";
+import { DEFAULT_FIXER } from "./models.ts";
 
 const description = askedScenario("description", "Check that the counter survives a restart.\n\n[delay:1]",
   resolveScenarioTarget({ target: "android", execution: "cloud", app: "app.apk" }, {}, {}, process.cwd()));
@@ -27,6 +28,7 @@ function fixture(target = "android", extra = "", build = "node build.cjs", final
   agentBuildOutput?: "with-source" | "only";
   description?: "stored" | "missing" | "doubted";
   rejectPush?: boolean;
+  throwFromAgent?: boolean;
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "proofed-fix-runtime-"));
   const log = join(dir, "events.jsonl");
@@ -109,6 +111,7 @@ export const minimize=async()=>{};`;
 import { execFileSync } from 'node:child_process';
 export function askAgent(prompt){
   globalThis.fixtureLog('ask',prompt);
+  ${options.throwFromAgent ? "throw new Error('Agent failed with fixture-token');" : ""}
   const fs=globalThis.fixtureFs;
   ${options.agentBuildOutput !== "only" ? "fs.writeFileSync('app.js','fixed\\n');" : ""}
   ${options.agentBuildOutput ? "fs.writeFileSync('dist/index.html','agent built output');" : "fs.writeFileSync('new-helper.js','verified new file\\n');"}
@@ -145,7 +148,8 @@ registerHooks({resolve(specifier,context,next){const url=specifier.startsWith('.
 if(mocks.has(url)&&!context.parentURL?.startsWith('data:'))return {url:mocks.get(url),shortCircuit:true};return next(specifier,context);}});
 globalThis.fetch=async()=>{throw new Error('Network forbidden in fixer fixture');};`;
   const env = { ...process.env, TMPDIR: dir, TEMP: dir, TMP: dir, GITHUB_TOKEN: "fixture-token", GITHUB_REPOSITORY: "fixture/repo", PROOFED_AUTO: "true", PROOFED_NUMBER: "1", PROOFED_BUILD: build, PROOFED_BASE_SHA: base, PROOFED_HEAD_REF: "main", PROOFED_OUT: join(dir, "out"), PROOFED_FIX: "true", PROOFED_DIR: ".", KANE_CLI: fakeKane, FAKE_KANE_LOG: join(dir, "kane.log"), FAKE_KANE_MODES: join(dir, "modes"), RUNNER_TEMP: dir };
-  for (const key of ["PROOFED_TARGET", "PROOFED_EXECUTION", "PROOFED_APP", "PROOFED_URL", "PROOFED_SERVE", "PROOFED_BASE_REF", "GITHUB_EVENT_PATH", "GITHUB_RUN_ID", "PROOFED_MODEL", "PROOFED_PROVIDER", "PROOFED_CLAUDE_MODEL", "PROOFED_SCENARIOS", "ACTIONS_ID_TOKEN_REQUEST_URL", "ACTIONS_ID_TOKEN_REQUEST_TOKEN"]) delete env[key as keyof typeof env];
+  for (const key of ["PROOFED_TARGET", "PROOFED_EXECUTION", "PROOFED_APP", "PROOFED_URL", "PROOFED_SERVE", "PROOFED_BASE_REF", "GITHUB_EVENT_PATH", "GITHUB_RUN_ID", "PROOFED_CLAUDE_MODEL", "PROOFED_CLAUDE_EFFORT", "PROOFED_SCENARIOS", "ACTIONS_ID_TOKEN_REQUEST_URL", "ACTIONS_ID_TOKEN_REQUEST_TOKEN"]) delete env[key as keyof typeof env];
+  Object.assign(env, { PROOFED_PROVIDER: "claude", PROOFED_MODEL: DEFAULT_FIXER.model, PROOFED_EFFORT: DEFAULT_FIXER.effort });
   if (options.description) Object.assign(env, { PROOFED_TARGET: "android", PROOFED_EXECUTION: "cloud", PROOFED_APP: "app.apk" });
   // Hooks and generated scripts sit outside the tested checkout so they can never be committed.
   const preload = join(tmpdir(), `proofed-fix-preload-${process.pid}-${Date.now()}.mjs`);
@@ -209,6 +213,23 @@ test("a rejected push restores the report and fails the original commit's pendin
     assert.match(JSON.stringify(statuses[0]?.value), /"state":"pending"/);
     assert.deepEqual(statuses[1]?.value, { state: "failure", description: "Proofed couldn't push the fix to the branch." });
     assert.doesNotMatch(ran.stdout + ran.stderr + JSON.stringify(events), /fixture-token/);
+  } finally { f.cleanup(); }
+});
+
+test("an exception after marking the fix pending restores the report and fails the status", () => {
+  const f = fixture("android", "", "node build.cjs", false, { throwFromAgent: true });
+  try {
+    const ran = f.run();
+    assert.equal(ran.status, 1, ran.stdout + ran.stderr);
+    const events = f.events();
+    assert.deepEqual(events.map((e) => e.type), ["report", "status", "ask", "report", "status"]);
+    assert.match(String(events[3]?.value), /couldn't finish the fix[\s\S]*- \[ \] \*\*Fix with Claude\*\*/);
+    assert.deepEqual(readReportData(String(events[3]?.value)), readReportData(f.body));
+    assert.equal(events[4]?.sha, f.original);
+    assert.equal((events[4]?.value as { state?: string }).state, "failure");
+    assert.match(ran.stdout, /Agent failed with \*\*\*/);
+    assert.doesNotMatch(ran.stdout + ran.stderr, /fixture-token/);
+    assert.equal(existsSync(join(f.dir, "proofed-build.sh")), false);
   } finally { f.cleanup(); }
 });
 

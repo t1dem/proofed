@@ -45,7 +45,8 @@ if (import.meta.main) {
   const number = Number(env("PROOFED_NUMBER"));
   const sha = env("PROOFED_SHA");
   const previous = repo ? readReportData((await findReport(repo, number))?.body ?? "") : undefined;
-  const body = blockedReport({ stage, command, dir: env("PROOFED_DIR", "."), url: env("PROOFED_URL"), log: read("proofed-app.log"), runUrl, sha, previous });
+  const url = stage === "serve" ? env("PROOFED_URL") : env("PROOFED_URL", "");
+  const body = blockedReport({ stage, command, dir: env("PROOFED_DIR", "."), url, log: read("proofed-app.log"), runUrl, sha, previous });
   console.log(body);
   if (repo) {
     // Only a check runs this step: on a comment, it's the /proofed a person asked with.

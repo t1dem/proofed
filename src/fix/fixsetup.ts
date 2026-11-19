@@ -9,7 +9,7 @@ export type FixSetup = { note: string; comment: boolean };
 // GITHUB_WORKFLOW_REF is owner/repo/.github/workflows/proofed.yml@refs/heads/main.
 const workflowFile = (ref?: string) => /^[^/]+\/[^/]+\/(.+?)@/.exec(ref ?? "")?.[1];
 
-function checkboxConditions(workflow: string) {
+function workflowConditions(workflow: string) {
   const lines = workflow.split(/\r?\n/);
   const conditions: string[] = [];
   const withoutComment = (line: string) => line.replace(/'(?:''|[^'])*'|"(?:\\.|[^"\\])*"|(^|\s)#.*$/g, (match, comment) => comment === undefined ? match : "");
@@ -30,9 +30,13 @@ function checkboxConditions(workflow: string) {
     }
     if (property[2] === "if") conditions.push(value);
   }
-  return [...conditions.join("\n").matchAll(/\bcontains\(\s*github\.event\.comment\.body\s*,\s*'- \[x\] \*\*Fix with (Claude|Codex)\*\*'\s*\)/gi)]
-    .map((m) => m[1]!.toLowerCase());
+  return conditions;
 }
+
+const checksFor = (label: string) => new RegExp(`\\bcontains\\(\\s*github\\.event\\.comment\\.body\\s*,\\s*'- \\[x\\] \\*\\*Fix with ${label}\\*\\*'\\s*\\)`, "i");
+const commandCondition = /(!\s*)?\b(?:contains|startsWith)\(\s*github\.event\.comment\.body\s*,\s*'\/proofed(?:\s+fix)?\s*'\s*\)/i;
+const editedOnly = /\bgithub\.event\.action\s*(?:==\s*'edited'|!=\s*'created')/i;
+const created = /\bgithub\.event\.action\s*==\s*'created'/i;
 
 export function fixSetup(provider: Provider, env: NodeJS.ProcessEnv = process.env): FixSetup | undefined {
   const label = providerLabel(provider);
@@ -54,10 +58,18 @@ export function fixSetup(provider: Provider, env: NodeJS.ProcessEnv = process.en
   } catch {
     return undefined;
   }
-  const checks = checkboxConditions(text);
-  if (!checks.includes("claude") || checks.includes("codex")) return undefined;
+  const conditions = workflowConditions(text);
+  const claude = conditions.filter((condition) => checksFor("Claude").test(condition));
+  if (!claude.length || conditions.some((condition) => checksFor("Codex").test(condition))) return undefined;
+  // A command needs a branch that accepts a new comment without a ticked box.
+  const comment = claude.every((condition) => condition.split("||").some((branch) => {
+    const command = commandCondition.exec(branch);
+    return command && !command[1] && !editedOnly.test(branch) && !checksFor("Claude").test(branch) &&
+      (!editedOnly.test(condition) || created.test(branch));
+  }));
+  const change = "add `|| contains(github.event.comment.body, '- [x] **Fix with Codex**')` next to its Claude condition.";
   return {
-    note: `\`${file}\` starts a fix only when **Fix with Claude** is ticked, so there is no box here. Comment \`/proofed fix\`, or add \`|| contains(github.event.comment.body, '- [x] **Fix with Codex**')\` next to its Claude condition.`,
-    comment: true,
+    note: `\`${file}\` supports the **Fix with Claude** checkbox. ${comment ? `Comment \`/proofed fix\`, or ${change}` : `To show the Codex box, ${change}`}`,
+    comment,
   };
 }
