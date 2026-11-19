@@ -142,7 +142,7 @@ if (mode === "hang") {
   await step("assert: shipping is €4.90", "failed");
   end({
     status: "failed",
-    reason: "Shipping shows “Free” for a €44.50 bag.",
+    reason: process.env.FAKE_KANE_FAILURE_REASON ?? "Shipping shows “Free” for a €44.50 bag.",
     verdict: { family: "product_bug", root_cause: "The free shipping threshold is €40, not €50.", suggestion: "Compare against 50 in shipping()." },
   });
 } else {

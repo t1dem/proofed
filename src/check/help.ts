@@ -9,6 +9,8 @@ Usage
   add --dry-run to any check         Plan it with its credit estimate; free
   proofed list --json                Which scenarios a change touches, and their cost; free
   proofed doctor --json              Setup problems and fixes; check runs its own; free
+  proofed mcp                        Serve Proofed tools over stdio from the project root
+  proofed hook claude-stop           Run affected checks when Claude Code is about to stop
   proofed <command> --help           All flags and JSON fields
   proofed --version
 
@@ -114,6 +116,7 @@ Mobile/Electron estimatedCredits is null without history.
 
   Target flags and their environment variables: as for proofed check.
   --base <rev>          Compare against this (default: the remote's default branch)
+  --all                 Select every scenario for the cost estimate
   --url <url>           The app's URL, for the cache (default: as proofed check finds it)
   --scenarios <dir>     Default .proofed/scenarios
   --out <dir>           Where the cache is (default .proofed-out)
@@ -132,4 +135,12 @@ Exit 0 when proofed check can run, else 3.
   --scenarios <dir>                    Default .proofed/scenarios
   --json                               {ok, exitCode, checks [{name, status: ok | warn | fail, detail, fix}]}`;
 
-export const helpText = (command?: Command) => (command === "check" ? CHECK : command === "list" ? LIST : command === "doctor" ? DOCTOR : MAIN);
+const HELP = {
+  check: CHECK,
+  list: LIST,
+  doctor: DOCTOR,
+  mcp: "proofed mcp\n\nServe proofed_list, proofed_doctor and proofed_check over stdio from the project root.",
+  hook: "proofed hook claude-stop\n\nRead a Claude Code Stop event from stdin and run affected checks.",
+};
+
+export const helpText = (command?: Command) => command ? HELP[command] : MAIN;

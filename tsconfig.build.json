@@ -9,6 +9,6 @@
     "declaration": false,
     "sourceMap": false
   },
-  "include": ["src/proofed.ts"],
+  "include": ["src/proofed.ts", "src/integrations/*.ts"],
   "exclude": ["src/**/*.test.ts", "src/testing"]
 }

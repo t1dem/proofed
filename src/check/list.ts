@@ -41,7 +41,7 @@ export function list(flags: Flags, io: Io): number {
       const hit = cache.passes[s.id];
       const cached = !!(hit && canReusePass(s, target.build?.value) && (s.resolvedTarget!.kind !== "web" || (url && isHttpUrl(url))) && changed && version !== "unknown" && hit.key === cacheKey(s, s.resolvedTarget!.kind === "web" ? new URL(s.url, url!).href : "", changed, undefined, baseId, version, target));
       const touched = changed ? affectedBy([s], changed).length > 0 : null;
-      const selected = touched !== false && changed?.length !== 0;
+      const selected = flags.all || (touched !== false && changed?.length !== 0);
       return {
         target: s.resolvedTarget,
         id: s.id,
@@ -63,7 +63,7 @@ export function list(flags: Flags, io: Io): number {
       return exitCode;
     }
 
-    const where = base.rev ? `changes against ${base.rev}: ${changed!.length} file${changed!.length === 1 ? "" : "s"}` : `${base.why}, so every scenario runs`;
+    const where = flags.all ? "all scenarios selected" : base.rev ? `changes against ${base.rev}: ${changed!.length} file${changed!.length === 1 ? "" : "s"}` : `${base.why}, so every scenario runs`;
     io.stdout.write(`${scenarios.length} scenario${scenarios.length === 1 ? "" : "s"} in ${dir}; ${where}.\n\n`);
     const rows = [
       ["ID", "NAME", "TARGET", "URL", "CHANGED", "CACHED", "PATHS"],
