@@ -42,8 +42,8 @@ const message = (d: ExceptionDetails) =>
 // The first uncaught exception, and a screenshot (JPEG file) of the page when it was judged blank.
 export type Crash = { error: string; screenshot?: string };
 
-// The URLs that crashed while loading. Screenshots go into `dir`.
-export async function findCrashes(urls: string[], dir: string) {
+// The URLs that crashed while loading. Screenshots go into `dir`. Tests on a starved runner pass a longer time limit.
+export async function findCrashes(urls: string[], dir: string, checkTimeout = CHECK_TIMEOUT) {
   const crashes = new Map<string, Crash>();
   if (urls.length === 0) return crashes;
   mkdirSync(dir, { recursive: true });
@@ -56,7 +56,7 @@ export async function findCrashes(urls: string[], dir: string) {
     const cdp = await connectCdp(chrome.endpoint);
     await Promise.all(
       urls.map(async (url, i) => {
-        const crash = await crashOf(cdp, url, join(dir, `crash-${i}.jpg`)).catch(() => undefined);
+        const crash = await crashOf(cdp, url, join(dir, `crash-${i}.jpg`), checkTimeout).catch(() => undefined);
         if (crash) crashes.set(url, crash);
       }),
     );
@@ -115,9 +115,9 @@ async function detectCrash(cdp: Cdp, url: string) {
   return error ? { error, page } : undefined;
 }
 
-async function crashOf(cdp: Cdp, url: string, file: string): Promise<Crash | undefined> {
-  const deadline = Date.now() + CHECK_TIMEOUT;
-  const crash = await Promise.race([detectCrash(cdp, url), limit(CHECK_TIMEOUT)]);
+async function crashOf(cdp: Cdp, url: string, file: string, checkTimeout: number): Promise<Crash | undefined> {
+  const deadline = Date.now() + checkTimeout;
+  const crash = await Promise.race([detectCrash(cdp, url), limit(checkTimeout)]);
   if (!crash) return undefined;
   // Give late verdicts time for a screenshot. A stalled capture only costs the picture.
   const screenshot = await Promise.race([
