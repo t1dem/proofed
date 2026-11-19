@@ -3,6 +3,7 @@ import { checkedAt, checkedWhere } from "./fixtarget.ts";
 import type { Fixer } from "./models.ts";
 import type { Scenario } from "../scenarios.ts";
 import type { FailureData } from "../report/report.ts";
+import { maskSecrets } from "../secrets.ts";
 import { FAILED_CHECK_ACTION, FAILED_CHECK_REASON } from "../report/runfile.ts";
 
 // Keep Kane's interpretation separate from the check the fixer must preserve.
@@ -45,7 +46,7 @@ End your answer with one line in English that starts with "SUMMARY:". It goes in
 }
 
 export function askFixer(text: string, fixer: Fixer, buildCommand: string) {
-  const answer = askAgent(text, {
+  const answer = askAgent(maskSecrets(text), {
     ...fixer,
     timeoutMs: 10 * 60_000,
     allowedTools: ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", `Bash(${buildCommand})`],

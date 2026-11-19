@@ -3,10 +3,13 @@ import { gitPath } from "../paths.ts";
 // writes scenarios for its main flows, Kane runs each of them next to the stock one, and the
 // ones Kane saw pass are committed to the setup branch. The rest are deleted, so the PR carries no guess.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
-import { basename, relative, resolve } from "node:path";
+import { cpSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { askAgent, configuredFixer } from "./agent.ts";
 import { env } from "../env.ts";
+import { scenarioTarget } from "./fixtarget.ts";
+import { diffPaths, untrackedPaths } from "./fixworkspace.ts";
 import { ctx, findReport, readEvent, setStatus, type PullRequest } from "../github.ts";
 import { providerLabel, providerOf } from "./models.ts";
 import { isBroken, publish, runAll } from "../check/pipeline.ts";
@@ -28,7 +31,6 @@ const { repo, runUrl, outDir } = ctx();
 const pr = event.pull_request;
 mkdirSync(outDir, { recursive: true });
 const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
-const lines = (text: string) => text.split("\n").filter(Boolean);
 // Claude Code's permission rules take paths relative to where it runs: the repo root.
 const dir = relative(process.cwd(), resolve(env("PROOFED_SCENARIOS", ".proofed/scenarios")));
 const appDir = env("PROOFED_DIR", ".");
@@ -107,15 +109,56 @@ Write only new files in ${dir}/. Don't change home.md. Do not run builds or othe
 End your answer with one line per scenario you wrote, most valuable first, in English:
 SCENARIO: <file name> - <what it checks, in one short sentence a person reads in the report>`;
 
-// Undoes whatever the fixer changed besides new files in the scenarios folder: home.md, or anything else
-// a tool let through. Files that were already changed or untracked (the build's) stay as they are.
-const changedBefore = new Set(lines(git("diff", "--name-only")));
-const untrackedBefore = new Set(lines(git("ls-files", "--others", "--exclude-standard")));
-function keepOnlyNewScenarios() {
-  for (const file of lines(git("diff", "--name-only"))) if (!changedBefore.has(file)) git("checkout", "--", file);
-  const added = lines(git("ls-files", "--others", "--exclude-standard")).filter((f) => !untrackedBefore.has(f));
-  for (const file of added) if (!file.startsWith(`${gitPath(dir).replace(/\/$/, "")}/`) || !file.endsWith(".md")) rmSync(file, { force: true });
-  return added.filter((f) => f.startsWith(`${gitPath(dir).replace(/\/$/, "")}/`) && f.endsWith(".md"));
+function writeScenarios(ask: () => ReturnType<typeof askAgent>) {
+  const index = git("rev-parse", "--git-path", "index");
+  const copyOptions = { recursive: true, verbatimSymlinks: true, preserveTimestamps: true };
+  const backup = mkdtempSync(join(tmpdir(), "proofed-scenario-writer-"));
+  try {
+    const before = new Set([...diffPaths("HEAD"), ...diffPaths("--cached"), ...untrackedPaths()]);
+    // Android's APK can be ignored by Git but is still an input to every candidate scenario.
+    for (const s of stock) {
+      const target = scenarioTarget(s);
+      if (target.kind !== "android" || !target.app || /^APP[\w-]+$/.test(target.app)) continue;
+      const file = gitPath(relative(process.cwd(), target.app));
+      if (file && file !== ".." && !file.startsWith("../") && !isAbsolute(file)) before.add(file);
+    }
+    const saved = new Map([...before].sort().map((file, i) => {
+      if (!lstatSync(file, { throwIfNoEntry: false })) return [file, undefined] as const;
+      const copy = join(backup, String(i));
+      cpSync(file, copy, copyOptions);
+      return [file, copy] as const;
+    }));
+    const savedIndex = readFileSync(index);
+    let answer: ReturnType<typeof askAgent>;
+    let files: string[] = [];
+    try {
+      answer = ask();
+    } finally {
+      if (!lstatSync(index, { throwIfNoEntry: false })?.isFile() || !readFileSync(index).equals(savedIndex)) {
+        rmSync(index, { force: true });
+        writeFileSync(index, savedIndex);
+      }
+      const changed = diffPaths("HEAD").filter((file) => !saved.has(file));
+      if (changed.length) git("--literal-pathspecs", "restore", "--worktree", "--", ...changed);
+      for (const [file, copy] of saved) {
+        const stat = lstatSync(file, { throwIfNoEntry: false });
+        if (copy || (stat && !stat.isDirectory())) rmSync(file, { force: true, recursive: true });
+        if (copy) {
+          mkdirSync(dirname(file), { recursive: true });
+          cpSync(copy, file, copyOptions);
+        }
+      }
+      const prefix = `${gitPath(dir).replace(/\/$/, "")}/`;
+      for (const file of untrackedPaths()) {
+        if (saved.has(file)) continue;
+        if (file.startsWith(prefix) && file.endsWith(".md") && lstatSync(file).isFile()) files.push(file);
+        else rmSync(file, { force: true, recursive: true });
+      }
+    }
+    return { answer, files };
+  } finally {
+    rmSync(backup, { recursive: true, force: true });
+  }
 }
 
 const why = (r: ScenarioResult) =>
@@ -129,16 +172,16 @@ const why = (r: ScenarioResult) =>
 
 async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Written; sha: string }> {
   console.log(`Asking ${writer.model} (${writer.effort}) to write scenarios in ${dir}/`);
-  const answer = timed("scenario writer", () => askAgent(android ? androidPrompt() : webPrompt(), {
+  const { answer, files: added } = writeScenarios(() => timed("scenario writer", () => askAgent(android ? androidPrompt() : webPrompt(), {
     ...writer,
     permissionMode: "default",
     tools: ["Read", "Glob", "Grep", "Write", "Edit"],
     allowedTools: ["Read", "Glob", "Grep", `Write(./${dir}/**)`, `Edit(./${dir}/**)`],
     maxTurns: 60,
     timeoutMs: WRITE_TIMEOUT_MS,
-  }));
+  })));
   // Scenarios go to Kane and into the PR, so one that holds a job credential is deleted unread.
-  const files = keepOnlyNewScenarios().filter((file) => {
+  const files = added.filter((file) => {
     if (!fileWithSecret([file])) return true;
     rmSync(file, { force: true });
     console.log(`Deleted ${file}: it held a credential of this job.`);
@@ -182,9 +225,10 @@ async function writeAndProve(): Promise<{ results: ScenarioResult[]; written: Wr
   console.log(`Kane credits: ${credits(results)} in all, ${droppedCredits} of them on the dropped scenarios.`);
   if (kept.length === 0) return { results: stockResults, written: { status: "written", kept: [], dropped, credits: droppedCredits }, sha: headSha };
 
-  git("add", "--", ...kept.map((r) => r.scenario.file));
-  git("-c", `user.name=${provider}`, "-c", `user.email=${provider === "Codex" ? "codex@openai.com" : "noreply@anthropic.com"}`, "commit", "--no-verify", "-m",
-    `Add scenarios: ${kept.map((r) => r.scenario.name).join(", ")}\n\nWritten by ${agentName} for the Proofed setup; Kane ran each one ${where} and saw it pass.\n\nWritten-by: ${writer.model} (${writer.effort} effort)`);
+  const paths = kept.map((r) => r.scenario.file);
+  git("--literal-pathspecs", "add", "--", ...paths);
+  git("--literal-pathspecs", "-c", `user.name=${provider}`, "-c", `user.email=${provider === "Codex" ? "codex@openai.com" : "noreply@anthropic.com"}`, "commit", "--only", "--no-verify", "-m",
+    `Add scenarios: ${kept.map((r) => r.scenario.name).join(", ")}\n\nWritten by ${agentName} for the Proofed setup; Kane ran each one ${where} and saw it pass.\n\nWritten-by: ${writer.model} (${writer.effort} effort)`, "--", ...paths);
   try {
     // The app's push starts a check of the new commit. It waits for this job (the workflow's
     // concurrency doesn't let that push cancel a run) and then skips Kane, since the report

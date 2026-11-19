@@ -1,7 +1,7 @@
 import { delimiter } from "node:path";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -54,6 +54,22 @@ test("job credentials are found in written files and masked in text, raw and as 
     assert.equal(maskSecrets(CODEX_TOKEN, secretValues({ PROOFED_CODEX_HOME: dir })), "***");
     assert.deepEqual(secretValues({ CODEX_HOME: dir }), []);
     assert.deepEqual(secretValues({}), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a credential can span two chunks beyond the old file size limit", () => {
+  const dir = mkdtempSync(join(tmpdir(), "proofed-large-secret-"));
+  try {
+    const file = join(dir, "artifact.bin");
+    const fd = openSync(file, "w");
+    try {
+      writeSync(fd, Buffer.from(TOKEN), 0, TOKEN.length, 21 * 1024 * 1024 - 4);
+    } finally {
+      closeSync(fd);
+    }
+    assert.equal(fileWithSecret([file], [TOKEN]), file);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

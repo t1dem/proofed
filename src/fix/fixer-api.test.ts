@@ -5,13 +5,18 @@ import { test } from "node:test";
 test("the dashboard validates efforts and encrypts/syncs the Codex credential", () => {
   const script = `
     import assert from "node:assert/strict";
-    import { registerHooks } from "node:module";
+    import { createRequire, registerHooks } from "node:module";
+    const sourceRoots = ${JSON.stringify([new URL("../../site/src/", import.meta.url).href, new URL("../", import.meta.url).href])};
     registerHooks({ resolve(specifier, context, nextResolve) {
-      if (specifier.startsWith(".") && !/\\.[a-z]+$/i.test(specifier)) specifier += ".ts";
+      if (sourceRoots.some(root => context.parentURL?.startsWith(root)) && specifier.startsWith(".") && !/\\.[a-z]+$/i.test(specifier)) specifier += ".ts";
       return nextResolve(specifier, context);
     }});
     const { handleApi, pushSecrets } = await import(${JSON.stringify(new URL("../../site/src/worker/api.ts", import.meta.url).href)});
     const { encrypt, decrypt } = await import(${JSON.stringify(new URL("../../site/src/worker/crypto.ts", import.meta.url).href)});
+    const require = createRequire(${JSON.stringify(new URL("../../site/package.json", import.meta.url).href)});
+    const nacl = require("tweetnacl");
+    const { blake2b } = require("@noble/hashes/blake2.js");
+    const repoKey = nacl.box.keyPair();
     const signing = await crypto.subtle.generateKey({name:"RSASSA-PKCS1-v1_5",modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:"SHA-256"},true,["sign","verify"]);
     const secret = Buffer.alloc(32,7).toString("base64");
     const user = {id:1,login:"owner",token:await encrypt(secret,"github-token"),token_expires:Date.now()+3600000,claude_token:null,codex_key:null};
@@ -30,7 +35,7 @@ test("the dashboard validates efforts and encrypts/syncs the Codex credential", 
       if(path.endsWith('/access_tokens')) return Response.json({token:'app-token',expires_at:new Date(Date.now()+3600000).toISOString()});
       if(path === '/user/installations') return Response.json({installations:[{id:7}]});
       if(path.endsWith('/repositories')) return Response.json({repositories:[{id:1,full_name:'owner/repo',permissions:{admin:true}}]});
-      if(path.endsWith('/public-key')) return Response.json({key:Buffer.alloc(32,1).toString('base64'),key_id:'1'});
+      if(path.endsWith('/public-key')) return Response.json({key:Buffer.from(repoKey.publicKey).toString('base64'),key_id:'1'});
       if(path.includes('/actions/variables') || path.includes('/actions/secrets/')) return new Response(null,{status:204});
       throw new Error('Unexpected request: '+path);
     };
@@ -49,6 +54,15 @@ test("the dashboard validates efforts and encrypts/syncs the Codex credential", 
     assert.equal(await decrypt(secret,user.codex_key),key);
     const pushed=requests.find(r=>r.path.endsWith('/secrets/CODEX_API_KEY'));
     assert.ok(pushed);
+    assert.equal(pushed.method, 'PUT');
+    assert.equal(pushed.body?.key_id, '1');
+    assert.equal(typeof pushed.body?.encrypted_value, 'string');
+    const sealed = Buffer.from(pushed.body.encrypted_value, 'base64');
+    const sender = sealed.subarray(0, nacl.box.publicKeyLength);
+    const nonce = blake2b(Buffer.concat([sender, repoKey.publicKey]), {dkLen:nacl.box.nonceLength});
+    const opened = nacl.box.open(sealed.subarray(sender.length), nonce, sender, repoKey.secretKey);
+    assert.ok(opened);
+    assert.equal(new TextDecoder().decode(opened), key);
     assert.equal(JSON.stringify(pushed).includes(key),false);
     const me=await handleApi(new Request('https://proofed.test/api/me',{headers:{cookie:'proofed_session=session'}}),env,'/api/me');
     assert.equal((await me.json()).codex,true);

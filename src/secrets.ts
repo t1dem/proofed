@@ -1,5 +1,5 @@
 // Job credentials an agent must not see, and must not get into a commit, a report or the dashboard.
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 // Not given to Claude or Codex. The agent's own key is added back by its runner.
@@ -46,9 +46,26 @@ export const maskSecrets = (text: string, values = secretValues()) => values.red
 // job's own processes (/proc/<pid>/environ), so what it writes is checked before anything leaves the runner.
 export function fileWithSecret(files: string[], values = secretValues()) {
   if (values.length === 0) return undefined;
+  const needles = values.map((value) => Buffer.from(value));
+  const overlap = Math.max(1, ...needles.map((value) => value.length)) - 1;
+  const chunk = 64 * 1024;
+  const buffer = Buffer.allocUnsafe(chunk + overlap);
   return files.find((file) => {
-    if (!existsSync(file) || !statSync(file).isFile() || statSync(file).size > 20 * 1024 * 1024) return false;
-    const text = readFileSync(file, "latin1");
-    return values.some((v) => text.includes(v));
+    if (!statSync(file, { throwIfNoEntry: false })?.isFile()) return false;
+    const fd = openSync(file, "r");
+    try {
+      let kept = 0;
+      for (;;) {
+        const read = readSync(fd, buffer, kept, chunk, null);
+        if (read === 0) return false;
+        const scanned = buffer.subarray(0, kept + read);
+        if (needles.some((value) => scanned.includes(value))) return true;
+        // A credential can start in this chunk and end in the next one.
+        kept = Math.min(scanned.length, overlap);
+        scanned.copy(buffer, 0, scanned.length - kept);
+      }
+    } finally {
+      closeSync(fd);
+    }
   });
 }

@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 // The fix loop (fixloop.ts) with the fake Kane (src/testing/fake-kane.ts) and real Chrome, against a
 // tiny page. Claude is a function here: what it "changes" is what the fake Kane sees on the next run.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -78,7 +78,7 @@ async function setup(t: { after: (fn: () => unknown) => void }) {
     check: (scenarios, attempt) => runAll(scenarios, join(dir, `attempt-${attempt}`)),
     ...o,
   });
-  return { set, asks, claude, input };
+  return { dir, set, asks, claude, input };
 }
 
 const ids = (results: { scenario: Scenario }[]) => results.map((r) => r.scenario.id).sort();
@@ -150,11 +150,23 @@ test("a scenario an earlier attempt fixed is checked again, and breaking it agai
 });
 
 test("a mixed web and Android fix builds once and sends both targets through runAll", { skip: noChrome }, async (t) => {
-  const { input, set } = await setup(t);
+  const { dir, input, set } = await setup(t);
   set({ shipping: "pass", android: "pass" });
-  const app = join(tmpdir(), `proofed-mixed-${process.pid}.apk`);
+  const app = join(dir, "app.apk");
   writeFileSync(app, "old artifact");
-  t.after(() => rmSync(app, { force: true }));
+  const installed = join(dir, "installed.json");
+  const kane = join(dir, "kane-with-artifact.mjs");
+  writeFileSync(kane, `
+    import { readFileSync, writeFileSync } from "node:fs";
+    const args = process.argv.slice(2);
+    if (args[0] === "run" && args.includes("--app")) {
+      const app = args[args.indexOf("--app") + 1];
+      const target = args[args.indexOf("--target") + 1];
+      writeFileSync(${JSON.stringify(installed)}, JSON.stringify({ target, app, contents: readFileSync(app, "utf8") }));
+    }
+    await import(${JSON.stringify(new URL("../testing/fake-kane.ts", import.meta.url).href)});
+  `);
+  process.env.KANE_CLI = kane;
   process.env.PROOFED_FIX = "true";
   const mobile = { ...scenario("android", ["src/pricing.js"]), target: "android", execution: "cloud", app };
   let builds = 0;
@@ -168,4 +180,5 @@ test("a mixed web and Android fix builds once and sends both targets through run
   assert.equal(builds, 1);
   assert.deepEqual(ids(end.results), ["android", "shipping"]);
   assert.ok(end.results.every((r) => r.outcome === "passed"));
+  assert.deepEqual(JSON.parse(readFileSync(installed, "utf8")), { target: "android", app, contents: "rebuilt artifact" });
 });

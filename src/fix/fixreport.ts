@@ -4,6 +4,7 @@ import { publishClips, readFile, type Repo } from "../github.ts";
 import { withGaveUpAttempt, type FixNote } from "../report/report.ts";
 import { COMMENT_LIMIT, oneLine, readRunKey, runMarker } from "../report/reportdata.ts";
 import { RUN_FILE, type RunFile } from "../report/runfile.ts";
+import { maskSecrets } from "../secrets.ts";
 import { timedAsync } from "../timing.ts";
 
 export async function gaveUpReport({ body, repo, pr, brokenSha, outDir, runUrl }: {
@@ -41,7 +42,15 @@ export async function gaveUpReport({ body, repo, pr, brokenSha, outDir, runUrl }
       }
     }
   }
-  writeFileSync(join(outDir, "report.md"), report);
-  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, report);
+  try {
+    writeFileSync(join(outDir, "report.md"), report);
+  } catch (e) {
+    console.log(`Couldn't write the local fix report: ${maskSecrets(String(e))}`);
+  }
+  try {
+    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, report);
+  } catch (e) {
+    console.log(`Couldn't write the fix step summary: ${maskSecrets(String(e))}`);
+  }
   return report;
 }

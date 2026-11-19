@@ -1,6 +1,7 @@
 // Pushing a commit Proofed made (the agent's fix or the setup PR's scenarios) to the PR branch.
 import { execFileSync } from "node:child_process";
 import { oidcToken } from "../action/server.ts";
+import { changesLfsFiles, git, LFS_REFUSAL } from "./fixworkspace.ts";
 
 // GitHub suppresses push workflows from the job's GITHUB_TOKEN and requires approval for PR
 // workflows it triggers. Proofed's server trades the job's OIDC token for a repository-scoped
@@ -56,6 +57,9 @@ function push(branch: string, token?: string) {
 // HEAD to `branch`, as the Proofed app when it can be, otherwise with the job's token. Returns
 // whether the app pushed it.
 export async function pushHead(branch: string) {
+  // Hook-free pushes do not upload new Git LFS objects.
+  const paths = git("diff-tree", "--root", "--no-commit-id", "-r", "--no-renames", "--diff-filter=AMT", "--name-only", "-z", "HEAD").split("\0").filter(Boolean);
+  if (changesLfsFiles(paths, true)) throw new Error(LFS_REFUSAL);
   const token = await appToken();
   const jobToken = process.env.GITHUB_TOKEN || undefined;
   try {

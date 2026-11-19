@@ -15,7 +15,14 @@ test("an old workflow gets a note instead of a fix box that would do nothing", (
   const workflow = (text: string) => writeFileSync(join(dir, ".github/workflows/proofed.yml"), text);
   const env = { GITHUB_WORKFLOW_REF: REF, GITHUB_WORKSPACE: dir };
   try {
-    workflow("contains(github.event.comment.body, '- [x] **Fix with Claude**')\n");
+    workflow(`jobs:
+  proofed:
+    if: >-
+      contains(github.event.comment.body, '- [x] **Fix with Claude**')
+    # contains(github.event.comment.body, '- [x] **Fix with Codex**')
+    steps:
+      - run: echo '- [x] **Fix with Codex**'
+`);
     const noKey = fixSetup("codex", { ...env, PROOFED_CODEX: "false" });
     assert.equal(noKey?.comment, false);
     assert.match(noKey!.note, /To fix with Codex, add `codex-api-key: \$\{\{ secrets\.CODEX_API_KEY \}\}` or `codex-auth-json: \$\{\{ secrets\.CODEX_AUTH_JSON \}\}`/);
@@ -24,7 +31,12 @@ test("an old workflow gets a note instead of a fix box that would do nothing", (
     assert.match(onlyClaude!.note, /only when \*\*Fix with Claude\*\* is ticked/);
     assert.equal(fixSetup("claude", { ...env, PROOFED_CLAUDE: "true" }), undefined);
     assert.equal(fixSetup("claude", { ...env, PROOFED_CLAUDE: "false" })?.comment, false);
-    workflow("contains(github.event.comment.body, '- [x] **Fix with Claude**') || contains(github.event.comment.body, '- [x] **Fix with Codex**')\n");
+    workflow(`jobs:
+  proofed:
+    if: >-
+      contains(github.event.comment.body, '- [x] **Fix with Claude**') ||
+      contains(github.event.comment.body, '- [x] **Fix with Codex**')
+`);
     assert.equal(fixSetup("codex", { ...env, PROOFED_CODEX: "true" }), undefined);
     // Outside Actions, or a fix step that doesn't say: nothing is known, the box stays.
     assert.equal(fixSetup("codex", {}), undefined);
@@ -39,9 +51,10 @@ test("the report puts the note where the box was, and offers /proofed fix only w
     outcome: "failed", steps: [], end: { type: "run_end", status: "failed", reason: "Total shows 0." },
   } as unknown as ScenarioResult;
   const base = { sha: "abc1234def", results: [failed], skipped: [], clips: new Map(), fixEnabled: true, fixer: { model: "gpt-6.1-sol", effort: "low" } };
-  assert.match(buildReport(base), /- \[ \] \*\*Fix with Codex\*\*/);
+  const codexBox = /- \[ \] \*\*Fix with Codex\*\*/;
+  assert.match(buildReport(base), codexBox);
   const noKey = buildReport({ ...base, fixSetup: { note: "Add the key.", comment: false } });
-  assert.doesNotMatch(noKey, /Fix with Codex\*\*:/);
+  assert.doesNotMatch(noKey, codexBox);
   assert.match(noKey, /\n> Add the key\.\n/);
   assert.doesNotMatch(noKey, /proofed fix/);
   const commentOnly = buildReport({ ...base, fixSetup: { note: "Comment instead.", comment: true } });

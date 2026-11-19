@@ -8,6 +8,7 @@ import { live } from "../report/live.ts";
 import { providerLabel, providerOf, type Fixer } from "./models.ts";
 import type { FailureData, FixAttempt } from "../report/report.ts";
 import { descriptionCheckNote } from "../action/requests.ts";
+import { maskSecrets } from "../secrets.ts";
 import type { ScenarioResult } from "../types.ts";
 import { timed } from "../timing.ts";
 import { affectedBy, touches, type Scenario } from "../scenarios.ts";
@@ -60,6 +61,8 @@ export type FixLoopEnd = {
   // Scenarios the last attempt broke, and the last note for Claude (or why the fixer couldn't run).
   broke: ScenarioResult[];
   feedback: string;
+  // The furthest any attempt got, even if a later attempt could not build.
+  failureStage: "change" | "build" | "check";
 };
 
 export async function fixLoop(o: FixLoopInput): Promise<FixLoopEnd> {
@@ -71,8 +74,9 @@ export async function fixLoop(o: FixLoopInput): Promise<FixLoopEnd> {
   let fixing: ScenarioResult[] = [];
   let results: ScenarioResult[] = [];
   let broke: ScenarioResult[] = [];
+  let failureStage: FixLoopEnd["failureStage"] = "change";
   const tries: FixAttempt[] = [];
-  const end = (status: FixLoopEnd["status"], attempt: number): FixLoopEnd => ({ status, attempt, summary, tries, fixing, results, broke, feedback });
+  const end = (status: FixLoopEnd["status"], attempt: number): FixLoopEnd => ({ status, attempt, summary, tries, fixing, results, broke, feedback, failureStage });
 
   for (let attempt = 1; attempt <= max; attempt++) {
     console.log(`\n=== Attempt ${attempt}: asking ${o.fixer.model} (${o.fixer.effort}) about ${failures.map((f) => f.name).join(", ")}`);
@@ -98,31 +102,37 @@ export async function fixLoop(o: FixLoopInput): Promise<FixLoopEnd> {
     live.fix({ doing: "building" });
     const buildError = o.build();
     if (buildError !== undefined) {
-      feedback = `Your change didn't build:\n${buildError.slice(-3000)}`;
+      if (failureStage === "change") failureStage = "build";
+      feedback = `Your change didn't build:\n${maskSecrets(buildError).slice(-3000)}`;
       tries.push({ summary, result: "It didn't build." });
       continue;
     }
 
+    failureStage = "check";
     live.fix({ doing: "checking" });
     // Every attempt re-runs all the scenarios the report had broken: a later attempt can break one an earlier one fixed.
     const files = o.changedFiles();
     const neighbours = affectedBy(o.allScenarios(), files).filter((s) => !ids.includes(s.id));
+    const requested = [...o.scenariosFor(ids), ...neighbours];
     try {
-      results = await o.check([...o.scenariosFor(ids), ...neighbours], attempt);
+      results = (await o.check(requested, attempt)).filter(Boolean);
     } catch (e) {
       results = [];
       fixing = [];
       broke = [];
-      feedback = `The rebuild couldn't be checked: ${String(e)}`;
+      feedback = `The rebuild couldn't be checked: ${maskSecrets(String(e))}`;
       tries.push({ summary, result: feedback });
       continue;
     }
+    const returned = new Set(results.map((r) => r.scenario.id));
+    const missing = [...o.failures, ...neighbours].filter((s) => !returned.has(s.id));
+    const missingLines = missing.map((s) => `Kane returned no result for "${s.name}" (${s.id}).`);
     fixing = results.filter((r) => ids.includes(r.scenario.id));
     broke = results.filter((r) => !ids.includes(r.scenario.id) && r.outcome === "failed" && !o.open.includes(r.scenario.id));
-    const fixed = fixing.length === ids.length && fixing.some((r) => r.outcome === "passed") && fixing.every(settled) && broke.length === 0;
+    const fixed = missing.length === 0 && fixing.length === ids.length && fixing.some((r) => r.outcome === "passed") && fixing.every(settled) && broke.length === 0;
     tries.push({
       summary,
-      result: fixed ? "Kane saw it pass." : [...notPassing(fixing), ...broke.map((r) => `It broke "${r.scenario.name}", which passed before.`)].join("; "),
+      result: fixed ? "Kane saw it pass." : [...notPassing(fixing), ...missingLines, ...broke.map((r) => `It broke "${r.scenario.name}", which passed before.`)].join("; "),
     });
     if (fixed) return end("fixed", attempt);
 
@@ -134,12 +144,14 @@ export async function fixLoop(o: FixLoopInput): Promise<FixLoopEnd> {
         : `"${r.scenario.name}" fails now: ${why} The pull request alone doesn't touch it; it covers ${edited}, which you changed.`;
     });
     const still = o.failures.filter((f) => fixing.some((r) => r.scenario.id === f.id && !settled(r)));
-    failures = still.length > 0 ? still : o.failures;
+    const unresolved = o.failures.filter((f) => !returned.has(f.id) || still.includes(f));
+    failures = unresolved.length > 0 ? unresolved : o.failures;
     feedback = [
       `Your change was: ${summary}`,
-      still.length > 0
-        ? `The scenarios were checked again ${checkedWhere(fixing.map((r) => r.scenario))}:\n${list(notPassing(fixing))}`
-        : `The scenarios you were fixing pass now ${checkedWhere(fixing.map((r) => r.scenario))}. Keep that.`,
+      ...(still.length > 0
+        ? [`The scenarios were checked again ${checkedWhere(fixing.map((r) => r.scenario))}:\n${list(notPassing(fixing))}`]
+        : unresolved.length === 0 ? [`The scenarios you were fixing pass now ${checkedWhere(fixing.map((r) => r.scenario))}. Keep that.`] : []),
+      ...(missing.length > 0 ? [list(missingLines)] : []),
       ...(broke.length > 0 ? [`But your change broke ${broke.length === 1 ? "a scenario" : "scenarios"} that didn't fail before it:\n${list(brokeLines)}\nFind what in your change did that, and fix it without breaking the others again.`] : []),
     ].join("\n");
   }

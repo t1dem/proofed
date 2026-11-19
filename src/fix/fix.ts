@@ -8,7 +8,7 @@ import { fixLoop, settled, type FixLoopEnd } from "./fixloop.ts";
 import { askFixer, fixPrompt } from "./fixprompt.ts";
 import { gaveUpReport } from "./fixreport.ts";
 import { checkFix, checkedWhere, fixRefusal, needsWeb, targetScenarios } from "./fixtarget.ts";
-import { diffPaths, discardLeak, fileStates, fixChanges, git, ignoredTrackedPaths, prepareBuild, stageCheckedFiles, treeBeforeCheck, untrackedPaths } from "./fixworkspace.ts";
+import { changesLfsFiles, diffPaths, discardLeak, fileStates, fixChanges, git, ignoredTrackedPaths, LFS_REFUSAL, prepareBuild, stageCheckedFiles, stagedFilesMatch, treeBeforeCheck, untrackedPaths } from "./fixworkspace.ts";
 import { ctx, editComment, findReport, readEvent, setStatus, type Comment } from "../github.ts";
 import { putBack } from "./guard.ts";
 import { live } from "../report/live.ts";
@@ -53,6 +53,7 @@ type Phase<T> = { value: T } | { outcome: FixOutcome };
 // Puts a line where the checkbox is, or under the headline when there's none.
 const withLine = (text: string, line: string) =>
   FIX_BOX_LINE.test(text) ? text.replace(FIX_BOX_LINE, () => line) : text.replace(/(### Proofed\n\n[^\n]*\n)/, (_, headline: string) => `${headline}\n${line}\n`);
+const untick = (body: string) => body.replace(FIX_BOX_LINE, (line) => line.replace("[x]", "[ ]"));
 const uniqueScenarios = (scenarios: Scenario[]) => [...new Map(scenarios.map((s) => [s.id, s])).values()];
 
 async function loadRequest(): Promise<FixRequest | undefined> {
@@ -64,8 +65,8 @@ async function loadRequest(): Promise<FixRequest | undefined> {
   const report = context.repo && pr ? await findReport(context.repo, pr) : undefined;
   const body = (ticked ? event.comment?.body : report?.body) ?? "";
   const data = readReportData(body);
-  // A tick on an older comment can race a newer report.
-  const replaced = ticked && !!context.repo && report?.id !== event.comment?.id;
+  // A new check can update the same comment while this checkbox event is waiting.
+  const replaced = ticked && !!context.repo && (!report?.body || report.id !== event.comment?.id || untick(report.body) !== untick(body));
   if (!pr || !(auto || event.issue?.pull_request) || !data?.failures.length || (ticked && !fixRequested(body)) || replaced) return undefined;
   return { ...context, pr, report, body, data };
 }
@@ -216,7 +217,8 @@ function stopAfterAttempts(plan: FixPlan, loop: FixLoopEnd): FixOutcome {
     return { ...restore, log, note: `${log}. Tick the box, or comment \`/proofed fix\` with a model, to try again.` };
   }
   if (loop.results.length === 0) {
-    return { ...restore, repost: true, note: `${provider} tried ${attempt} times without a change that builds. Last note: ${feedback.split("\n")[0]}` };
+    const reason = loop.failureStage === "check" ? "without a completed check of the rebuild" : "without a change that builds";
+    return { ...restore, repost: true, note: `${provider} tried ${attempt} times ${reason}. Last note: ${feedback.split("\n")[0]}` };
   }
   if (loop.fixing.length === plan.failures.length && loop.fixing.every(settled) && loop.broke.length > 0) {
     const names = (results: ScenarioResult[]) => results.map((r) => `"${r.scenario.name}"`).join(", ");
@@ -252,40 +254,48 @@ async function verifyTree(
     git("checkout", "--", ".");
     return { outcome: { kind: "restore", request: plan, note, status, repost: true } };
   };
-  // Reuse the last attempt's results while the checked files still match.
+  // Reuse the last attempt only when both the files and the build are still current.
   const pickFinal = () => {
     const { selected, skipped } = pickScenarios({ changed: [...new Set([...changedFiles(base), ...fixChanges()])], rev });
     return { final: targetScenarios(uniqueScenarios([...selected, ...failedFiles, ...asked])), skipped };
   };
-  let { final, skipped } = pickFinal();
-  let verifiedFiles = treeBeforeCheck();
-  const known = new Map(lastAttemptTree === verifiedFiles ? loop.results.map((r) => [r.scenario.id, r]) : []);
-  let missing = final.filter((s) => !known.has(s.id));
+  let final: Scenario[];
+  let skipped: string[];
+  let verifiedFiles: string;
   let results: ScenarioResult[];
   try {
-    const refusal = fixRefusal(final, process.env.PROOFED_BUILD);
-    if (refusal) throw new Error(refusal);
-    if (missing.length > 0) {
+    ({ final, skipped } = pickFinal());
+    const checkSupported = () => {
+      const refusal = fixRefusal(final, process.env.PROOFED_BUILD);
+      if (refusal) throw new Error(refusal);
+    };
+    checkSupported();
+    verifiedFiles = treeBeforeCheck();
+    let byId = new Map(loop.results.map((r) => [r.scenario.id, r]));
+    const canReuse = lastAttemptTree === verifiedFiles && final.every((s) => byId.has(s.id));
+    if (!canReuse) {
       const buildError = build();
       if (buildError !== undefined) throw new Error(buildError);
       verifiedFiles = treeBeforeCheck();
-      if (lastAttemptTree !== verifiedFiles) {
-        ({ final, skipped } = pickFinal());
-        const refusal = fixRefusal(final, process.env.PROOFED_BUILD);
-        if (refusal) throw new Error(refusal);
-        known.clear();
-        missing = final;
-      }
+      ({ final, skipped } = pickFinal());
+      checkSupported();
     }
-    console.log(`Final check: ${final.length - missing.length} result(s) from the last attempt, ${missing.length} to run.`);
-    if (missing.length > 0) {
+    console.log(`Final check: ${canReuse ? final.length : 0} result(s) from the last attempt, ${canReuse ? 0 : final.length} to run.`);
+    if (!canReuse) {
       live.fix({ doing: "checking" });
-      const ran = await checkFix(missing, serve, (selected) => runAll(selected, `${outDir}/final`));
-      for (const result of ran) known.set(result.scenario.id, result);
+      const checked = await checkFix(final, serve, (selected) => runAll(selected, `${outDir}/final`));
+      byId = new Map(checked.filter(Boolean).map((r) => [r.scenario.id, r]));
     }
-    results = final.map((s) => known.get(s.id)!);
+    results = final.map((s) => {
+      const result = byId.get(s.id);
+      if (!result) throw new Error(`Kane returned no result for "${s.name}"`);
+      return result;
+    });
+    if (treeBeforeCheck() !== verifiedFiles) {
+      return refuse("The files changed during Kane's final check. Nothing was pushed.", "The changed files weren't checked; nothing was pushed");
+    }
   } catch (e) {
-    return refuse(`The final check couldn't run: ${String(e)}. Nothing was pushed.`, "The final check couldn't run; nothing was pushed");
+    return refuse(`The final check couldn't run: ${maskSecrets(String(e))}. Nothing was pushed.`, "The final check couldn't run; nothing was pushed");
   }
   const fixedIds = new Set(failures.map((f) => f.id));
   const finalFixed = results.filter((r) => fixedIds.has(r.scenario.id));
@@ -293,9 +303,6 @@ async function verifyTree(
   const verified = finalFixed.filter((r) => r.outcome === "passed");
   if (!verified.length || finalFixed.length !== fixedIds.size || !finalFixed.every(settled) || regressed.length) {
     return refuse("Kane couldn't confirm the fix in the final check. Nothing was pushed.", "The final check didn't pass; nothing was pushed");
-  }
-  if (treeBeforeCheck() !== verifiedFiles) {
-    return refuse("The files changed during Kane's final check. Nothing was pushed.", "The changed files weren't checked; nothing was pushed");
   }
   const leak = discardLeak(agentName);
   if (leak) {
@@ -318,8 +325,16 @@ function commitFix(plan: FixPlan, verified: VerifiedFix, { loop, agentTouched }:
   };
   if (treeBeforeCheck() !== verified.files) return { outcome: changed };
   stageCheckedFiles(agentTouched);
-  if (treeBeforeCheck() !== verified.files) return { outcome: changed };
-  const buildOnlyUntracked = new Set(untrackedPaths());
+  if (changesLfsFiles(diffPaths("--cached", "--diff-filter=AMT"), true)) {
+    return { outcome: { ...restore, note: LFS_REFUSAL, status: "The fix changed Git LFS files. Nothing was pushed." } };
+  }
+  if (untrackedPaths().length) {
+    return { outcome: {
+      ...restore, note: "Kane checked the fix with untracked build outputs that would be left out of the commit. Nothing was pushed.",
+      status: "The staged tree wasn't checked. Nothing was pushed.",
+    } };
+  }
+  if (treeBeforeCheck() !== verified.files || !stagedFilesMatch()) return { outcome: changed };
   if (!diffPaths("--cached").length) {
     return { outcome: { ...restore, note: `${provider} tried ${attempt} times without a change that builds. Last note: You made no changes to the code.` } };
   }
@@ -333,8 +348,7 @@ function commitFix(plan: FixPlan, verified: VerifiedFix, { loop, agentTouched }:
   // Hooks can fail or rewrite files after Kane checked the tree.
   git("-c", `user.name=${provider}`, "-c", `user.email=${provider === "Codex" ? "codex@openai.com" : "noreply@anthropic.com"}`, "commit", "--no-verify", "-m",
     `Fix ${names}\n\n${summary}\n\nWritten by ${agentName} from a Proofed report; Kane re-ran the scenarios ${checkedWhere(verified.final)} and the fix passes.\n\nFixed-by: ${fixer.model} (${fixer.effort} effort)`);
-  if (git("rev-parse", "HEAD^{tree}") !== checkedTree || git("status", "--porcelain", "--untracked-files=no")
-    || untrackedPaths().some((file) => !buildOnlyUntracked.has(file))) {
+  if (git("rev-parse", "HEAD^{tree}") !== checkedTree || git("status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")) {
     return { outcome: changed };
   }
   return { value: { changes, names } };
@@ -388,7 +402,14 @@ export async function runFix(): Promise<FixOutcome> {
     const verification = await verifyTree(plan, app, attempt);
     if ("outcome" in verification) return verification.outcome;
     const verified = verification.value;
-    const commit = commitFix(plan, verified, attempt);
+    let commit: Phase<CommittedFix>;
+    try {
+      commit = commitFix(plan, verified, attempt);
+    } catch (e) {
+      const note = "Proofed couldn't commit the fix. Nothing was pushed.";
+      const diagnostic = e instanceof Error ? e.message : String(e);
+      return { kind: "restore", request: plan, note, status: note, log: `${note} ${maskSecrets(diagnostic)}` };
+    }
     if ("outcome" in commit) return commit.outcome;
     return await pushFix(plan, verified, commit.value, attempt.loop);
   } finally {

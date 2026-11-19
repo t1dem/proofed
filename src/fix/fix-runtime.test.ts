@@ -22,6 +22,7 @@ function fixture(target = "android", extra = "", build = "node build.cjs", final
   partialFix?: boolean;
   changeAfterAttempt?: boolean;
   buildOutput?: boolean;
+  untrackedBuildOutput?: boolean;
   ignoredBuildOutput?: boolean;
   agentBuildOutput?: "with-source" | "only";
   description?: "stored" | "missing" | "doubted";
@@ -41,7 +42,7 @@ function fixture(target = "android", extra = "", build = "node build.cjs", final
     writeFileSync(join(dir, ".proofed/scenarios/extra.md"), `---\nname: Extra\ntarget: ${target}\nexecution: cloud\napp: app.${target === "ios" ? "ipa" : "apk"}\npaths: [extra.js]\n---\nAssert extra is 1. [fake-from:extra] [delay:1]\n`);
   }
   writeFileSync(join(dir, ".proofed/scenarios/counter.md"), `---\nname: Counter\ntarget: ${target}\n${target === "desktop" ? "execution: local\n" : `execution: cloud\napp: app.${target === "ios" ? "ipa" : "apk"}\n`}${extra}---\nAssert counter is 1. [fake-from:counter] [delay:1]\n`);
-  writeFileSync(join(dir, "build.cjs"), `const fs=require('node:fs'); fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({type:'build',code:fs.readFileSync('app.js','utf8')})+'\\n'); fs.writeFileSync('app.${target === "ios" ? "ipa" : "apk"}',fs.readFileSync('app.js')); ${finalFails ? `const rounds=fs.readFileSync(${JSON.stringify(log)},'utf8').split('"type":"build"').length-1;if(rounds===2)fs.writeFileSync('modes/extra','fail');` : ""}`);
+  writeFileSync(join(dir, "build.cjs"), `const fs=require('node:fs'); fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({type:'build',code:fs.readFileSync('app.js','utf8')})+'\\n'); fs.writeFileSync('app.${target === "ios" ? "ipa" : "apk"}',fs.readFileSync('app.js')); ${finalFails ? `const rounds=fs.readFileSync(${JSON.stringify(log)},'utf8').split('"type":"build"').length-1;if(rounds===2){fs.writeFileSync('app.apk','different APK from the final build');fs.writeFileSync('modes/counter','fail');}` : ""}`);
   git("init", "-q", "-b", "main");
   if (options.buildOutput || options.agentBuildOutput) {
     mkdirSync(join(dir, "dist"));
@@ -53,6 +54,7 @@ function fixture(target = "android", extra = "", build = "node build.cjs", final
     }
   }
   if (options.buildOutput) {
+    if (!options.untrackedBuildOutput) writeFileSync(join(dir, ".gitignore"), readFileSync(join(dir, ".gitignore"), "utf8") + "/build-output.js\n");
     writeFileSync(join(dir, "dist/config.js"), "original config");
     const buildScript = join(dir, "build.cjs");
     writeFileSync(buildScript, readFileSync(buildScript, "utf8") + `
@@ -166,7 +168,7 @@ globalThis.fetch=async()=>{throw new Error('Network forbidden in fixer fixture')
   };
   const runs = () => readFileSync(join(dir, "kane.log"), "utf8").trim().split("\n")
     .map((s) => JSON.parse(s) as { args?: string[] }).filter((c) => c.args?.[0] === "run");
-  const events = () => readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((s) => JSON.parse(s) as { type: string; value?: string | { description: string; state: string }; code?: string; sha?: string });
+  const events = () => (existsSync(log) ? readFileSync(log, "utf8") : "").trim().split("\n").filter(Boolean).map((s) => JSON.parse(s) as { type: string; value?: string | { description: string; state: string }; code?: string; sha?: string });
   return { dir, original, originalRun, body, git, run, check, runs, events, cleanup: () => { rmSync(dir, { recursive: true, force: true }); rmSync(preload, { force: true }); } };
 }
 
@@ -210,6 +212,25 @@ test("a rejected push restores the report and fails the original commit's pendin
   } finally { f.cleanup(); }
 });
 
+test("a rejected commit restores the report and logs a masked Git diagnostic", () => {
+  const f = fixture();
+  try {
+    f.git("config", "--local", "gpg.format", "ssh");
+    f.git("config", "--local", "user.signingkey", join(f.dir, "fixture-token"));
+    f.git("config", "--local", "commit.gpgsign", "true");
+    const ran = f.run();
+    assert.equal(ran.status, 1, ran.stdout + ran.stderr);
+    assert.equal(f.git("rev-parse", "HEAD"), f.original);
+    const events = f.events();
+    assert.deepEqual(events.map((e) => e.type), ["report", "status", "ask", "build", "report", "status"]);
+    assert.match(events[4]!.value as string, /Proofed couldn't commit the fix/);
+    assert.match(events[4]!.value as string, /- \[ \] \*\*Fix with Claude\*\*/);
+    assert.deepEqual(events[5]!.value, { state: "failure", description: "Proofed couldn't commit the fix. Nothing was pushed." });
+    assert.match(ran.stdout, /\*\*\*/);
+    assert.doesNotMatch(ran.stdout + ran.stderr + JSON.stringify(events), /fixture-token/);
+  } finally { f.cleanup(); }
+});
+
 test("a stale report asks for a fresh check without starting the fix or updating status", () => {
   const f = fixture();
   try {
@@ -226,6 +247,20 @@ test("a stale report asks for a fresh check without starting the fix or updating
     assert.match(body, /This report is for an older commit\. Proofed checks new commits on its own; comment `\/proofed` only if no check is running\./);
     assert.match(body, /- \[ \] \*\*Fix with Claude\*\*/);
     assert.deepEqual(readReportData(body), readReportData(f.body));
+  } finally { f.cleanup(); }
+});
+
+test("a queued checkbox event leaves the newer version of the same comment alone", () => {
+  const f = fixture();
+  try {
+    f.git("commit", "--allow-empty", "-qm", "New PR commit");
+    const event = join(f.dir, "out/event.json");
+    mkdirSync(join(f.dir, "out"));
+    writeFileSync(event, JSON.stringify({ action: "edited", comment: { id: 1, body: f.body.replace("[ ]", "[x]") }, issue: { number: 1, pull_request: {} } }));
+    const newer = f.body.replace(f.original, f.git("rev-parse", "HEAD"));
+    const ran = f.run("./fix.ts", { GITHUB_EVENT_PATH: event, PROOFED_AUTO: "false", FIXTURE_REPORT: newer });
+    assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+    assert.deepEqual(f.events(), []);
   } finally { f.cleanup(); }
 });
 
@@ -312,15 +347,16 @@ for (const ignoredBuildOutput of [false, true]) test(`a retried fix commits the 
     assert.equal(f.git("show", "HEAD:dist/index.html"), "bundle: fixed");
     assert.equal(f.git("rev-parse", "HEAD:dist/index.html"), f.git("hash-object", "--no-filters", "app.apk"));
     assert.equal(f.git("ls-tree", "--name-only", "HEAD", "dist/old.html"), "");
-    assert.equal(f.git("status", "--porcelain"), "?? build-output.js");
+    assert.equal(f.git("status", "--porcelain"), "");
   } finally { f.cleanup(); }
 });
 
 test("a partial fix leaves the original check and both failures in the report for the next fix", () => {
   const f = fixture("android", "", "node build.cjs", false, { partialFix: true });
   try {
-    const ran = f.run();
+    const ran = f.run("./fix.ts", { GITHUB_STEP_SUMMARY: f.dir });
     assert.equal(ran.status, 1, ran.stdout + ran.stderr);
+    assert.match(ran.stdout, /Couldn't write the fix step summary/);
     assert.equal(f.git("rev-parse", "HEAD"), f.original);
     const events = f.events();
     assert.equal(events.some((e) => e.type === "push"), false);
@@ -352,6 +388,19 @@ test("a partial fix leaves the original check and both failures in the report fo
   } finally { f.cleanup(); }
 });
 
+test("the fixer refuses to commit when staging leaves out an untracked build input", () => {
+  const f = fixture("android", "", "node build.cjs", false, { buildOutput: true, untrackedBuildOutput: true });
+  try {
+    const ran = f.run();
+    assert.equal(ran.status, 1, ran.stdout + ran.stderr);
+    assert.equal(f.git("rev-parse", "HEAD"), f.original);
+    assert.equal(f.events().some((e) => e.type === "push"), false);
+    const body = f.events().filter((e) => e.type === "report").map((e) => String(e.value))
+      .findLast((body) => body.startsWith("<!-- proofed -->"));
+    assert.match(body ?? "", /untracked build outputs/);
+  } finally { f.cleanup(); }
+});
+
 test("a fix restores ignored tracked output rewritten or deleted by the agent", () => {
   const f = fixture("android", "", "node build.cjs", false, { agentBuildOutput: "with-source" });
   try {
@@ -377,13 +426,13 @@ test("agent edits to ignored tracked output alone do not start the build", () =>
   } finally { f.cleanup(); }
 });
 
-test("the final selection runs only the scenario missing from the last attempt", () => {
+test("the final selection checks every scenario after rebuilding for a missing result", () => {
   const f = fixture("android", "", "node build.cjs", false, { extraScenario: true });
   try {
     const ran = f.run();
     assert.equal(ran.status, 0, ran.stdout + ran.stderr);
-    assert.match(ran.stdout, /Final check: 1 result\(s\) from the last attempt, 1 to run\./);
-    assert.deepEqual(f.runs().map((c) => /\[fake-from:([^\]]+)\]/.exec(c.args![1]!)?.[1]), ["counter", "extra"]);
+    assert.match(ran.stdout, /Final check: 0 result\(s\) from the last attempt, 2 to run\./);
+    assert.deepEqual(f.runs().map((c) => /\[fake-from:([^\]]+)\]/.exec(c.args![1]!)?.[1]), ["counter", "counter", "extra"]);
     assert.deepEqual(f.events().filter((e) => ["ask", "build", "push"].includes(e.type)).map((e) => e.type), ["ask", "build", "build", "push"]);
   } finally { f.cleanup(); }
 });
@@ -400,11 +449,13 @@ test("a changed tree after the attempt rebuilds and checks the whole final selec
   } finally { f.cleanup(); }
 });
 
-test("a failure on the final native check prevents the commit and push", () => {
+test("a previously passing check can fail on a different APK from the final build", () => {
   const f = fixture("android", "", "node build.cjs", true);
   try {
     const ran = f.run();
     assert.equal(ran.status, 1, ran.stdout + ran.stderr);
+    assert.equal(readFileSync(join(f.dir, "app.apk"), "utf8"), "different APK from the final build");
+    assert.deepEqual(f.runs().map((c) => /\[fake-from:([^\]]+)\]/.exec(c.args![1]!)?.[1]), ["counter", "counter", "extra"]);
     assert.equal(f.git("rev-parse", "HEAD"), f.original);
     assert.equal(f.events().some((e) => e.type === "push"), false);
     assert.ok(f.events().some((e) => e.type === "report" && /final check\. Nothing was pushed/.test(e.value as string)));
