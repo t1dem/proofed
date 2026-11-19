@@ -13,7 +13,7 @@ type Events = {
   "Page.screencastFrame": { data: string; sessionId: number; metadata: ScreencastMetadata };
   "Runtime.bindingCalled": { name: string; payload: string };
   "Runtime.exceptionThrown": { exceptionDetails: ExceptionDetails };
-  "Page.loadEventFired": { timestamp: number };
+  "Page.lifecycleEvent": { loaderId: string; name: string };
 };
 
 type Message = {

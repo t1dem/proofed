@@ -155,7 +155,8 @@ globalThis.fetch=async()=>{throw new Error('Network forbidden in fixer fixture')
   const preload = join(tmpdir(), `proofed-fix-preload-${process.pid}-${Date.now()}.mjs`);
   writeFileSync(preload, script);
   const run = (entry = "./fix.ts", overrides: NodeJS.ProcessEnv = {}) => spawnSync(process.execPath, ["--import", preload, fileURLToPath(new URL(entry, import.meta.url))], {
-    cwd: dir, env: { ...env, ...overrides }, encoding: "utf8", timeout: 30_000,
+    // Rebuilding, checking twice and committing can take over 30 seconds on a busy macOS runner.
+    cwd: dir, env: { ...env, ...overrides }, encoding: "utf8", timeout: 45_000,
   });
   const check = (request: string, counter: "pass" | "fail") => {
     const out = join(dir, "out");
@@ -462,7 +463,7 @@ test("a changed tree after the attempt rebuilds and checks the whole final selec
   const f = fixture("android", "", "node build.cjs", false, { extraScenario: true, changeAfterAttempt: true });
   try {
     const ran = f.run();
-    assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+    assert.equal(ran.status, 0, [ran.error, ran.signal, ran.stdout, ran.stderr].filter(Boolean).join("\n"));
     assert.match(ran.stdout, /Final check: 0 result\(s\) from the last attempt, 2 to run\./);
     assert.deepEqual(f.runs().map((c) => /\[fake-from:([^\]]+)\]/.exec(c.args![1]!)?.[1]), ["counter", "counter", "extra"]);
     assert.equal(f.git("show", "HEAD:new-helper.js"), "changed after attempt");

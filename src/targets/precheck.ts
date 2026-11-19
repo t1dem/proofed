@@ -21,6 +21,9 @@ const SETTLE = 3_000;
 // be about to render, and the exception may be someone else's (an analytics script).
 const RECHECK = 10_000;
 const POLL = 250;
+// Target creation, attachment and CDP replies also need time when Chrome is busy.
+const CHECK_TIMEOUT = LOAD_TIMEOUT + SETTLE + RECHECK + 20_000;
+const SCREENSHOT_GRACE = 5_000;
 
 // Any text, or an element that shows something without text.
 const PAINTED = `(() => {
@@ -53,10 +56,7 @@ export async function findCrashes(urls: string[], dir: string) {
     const cdp = await connectCdp(chrome.endpoint);
     await Promise.all(
       urls.map(async (url, i) => {
-        // The slack covers a loaded machine: on a busy CI runner six pages took 37 s, not the usual 14.
-        const crash = await Promise.race([crashOf(cdp, url, join(dir, `crash-${i}.jpg`)), limit(LOAD_TIMEOUT + SETTLE + RECHECK + 20_000)]).catch(
-          () => undefined,
-        );
+        const crash = await crashOf(cdp, url, join(dir, `crash-${i}.jpg`)).catch(() => undefined);
         if (crash) crashes.set(url, crash);
       }),
     );
@@ -71,22 +71,30 @@ export async function findCrashes(urls: string[], dir: string) {
   return crashes;
 }
 
-async function crashOf(cdp: Cdp, url: string, file: string): Promise<Crash | undefined> {
+async function detectCrash(cdp: Cdp, url: string) {
   const { targetId } = await cdp.send<{ targetId: string }>("Target.createTarget", { url: "about:blank" });
   const { sessionId } = await cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true });
   const page = <T = unknown>(method: string, params: object = {}) => cdp.send<T>(method, params, sessionId);
 
   const errors: string[] = [];
-  let loaded = () => {};
-  const load = new Promise<void>((resolve) => (loaded = resolve));
+  const load = Promise.withResolvers<true>();
+  const loaded = new Set<string>();
+  let navigationLoader: string | undefined;
   cdp.on("Runtime.exceptionThrown", ({ exceptionDetails }, from) => from === sessionId && errors.push(message(exceptionDetails)));
-  cdp.on("Page.loadEventFired", (_, from) => from === sessionId && loaded());
+  // The initial about:blank can finish loading first, and the real load can arrive before the navigate reply.
+  cdp.on("Page.lifecycleEvent", ({ loaderId, name }, from) => {
+    if (from !== sessionId || name !== "load") return;
+    if (loaderId === navigationLoader) load.resolve(true);
+    else if (!navigationLoader) loaded.add(loaderId);
+  });
   await page("Page.enable");
+  await page("Page.setLifecycleEventsEnabled", { enabled: true });
   await page("Runtime.enable");
 
-  const { errorText } = await page<{ errorText?: string }>("Page.navigate", { url });
-  if (errorText) return undefined; // Not reachable at all: Kane reports that as it always has.
-  await Promise.race([load, limit(LOAD_TIMEOUT)]);
+  const { errorText, loaderId } = await page<{ errorText?: string; loaderId?: string }>("Page.navigate", { url });
+  if (errorText || !loaderId) return undefined;
+  navigationLoader = loaderId;
+  if (!loaded.has(loaderId) && !(await Promise.race([load.promise, limit(LOAD_TIMEOUT)]))) return undefined;
 
   // `blank` only turns true on a definite answer; an evaluation lost to a navigation counts as unknown.
   let blank = false;
@@ -101,17 +109,26 @@ async function crashOf(cdp: Cdp, url: string, file: string): Promise<Crash | und
     if (Date.now() < until) continue;
     if (rechecking || !blank || errors.length === 0) break;
     rechecking = true;
-    until += RECHECK;
+    until = Date.now() + RECHECK;
   }
   const error = blank ? errors[0] : undefined;
-  if (!error) return undefined;
-  // Without Kane there is no recording; this is the picture the report shows instead. A failed
-  // screenshot only costs the picture, never the verdict.
-  const screenshot = await page<{ data: string }>("Page.captureScreenshot", { format: "jpeg", quality: 80 }).then(
-    ({ data }) => (writeFileSync(file, Buffer.from(data, "base64")), file),
-    () => undefined,
-  );
-  return { error, screenshot };
+  return error ? { error, page } : undefined;
+}
+
+async function crashOf(cdp: Cdp, url: string, file: string): Promise<Crash | undefined> {
+  const deadline = Date.now() + CHECK_TIMEOUT;
+  const crash = await Promise.race([detectCrash(cdp, url), limit(CHECK_TIMEOUT)]);
+  if (!crash) return undefined;
+  // Give late verdicts time for a screenshot. A stalled capture only costs the picture.
+  const screenshot = await Promise.race([
+    crash.page<{ data: string }>("Page.captureScreenshot", { format: "jpeg", quality: 80 }),
+    limit(Math.max(deadline - Date.now(), SCREENSHOT_GRACE)),
+  ]).then((capture) => {
+    if (!capture) return undefined;
+    writeFileSync(file, Buffer.from(capture.data, "base64"));
+    return file;
+  }).catch(() => undefined);
+  return { error: crash.error, screenshot };
 }
 
 // A normal failed result, so the report, the run file, the dashboard and the fixer need nothing new.
