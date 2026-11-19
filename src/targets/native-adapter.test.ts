@@ -154,16 +154,19 @@ test("cloud preparation is screenshot-only and never starts a local device", asy
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("a native clip keeps one second of each still stretch", { timeout: 60_000 }, async () => {
+test("a native clip keeps one second of each still stretch, three of the last", { timeout: 60_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "proofed-still-"));
   try {
     const input = join(dir, "whole.mp4"), output = join(dir, "clip.mp4");
-    // Two seconds of change, then six still seconds, the way a device recording looks while Kane thinks.
-    execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=10:duration=2", "-f", "lavfi", "-i", "color=c=blue:size=320x240:rate=10:duration=6",
-      "-filter_complex", "[0][1]concat=n=2:v=1", "-pix_fmt", "yuv420p", input]);
-    await squeezeStills(input, output, 8, 60_000);
+    // Change, six still seconds while Kane thinks, change again, and a still end: 2 + 6 + 2 + 6 s.
+    const moving = ["-f", "lavfi", "-i", "testsrc2=size=320x240:rate=10:duration=2"];
+    const still = ["-f", "lavfi", "-i", "color=c=blue:size=320x240:rate=10:duration=6"];
+    execFileSync("ffmpeg", ["-v", "error", ...moving, ...still, ...moving, ...still,
+      "-filter_complex", "[0][1][2][3]concat=n=4:v=1", "-pix_fmt", "yuv420p", input]);
+    await squeezeStills(input, output, 16, 60_000);
     const seconds = Number(execFileSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", output], { encoding: "utf8" }));
-    assert.ok(seconds > 2.5 && seconds < 3.5, `expected about 3 s, got ${seconds}`);
+    // 2 + 1 + 2 + 3 s.
+    assert.ok(seconds > 7.5 && seconds < 8.5, `expected about 8 s, got ${seconds}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

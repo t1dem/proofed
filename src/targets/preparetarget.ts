@@ -64,15 +64,17 @@ async function required(bin: string, args: string[], timeout?: number) {
 
 // Kane can think for a minute while the device screen stands still, and the device records all of it. Each still
 // stretch keeps its first second, so a six-minute run plays in about half a minute with every change in it.
-// Small changes, such as a blinking text cursor, count as still.
+// Small changes, such as a blinking text cursor, count as still. The screen the run ends on stays longer: it shows
+// what the check was about before the GIF loops.
 const NATIVE_FPS = 10;
 const STILL_HOLD = 1;
+const END_HOLD = 3;
 
 export async function squeezeStills(input: string, output: string, length: number, timeout: number) {
   const text = await required("ffmpeg", ["-hide_banner", "-nostats", "-i", input, "-vf", "scale=270:-2,freezedetect=n=-50dB:d=1.5", "-f", "null", "-"], timeout);
   const cuts: string[] = [];
-  const cut = (from: number, to: number) => {
-    if (to - from > STILL_HOLD) cuts.push(`between(t,${(from + STILL_HOLD).toFixed(2)},${to.toFixed(2)})`);
+  const cut = (from: number, to: number, hold = STILL_HOLD) => {
+    if (to - from > hold) cuts.push(`between(t,${(from + hold).toFixed(2)},${to.toFixed(2)})`);
   };
   let start: number | undefined;
   for (const [, edge, at] of text.matchAll(/freeze_(start|end): ([\d.]+)/g)) {
@@ -83,7 +85,7 @@ export async function squeezeStills(input: string, output: string, length: numbe
     }
   }
   // The recording can end on a still screen.
-  if (start !== undefined) cut(start, length);
+  if (start !== undefined) cut(start, length, END_HOLD);
   if (cuts.length === 0) return renameSync(input, output);
   await required("ffmpeg", ["-y", "-i", input, "-vf", `select='not(${cuts.join("+")})',setpts=N/${NATIVE_FPS}/TB`, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", output], timeout);
 }
