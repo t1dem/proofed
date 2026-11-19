@@ -62,6 +62,34 @@ async function required(bin: string, args: string[], timeout?: number) {
   return result.text;
 }
 
+// Kane can think for a minute while the device screen stands still, and the device records all of it. Each still
+// stretch keeps its first second, so a six-minute run plays in about half a minute with every change in it.
+// Small changes, such as a blinking text cursor, count as still. The screen the run ends on stays longer: it shows
+// what the check was about before the GIF loops.
+const NATIVE_FPS = 10;
+const STILL_HOLD = 1;
+const END_HOLD = 3;
+
+export async function squeezeStills(input: string, output: string, length: number, timeout: number) {
+  const text = await required("ffmpeg", ["-hide_banner", "-nostats", "-i", input, "-vf", "scale=270:-2,freezedetect=n=-50dB:d=1.5", "-f", "null", "-"], timeout);
+  const cuts: string[] = [];
+  const cut = (from: number, to: number, hold = STILL_HOLD) => {
+    if (to - from > hold) cuts.push(`between(t,${(from + hold).toFixed(2)},${to.toFixed(2)})`);
+  };
+  let start: number | undefined;
+  for (const [, edge, at] of text.matchAll(/freeze_(start|end): ([\d.]+)/g)) {
+    if (edge === "start") start = Number(at);
+    else if (start !== undefined) {
+      cut(start, Number(at));
+      start = undefined;
+    }
+  }
+  // The recording can end on a still screen.
+  if (start !== undefined) cut(start, length, END_HOLD);
+  if (cuts.length === 0) return renameSync(input, output);
+  await required("ffmpeg", ["-y", "-i", input, "-vf", `select='not(${cuts.join("+")})',setpts=N/${NATIVE_FPS}/TB`, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", output], timeout);
+}
+
 async function nativeRecorder(target: Extract<Target, { kind: "ios" | "android" }>, dir: string, id: string) {
   // Transferring and encoding long recordings can take minutes on CI runners.
   const recordingTimeout = 10 * 60 * 1000;
@@ -150,21 +178,29 @@ async function nativeRecorder(target: Extract<Target, { kind: "ios" | "android" 
         const list = join(dir, "segments.txt");
         writeFileSync(list, segments.map((f) => `file '${f.replaceAll("\\", "/").replaceAll("'", "'\\''")}'`).join("\n"));
         const mp4 = join(dir, "clip.mp4"), jpg = join(dir, "clip.jpg"), gif = join(dir, "clip.gif");
-        const untrimmed = join(dir, "clip-untrimmed.mp4");
+        const untrimmed = join(dir, "clip-untrimmed.mp4"), whole = join(dir, "clip-whole.mp4");
         try {
           // Use a constant frame rate so the thumbnail seek finds a frame even when the Android screen stops changing.
-          await required("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", list, "-vf", "fps=10,scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-bf", "0", "-pix_fmt", "yuv420p", untrimmed], recordingTimeout);
+          await required("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", list, "-vf", `fps=${NATIVE_FPS},scale=trunc(iw/2)*2:trunc(ih/2)*2`, "-c:v", "libx264", "-bf", "0", "-pix_fmt", "yuv420p", untrimmed], recordingTimeout);
           const { text } = await command("ffmpeg", ["-hide_banner", "-i", untrimmed], process.env, recordingTimeout);
           const duration = /^\s*Duration: (\d+):(\d{2}):(\d{2}\.\d+),/m.exec(text);
-          const seconds = duration ? Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3]) : 0;
+          let seconds = duration ? Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3]) : 0;
           // Kane closes the app at the end, so cut away the launcher frames.
-          if (seconds > 3) await required("ffmpeg", ["-y", "-i", untrimmed, "-t", (seconds - 1.5).toFixed(2), "-c", "copy", mp4], recordingTimeout);
-          else renameSync(untrimmed, mp4);
+          if (seconds > 3) {
+            await required("ffmpeg", ["-y", "-i", untrimmed, "-t", (seconds - 1.5).toFixed(2), "-c", "copy", whole], recordingTimeout);
+            seconds -= 1.5;
+          } else renameSync(untrimmed, whole);
+          await squeezeStills(whole, mp4, seconds, recordingTimeout).catch((error: unknown) => {
+            log(`Kept the whole recording: ${error instanceof Error ? error.message : error}`);
+            renameSync(whole, mp4);
+          });
         } finally {
           rmSync(untrimmed, { force: true });
+          rmSync(whole, { force: true });
         }
         await required("ffmpeg", ["-y", "-sseof", "-0.1", "-i", mp4, "-frames:v", "1", jpg], recordingTimeout);
-        await required("ffmpeg", ["-y", "-i", mp4, "-vf", "fps=6,scale=480:-1", gif], recordingTimeout);
+        // The same palette as web clips: the default one dithers gradients into noise.
+        await required("ffmpeg", ["-y", "-i", mp4, "-vf", `fps=${NATIVE_FPS},scale=480:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle`, gif], recordingTimeout);
         return { mp4, jpg, gif };
       })();
     },

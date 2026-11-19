@@ -4,8 +4,9 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { execFileSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { prepareTarget } from "./preparetarget.ts";
+import { prepareTarget, squeezeStills } from "./preparetarget.ts";
 import { runAll } from "../check/pipeline.ts";
 import { runScenario } from "../check/run.ts";
 import { resolveScenarioTarget } from "./target.ts";
@@ -128,7 +129,7 @@ else if(a.includes('rm')) {
     assert.notEqual(installs[1], firstInstall, "the rebuilt artifact reached the second Kane process");
     assert.doesNotMatch(calls, /--url|--cdp-endpoint|shutdown|uninstall|--install/);
     assert.match(calls, /scale=trunc\(iw\/2\)\*2:trunc\(ih\/2\)\*2/);
-    if (kind === "android") assert.match(calls, /-t 4\.30 -c copy .*clip\.mp4/);
+    if (kind === "android") assert.match(calls, /-t 4\.30 -c copy .*clip-whole\.mp4/);
     else assert.doesNotMatch(calls, /ffmpeg .* -t /);
     if (kind === "android") { assert.match(calls, /--time-limit 175/); assert.match(calls, /pull.*native-0.mp4/); assert.ok(calls.indexOf('pull ') < calls.lastIndexOf('shell rm ')); }
     if (kind === "ios") assert.match(calls, /--target simulator --app .*simulator.zip/);
@@ -151,4 +152,22 @@ test("cloud preparation is screenshot-only and never starts a local device", asy
     assert.equal(prepared.native, undefined);
     await prepared.cleanup();
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a native clip keeps one second of each still stretch, three of the last", { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "proofed-still-"));
+  try {
+    const input = join(dir, "whole.mp4"), output = join(dir, "clip.mp4");
+    // Change, six still seconds while Kane thinks, change again, and a still end: 2 + 6 + 2 + 6 s.
+    const moving = ["-f", "lavfi", "-i", "testsrc2=size=320x240:rate=10:duration=2"];
+    const still = ["-f", "lavfi", "-i", "color=c=blue:size=320x240:rate=10:duration=6"];
+    execFileSync("ffmpeg", ["-v", "error", ...moving, ...still, ...moving, ...still,
+      "-filter_complex", "[0][1][2][3]concat=n=4:v=1", "-pix_fmt", "yuv420p", input]);
+    await squeezeStills(input, output, 16, 60_000);
+    const seconds = Number(execFileSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", output], { encoding: "utf8" }));
+    // 2 + 1 + 2 + 3 s.
+    assert.ok(seconds > 7.5 && seconds < 8.5, `expected about 8 s, got ${seconds}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

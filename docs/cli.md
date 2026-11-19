@@ -249,7 +249,8 @@ actual inventory; the examples do not install a runtime or choose a device for y
 Native recording uses `simctl recordVideo` or `adb shell screenrecord`. Android segments
 are limited to 175 seconds and concatenated after pulling them. ffmpeg produces MP4,
 final JPG and GIF without changing portrait orientation or adding a cursor or zoom.
-Segment boundaries may have a gap. A recording failure is reported separately and
+Each stretch where the screen stands still keeps its first second, so a run in which Kane
+thinks for minutes plays in well under a minute. Segment boundaries may have a gap. A recording failure is reported separately and
 preserves Kane's verdict. Cloud recordings are not available through this adapter.
 Only Proofed's remote recording files are removed, after a successful pull.
 
