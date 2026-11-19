@@ -3,7 +3,7 @@ import type { Step } from "../kane/kane.ts";
 // The final check, its text literals, and whether they were quoted. Quoted text is the author's own
 // word for what the page shows; unquoted names are only taken from `Check that <A> contains <B>.`
 // when they read as on-screen text, since a false contradiction turns a real pass into "not checked".
-export type Expected = { check: string; literals: string[]; quoted: boolean };
+export type Expected = { check: string; literals: string[]; quoted: boolean; literalGroups?: string[][] };
 
 const NEGATION = /\b(?:not|no|never|none|nothing|without|longer|cannot|neither|nor|hidden|gone|absent|missing|empty|removed|disappears?|disappeared)\b|n['’]t\b/i;
 const QUOTED = /"([^"]+)"|“([^”]+)”|(?<![\p{L}\p{N}])'([^']+)'(?![\p{L}\p{N}])|‘([^’]+)’(?![\p{L}\p{N}])/gu;
@@ -31,8 +31,21 @@ export function expectedText(objective: string): Expected {
   const check = restore(sentence);
   const body = /^(?:Check|Assert|Verify|Confirm|Ensure)(?: that)?\s+(.+?)\.?$/i.exec(sentence)?.[1];
   if (!body || NEGATION.test(body)) return { check, literals: [], quoted: false };
-  const quoted = [...body.matchAll(/\u0000(\d+)\u0000/g)].map((m) => quotes[Number(m[1])]!.trim().replace(/[.,]+$/, "")).filter(Boolean);
-  if (quoted.length) return { check, literals: [...new Set(quoted)], quoted: true };
+  const literalGroups: string[][] = [];
+  let previousEnd = 0;
+  for (const match of body.matchAll(/\u0000(\d+)\u0000/g)) {
+    const literal = quotes[Number(match[1])]!.trim().replace(/[.,]+$/, "");
+    const previous = literalGroups.at(-1);
+    if (literal) {
+      if (previous && /^\s+or\s+$/i.test(body.slice(previousEnd, match.index))) previous.push(literal);
+      else literalGroups.push([literal]);
+    }
+    previousEnd = literal ? match.index + match[0].length : 0;
+  }
+  if (literalGroups.length) {
+    const literals = [...new Set(literalGroups.flat())];
+    return { check, literals, quoted: true, ...(literalGroups.some((group) => group.length > 1) && { literalGroups }) };
+  }
   const verbs = [...body.matchAll(VERB)];
   if (verbs.length !== 1) return { check, literals: [], quoted: false };
   const at = verbs[0]!.index!;
@@ -42,9 +55,11 @@ export function expectedText(objective: string): Expected {
 // Lenient on purpose: whitespace, case, quote and dash styles, and how an element splits text.
 const squash = (text: string) => text.normalize("NFKC").toLocaleLowerCase("en-US").replace(/[‘’ʼ]/g, "'").replace(/[“”«»„]/g, '"').replace(/[‐‑‒–—―−]/g, "-").replace(/\s+/gu, "");
 
-export function textContradiction(expected: Expected, text: string | undefined): string | undefined {
+export function textContradiction(expected: Expected, text: string | string[] | undefined): string | undefined {
   if (text === undefined) return;
-  const missing = expected.literals.filter((literal) => !squash(text).includes(squash(literal)));
+  const captures = (typeof text === "string" ? [text] : text).map(squash);
+  const groups = expected.literalGroups ?? expected.literals.map((literal) => [literal]);
+  const missing = groups.filter((group) => !group.some((literal) => captures.some((capture) => capture.includes(squash(literal))))).flat();
   if (!missing.length) return;
   const reason = `Proofed could not confirm Kane's pass: the page text had no ${missing.map((s) => JSON.stringify(s)).join(" or ")} when Kane made its final check.`;
   return expected.quoted ? reason : `${reason} The words were taken as on-screen text from the unquoted check ${JSON.stringify(expected.check)}; quote the exact text the page should show to say what to compare.`;
@@ -60,13 +75,14 @@ export function assertSnapshots(expected: Expected, read: () => Promise<string |
     step(s: Step) {
       if (!expected.literals.length || !/^assert:/i.test(s.remark)) return;
       if (s.status === "running") {
-        const names = expected.literals.every((l) => squash(s.remark).includes(squash(l)));
+        const remark = squash(s.remark);
+        const names = expected.literals.every((literal) => remark.includes(squash(literal)));
         if (names || !chosen?.names) chosen = { step: s.step, names, reads: [read()] };
       } else if (chosen?.step === s.step && chosen.reads.length === 1) chosen.reads.push(read());
     },
     async text() {
       const reads = await Promise.all(chosen?.reads ?? []);
-      return reads.length && reads.every((r) => r !== undefined) ? reads.join("\n") : undefined;
+      return reads.length && reads.every((r) => r !== undefined) ? reads : undefined;
     },
   };
 }
@@ -78,11 +94,22 @@ export function assertSnapshots(expected: Expected, read: () => Promise<string |
 export const VISIBLE_TEXT = `(() => {
   let complete = true;
   const parts = [document.title];
-  const read = (root) => {
-    parts.push(root instanceof ShadowRoot ? [...root.children].map((el) => el.innerText || '').join('\\n') : root.innerText || '');
-    for (const el of [...(root instanceof Element ? [root] : []), ...root.querySelectorAll('*')]) {
-      const view = el.ownerDocument.defaultView;
-      if (!el.checkVisibility({checkOpacity: true, checkVisibilityCSS: true})) continue;
+  const text = [];
+  const read = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const parent = node.assignedSlot || node.parentElement || node.parentNode?.host;
+      if (!parent || parent.ownerDocument.defaultView.getComputedStyle(parent).visibility !== 'visible') return;
+      const range = node.ownerDocument.createRange();
+      range.selectNodeContents(node);
+      if ([...range.getClientRects()].some((rect) => rect.width > 0 && rect.height > 0)) text.push(node.data);
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const el = node;
+    const view = el.ownerDocument.defaultView;
+    const style = view.getComputedStyle(el);
+    if (style.display === 'none' || (style.display !== 'contents' && style.opacity === '0') || style.contentVisibility === 'hidden') return;
+    if (el.checkVisibility({checkOpacity: true, checkVisibilityCSS: true})) {
       const tag = el.localName;
       if (['canvas', 'video', 'object', 'embed'].includes(tag)) {
         const r = el.getBoundingClientRect();
@@ -92,16 +119,15 @@ export const VISIBLE_TEXT = `(() => {
       if (tag === 'select') parts.push(...[...el.selectedOptions].map((o) => o.text));
       if (tag === 'img' || tag === 'area' || (tag === 'input' && el.type === 'image')) parts.push(el.alt);
       if (tag === 'svg') parts.push(...[...el.querySelectorAll('title')].map((t) => t.textContent));
-      if (tag === 'text' && el instanceof view.SVGElement) parts.push(el.textContent);
       parts.push(el.getAttribute('aria-label'), el.getAttribute('title'));
       for (const pseudo of ['::before', '::after']) {
-        const content = view.getComputedStyle(el, pseudo).content;
-        if (!content || content === 'none' || content === 'normal') continue;
+        const pseudoStyle = view.getComputedStyle(el, pseudo);
+        const content = pseudoStyle.content;
+        if (!content || content === 'none' || content === 'normal' || pseudoStyle.display === 'none' || pseudoStyle.visibility !== 'visible' || pseudoStyle.opacity === '0') continue;
         if (/counter/.test(content)) complete = false;
         parts.push(content.replace(/attr\\(([\\w-]+)\\)/g, (_, name) => JSON.stringify(el.getAttribute(name) || '')).match(/"(?:[^"\\\\]|\\\\.)*"/g)?.map((s) => { try { return JSON.parse(s); } catch { return s.slice(1, -1); } }).join('') ?? '');
       }
-      if (el.shadowRoot) read(el.shadowRoot);
-      else if (view.customElements.get(tag)) complete = false;
+      if (!el.shadowRoot && view.customElements.get(tag)) complete = false;
       if (tag === 'iframe') {
         try {
           const doc = el.contentDocument, src = el.getAttribute('src');
@@ -111,7 +137,10 @@ export const VISIBLE_TEXT = `(() => {
         catch { complete = false; }
       }
     }
+    // Visit the rendered children, including slotted nodes and direct shadow text.
+    const slotted = el.localName === 'slot' ? el.assignedNodes?.() : undefined;
+    for (const child of slotted?.length ? slotted : (el.shadowRoot || el).childNodes) read(child);
   };
   read(document.documentElement);
-  return complete ? parts.filter(Boolean).join('\\n') : null;
+  return complete ? [text.join(''), ...parts].filter(Boolean).join('\\n') : null;
 })()`;

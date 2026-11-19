@@ -5,7 +5,7 @@ import { matchesPath } from "../paths.ts";
 // changed files in its `paths` (every changed file, when it has none) stay as they were. Only
 // passes are kept; everything else runs again.
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync, lstatSync, readlinkSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, lstatSync, readlinkSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Scenario } from "../scenarios.ts";
 import type { WebService } from "../targets/target.ts";
@@ -64,14 +64,20 @@ export function cacheKey(s: Scenario, startUrl: string, changed: string[], read:
     add(JSON.stringify(target));
     add(kaneVersion);
     if ("app" in target && target.app && !/^APP[\w-]+$/.test(target.app)) {
-      const digest = (file: string) => {
+      const digest = (file: string, appRoot = false) => {
         try {
-          if (lstatSync(file).isSymbolicLink()) add(readlinkSync(file));
-          else if (lstatSync(file).isDirectory()) for (const name of readdirSync(file).sort()) { add(name); digest(join(file, name)); }
+          let stat = lstatSync(file);
+          if (stat.isSymbolicLink()) {
+            add(readlinkSync(file));
+            if (!appRoot) return;
+            // Follow the app path itself. Links inside the artifact remain leaves.
+            stat = statSync(file);
+          }
+          if (stat.isDirectory()) for (const name of readdirSync(file).sort()) { add(name); digest(join(file, name)); }
           else add(readFileSync(file));
         } catch { add("missing"); }
       };
-      digest(target.app);
+      digest(target.app, true);
     }
   }
   if (service && (s.resolvedTarget?.kind ?? s.target ?? "web") === "web" && (service.build || service.install)) {

@@ -144,6 +144,10 @@ export async function runScenario(scenario: Scenario, o: RunOptions): Promise<Sc
 
 async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResult> {
   const log = (line: string) => logLine(`[${scenario.id}] ${line}`);
+  const logRecordingFailure = (what: string, error: unknown) => {
+    try { log(`${what} failed: ${String(error)}`); }
+    catch { /* An unwritable output directory can break both the recording and the log. */ }
+  };
   const name = JSON.stringify(maskSecrets(scenario.id));
   const kaneRun = (options: Parameters<typeof runKane>[0]) => timedAsync(`Kane scenario ${name}`, () => runKane(options));
   const dir = join(o.outDir, scenario.id);
@@ -172,7 +176,8 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
       const clip = await stopNative()?.catch((e: unknown) => { recordingNote = `Native recording failed: ${String(e)}`; return undefined; });
       const end = reconciledEnd(kane.end, kane.steps);
       const outcome = outcomeOf(end, kane.steps);
-      writeFileSync(join(dir, "metadata.json"), JSON.stringify({ ...prepared.metadata, recordingNote }));
+      try { writeFileSync(join(dir, "metadata.json"), JSON.stringify({ ...prepared.metadata, recordingNote })); }
+      catch (e) { logRecordingFailure("recording metadata", e); }
       const error = kane.timedOut
         ? cutOffReason(kane.stderr, target, kane.steps.length > 0, timeouts.wallTimeoutSeconds)
         : end?.reason || (end ? `Kane ended with status ${end.status}` : kaneError(kane.stderr) || "Kane exited without run_end");
@@ -214,16 +219,15 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
         o.onEvent?.({ type: "step", id: scenario.id, step: s });
         if (s.status !== "running" && s.remark) log(`${s.status === "failed" ? "✗" : "·"} ${s.remark}`);
       },
-      onEnd: (end) => (focus = recorder.locate(focusWords(end))),
+      onEnd: (end) => (focus = recorder.locate(focusWords(end)).catch(() => undefined)),
     });
     clearInterval(stills);
-    const focusRect = await focus;
     // Drop the blank about:blank frames from before Kane's first navigation.
     const start = Date.parse(kane.steps[0]?.ts ?? "") / 1000 || 0;
-    // The page reads use the connection that stop() closes.
+    // The page reads and focus locator use the connection that stop() closes.
     const assertedText = await asserted.text();
-    const recorded = recorder.stop();
-    const frames = target.kind === "web" ? recorded.frames.filter((f) => f.time >= start) : recorded.frames;
+    const focusRect = await focus;
+    const frames = target.kind === "web" ? recorder.frames.filter((f) => f.time >= start) : recorder.frames;
     const verdict = reconciledEnd(kane.end, kane.steps);
     const contradiction = verdict?.status === "passed" ? textContradiction(expected, assertedText) : undefined;
     const outcome = recorder.unexpectedPage ? "error" : contradiction ? "unsure" : outcomeOf(verdict, kane.steps);
@@ -235,14 +239,18 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     const error = recorder.unexpectedPage ? "Experimental desktop attach failed: Kane opened another page instead of using the chosen renderer" : kane.timedOut
       ? cutOffReason(kane.stderr, target, kane.steps.length > 0, timeouts.wallTimeoutSeconds)
       : (end?.reason || (end ? `Kane ended with status ${end.status}` : kaneError(kane.stderr) || "Kane exited without run_end"));
-    const film = { frames, actions: recorded.actions, focus: focusRect };
-    writeFileSync(join(dir, "film.json"), JSON.stringify(film));
+
     // A step starts when Kane announces it (the "running" event), not when it reports it done.
     const announced = new Map(kane.steps.filter((s) => s.status === "running").map((s) => [s.step, s.ts]));
     const marks = kane.steps.map((s) => Date.parse(announced.get(s.step) ?? s.ts) / 1000);
-    const endpoint = prepared.montage ? await prepared.montage() : prepared.clipEndpoint!;
-    const made = await timedAsync(`clip encode ${name}`, () => makeClip({ ...film, marks, endpoint }, join(dir, "clip"))).catch((e: unknown) => {
-      log(`clip failed: ${String(e)}`);
+    const made = await timedAsync(`clip encode ${name}`, async () => {
+      const { actions } = recorder.stop();
+      const film = { frames, actions, focus: focusRect };
+      writeFileSync(join(dir, "film.json"), JSON.stringify(film));
+      const endpoint = prepared.montage ? await prepared.montage() : prepared.clipEndpoint!;
+      return makeClip({ ...film, marks, endpoint }, join(dir, "clip"));
+    }).catch((e: unknown) => {
+      logRecordingFailure("clip", e);
       return undefined;
     });
     const clip = made && { mp4: made.mp4, gif: made.gif, jpg: made.jpg };
@@ -259,6 +267,6 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     };
   } finally {
     clearInterval(stills);
-    await prepared.cleanup();
+    await prepared.cleanup().catch((e: unknown) => logRecordingFailure("target cleanup", e));
   }
 }

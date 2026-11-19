@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -20,6 +21,14 @@ test("balance snapshots are observations, and concurrent meters discard their de
     const second = await creditMeter(env, lock);
     assert.equal(await second(), undefined);
     assert.equal(await first(), undefined);
+    const owner = await creditMeter(env, lock);
+    const overlapping = await creditMeter(env, lock);
+    assert.equal(await owner(), undefined);
+    const third = await creditMeter(env, lock);
+    writeFileSync(balance, "62");
+    assert.equal(await overlapping(), undefined);
+    assert.equal(await third(), undefined);
+    assert.deepEqual(await (await creditMeter(env, lock))(), { before: 62, after: 62, debit: 0 });
     const failed = await creditMeter({ ...env, FAKE_KANE_SIGNED_IN: "0", LT_USERNAME: "", LT_ACCESS_KEY: "" }, lock);
     assert.equal(await failed(), undefined);
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -32,41 +41,25 @@ test("a dead owner's lock is reclaimed and balance metering resumes", async () =
   const balance = join(dir, "balance");
   const env = { ...process.env, KANE_CLI: fileURLToPath(new URL("../testing/fake-kane.ts", import.meta.url)), FAKE_KANE_BALANCE_FILE: balance };
   try {
-    mkdirSync(lock);
-    writeFileSync(join(lock, "meter"), "2147483647");
-    mkdirSync(join(lock, "reclaim"));
-    writeFileSync(join(lock, "reclaim", "2147483647"), "");
-    writeFileSync(join(lock, "contended"), "");
+    mkdirSync(lock, { mode: 0o700 });
+    mkdirSync(join(lock, `2147483647-${randomUUID()}`));
     writeFileSync(balance, "100");
     const finish = await creditMeter(env, lock);
     writeFileSync(balance, "82");
     assert.deepEqual(await finish(), { before: 100, after: 82, debit: 18 });
-    assert.equal(existsSync(lock), false);
+    assert.deepEqual(readdirSync(lock), []);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("live owners and fresh missing pids stay contended; old unreadable pids are reclaimed", async () => {
+test("a non-private credit lock is left alone", { skip: process.getuid === undefined }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "proofed-meter-"));
   const lock = join(dir, "lock");
-  const env = { ...process.env, KANE_CLI: fileURLToPath(new URL("../testing/fake-kane.ts", import.meta.url)) };
   try {
-    mkdirSync(lock);
-    writeFileSync(join(lock, "meter"), String(process.pid));
-    assert.equal(await (await creditMeter(env, lock))(), undefined);
-    assert.equal(existsSync(join(lock, "contended")), true);
-    rmSync(lock, { recursive: true });
-    mkdirSync(lock);
-    assert.equal(await (await creditMeter(env, lock))(), undefined);
-    assert.equal(existsSync(lock), true);
-    rmSync(lock, { recursive: true });
-    mkdirSync(lock);
-    writeFileSync(join(lock, "meter"), "not a pid");
-    const old = new Date(Date.now() - 120_000);
-    utimesSync(lock, old, old);
-    assert.deepEqual(await (await creditMeter(env, lock))(), { before: 1234.5, after: 1234.5, debit: 0 });
+    mkdirSync(lock, { mode: 0o755 });
+    assert.equal(await (await creditMeter({}, lock))(), undefined);
+    assert.deepEqual(readdirSync(lock), []);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
-
 
 test("a lock removed mid-run loses the snapshot instead of failing the run", async () => {
   const dir = mkdtempSync(join(tmpdir(), "proofed-meter-"));
@@ -79,19 +72,6 @@ test("a lock removed mid-run loses the snapshot instead of failing the run", asy
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("takeover preserves a live contender's credit attribution warning", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "proofed-meter-"));
-  const lock = join(dir, "lock");
-  const env = { ...process.env, KANE_CLI: fileURLToPath(new URL("../testing/fake-kane.ts", import.meta.url)) };
-  try {
-    mkdirSync(lock);
-    writeFileSync(join(lock, "meter"), "2147483647");
-    writeFileSync(join(lock, `contended-${process.pid}`), "");
-    assert.equal(await (await creditMeter(env, lock))(), undefined);
-    assert.equal(existsSync(lock), false);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
 test("a replaced credit lock invalidates the old meter and survives its cleanup", async () => {
   const dir = mkdtempSync(join(tmpdir(), "proofed-meter-"));
   const lock = join(dir, "lock");
@@ -101,7 +81,7 @@ test("a replaced credit lock invalidates the old meter and survives its cleanup"
     rmSync(lock, { recursive: true });
     const replacement = await creditMeter(env, lock);
     assert.equal(await finish(), undefined);
-    assert.equal(existsSync(lock), true);
+    assert.equal(readdirSync(lock).length, 1);
     assert.deepEqual(await replacement(), { before: 1234.5, after: 1234.5, debit: 0 });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

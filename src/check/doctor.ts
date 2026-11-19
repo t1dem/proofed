@@ -17,6 +17,7 @@ import { readScenarios } from "../scenarios.ts";
 import { answers } from "../targets/serve.ts";
 import { SetupError } from "../setuperror.ts";
 import { isHttpUrl, resolveTarget, resolveScenarioTarget } from "../targets/target.ts";
+import { targetFilter } from "./targetfilter.ts";
 import { findKane, findOnPath } from "../which.ts";
 
 // "warn" and "fail" always carry a fix. A state proofed check resolves itself (an app it starts,
@@ -65,9 +66,22 @@ export async function doctorChecks(flags: Flags, io: Io): Promise<DoctorCheck[]>
   else add("Scenarios", "ok", `${loaded.scenarios.length} in ${dir}`);
   for (const e of loaded.errors) add("Scenario", "fail", `${e.file}: ${e.message}`, `Correct the frontmatter of ${e.file}: --- name, paths, url --- then the objective.`);
 
-  const filter = flags.target ?? io.env.PROOFED_TARGET;
-  const targets = loaded.scenarios.filter((s) => !filter || (s.target ?? "web") === filter).map((s) => resolveScenarioTarget(s, flags, io.env, io.cwd));
-  if (!targets.length) targets.push(resolveScenarioTarget({}, flags, io.env, io.cwd));
+  const targets: ReturnType<typeof resolveScenarioTarget>[] = [];
+  let pendingBuild = false;
+  const setupFailure = (e: unknown) => {
+    if (!(e instanceof SetupError)) throw e;
+    add("Target", "fail", e.message, e.fix);
+  };
+  try {
+    pendingBuild = !!resolveTarget({ flags, env: io.env, cwd: io.cwd }).build;
+    const selected = loaded.scenarios.filter(targetFilter(flags, io));
+    for (const scenario of selected.length ? selected : [{}]) {
+      try { targets.push(resolveScenarioTarget(scenario, flags, io.env, io.cwd)); }
+      catch (e) { setupFailure(e); }
+    }
+  } catch (e) {
+    setupFailure(e);
+  }
   const needsWeb = targets.some((t) => t.kind === "web");
   const found = findKane(io.env);
   if (!found.path) {
@@ -91,7 +105,7 @@ export async function doctorChecks(flags: Flags, io: Io): Promise<DoctorCheck[]>
   }
 
   for (const target of targets) {
-    for (const check of await targetChecks(target, { env: io.env, pendingBuild: !!resolveTarget({ flags, env: io.env, cwd: io.cwd }).build, launchPending: true })) checks.push({ ...check, name: `${target.kind}: ${check.name}` });
+    for (const check of await targetChecks(target, { env: io.env, pendingBuild, launchPending: true })) checks.push({ ...check, name: `${target.kind}: ${check.name}` });
   }
   if (targets.some((t) => ["web", "desktop"].includes(t.kind))) {
     const chrome = findChrome(io.env);

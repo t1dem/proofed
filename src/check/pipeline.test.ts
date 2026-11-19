@@ -67,7 +67,7 @@ test("invalid concurrency cannot leave a batch of scenarios unchecked", async ()
   }
 });
 
-test("a mobile check publishes its running state and Kane steps", { skip: process.platform === "win32" }, async (t) => {
+test("grouped mobile checks preserve input order, duplicate IDs, and live tracking", { skip: process.platform === "win32" }, async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "proofed-mobile-live-"));
   const kane = join(dir, "kane");
   const before = process.env.KANE_CLI;
@@ -78,16 +78,27 @@ test("a mobile check publishes its running state and Kane steps", { skip: proces
   });
   writeFileSync(kane, `#!${process.execPath}
 console.log(JSON.stringify({ step: 1, status: "done", remark: "assert: counter is 1", ts: new Date().toISOString() }));
-console.log(JSON.stringify({ type: "run_end", status: "passed" }));
+console.log(JSON.stringify({ type: "run_end", status: process.argv.includes("ios") ? "passed" : "failed" }));
 `, { mode: 0o755 });
   process.env.KANE_CLI = kane;
   const sent: string[] = [];
+  t.mock.method(live, "track", (scenarios: Parameters<typeof live.track>[0]) => sent.push(`track:${scenarios.map(({ name }) => name).join(",")}`));
   t.mock.method(live, "scenario", (id: string, patch: Parameters<typeof live.scenario>[1]) => sent.push(`${id}:${patch.status}`));
   t.mock.method(live, "step", (id: string, step: Parameters<typeof live.step>[1]) => sent.push(`${id}:${step.remark}`));
-  const target = resolveScenarioTarget({ target: "ios", execution: "cloud", app: "APP123" }, {}, {}, dir);
-  const [result] = await runAll([{ id: "counter", name: "Counter", file: "", paths: [], url: "", objective: "Assert counter is 1.", resolvedTarget: target }], dir, 1, { noRetry: true });
-  assert.equal(result?.outcome, "passed");
-  assert.deepEqual(sent, ["counter:running", "counter:assert: counter is 1", "counter:passed"]);
+  const scenario = (id: string, name: string, target: "ios" | "android") => ({
+    id, name, file: "", paths: [], url: "", objective: "Assert counter is 1.",
+    resolvedTarget: resolveScenarioTarget({ target, execution: "cloud", app: "APP123" }, {}, {}, dir),
+  });
+  const results = await runAll([scenario("counter", "iOS", "ios"), scenario("counter", "Android", "android"), scenario("other", "Other iOS", "ios")], dir, 1, { noRetry: true, preselected: true });
+  assert.deepEqual(results.map(({ scenario, outcome }) => [scenario.name, outcome]), [
+    ["iOS", "passed"], ["Android", "failed"], ["Other iOS", "passed"],
+  ]);
+  assert.deepEqual(sent, [
+    "track:iOS,Android,Other iOS",
+    "counter:running", "counter:assert: counter is 1", "counter:passed",
+    "other:running", "other:assert: counter is 1", "other:passed",
+    "counter:running", "counter:assert: counter is 1", "counter:failed",
+  ]);
 });
 
 test("an explicit scenario selection rejects missing IDs", () => inRepo(() => {

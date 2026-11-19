@@ -740,6 +740,23 @@ test("mixed web and native checks build once before running, including with --re
   }
 });
 
+test("a cached web pass does not require a server for the uncached native check", { skip: noChrome }, async () => {
+  const r = repo({ web: { mode: "pass" }, counter: { mode: "pass" } });
+  const port = await freePort();
+  const url = `http://127.0.0.1:${port}`;
+  try {
+    writeFileSync(join(r.dir, ".proofed/scenarios/counter.md"), "---\ntarget: android\nexecution: cloud\napp: APP123\n---\nAssert counter is 1. [fake:pass] [delay:1]\n");
+    const initial = await cli(r, ["check", "--only", "web", "--json", "--url", url, "--serve", `node server.cjs ${port}`]);
+    assert.equal(initial.code, 0, initial.stderr);
+    assert.equal(await portFree(port), true);
+
+    const ran = await cli(r, ["check", "--all", "--json", "--url", url]);
+    assert.equal(ran.code, 0, ran.stderr);
+    assert.deepEqual(json(ran).scenarios.map(({ id, cached }) => [id, !!cached]), [["counter", false], ["web", true]]);
+    assert.equal(runs(r).length, 2);
+  } finally { r.cleanup(); }
+});
+
 test("ad hoc native checks use the target selected by CLI flags in Kane's objective", async () => {
   const r = repo({});
   try {

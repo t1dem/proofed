@@ -69,13 +69,16 @@ test("the package file check rejects source, tests, extra files, missing entries
   const packed: Packed = { filename: "proofed-cli-0.1.0.tgz", size: 200, unpackedSize: 600, files };
   checkContents(packed, modules);
   checkContents({ ...packed, files: [...files, { path: "LICENSE", size: 100, mode: 0o644 }] }, modules);
-  for (const path of ["src/proofed.ts", "dist/install.test.js", "dist/testing/fake-kane.js", "site/index.html", "action.yml"]) {
+  for (const path of ["src/proofed.ts", "site/index.html", "action.yml"]) {
     assert.throws(() => checkContents({ ...packed, files: [...files, { path, size: 1, mode: 0o644 }] }, modules));
   }
   assert.throws(() => checkContents({ ...packed, files: files.slice(1) }, modules));
   assert.throws(() => checkContents({ ...packed, size: 128 * 1024 }, modules));
   assert.throws(() => checkContents({ ...packed, unpackedSize: 1024 * 1024 }, modules));
-  assert.throws(() => checkContents(packed, [...modules, "check/install.test.js"]));
+  for (const module of ["check/install.test.js", "testing/fake-kane.js"]) {
+    const extra = { path: `dist/${module}`, size: 1, mode: 0o644 };
+    assert.throws(() => checkContents({ ...packed, files: [...files, extra] }, [...modules, module]), /dist must contain only runtime JavaScript/);
+  }
 });
 
 test("the packed CLI installs and runs without consumer scripts", { timeout: 120_000, skip: process.platform === "win32" ? "scripts/check-package.ts assumes POSIX npm/global-bin paths; source and dist launchers are tested above" : false }, () => {

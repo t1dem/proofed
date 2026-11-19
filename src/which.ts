@@ -1,5 +1,5 @@
 import { accessSync, constants, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, win32 } from "node:path";
 
 const executable = (file: string, platform = process.platform) => {
   try {
@@ -14,8 +14,11 @@ export const pathValue = (env: NodeJS.ProcessEnv, name: string) =>
 export function findOnPath(name: string, env: NodeJS.ProcessEnv = process.env, platform = process.platform) {
   const windows = platform === "win32";
   const extensions = windows ? (pathValue(env, "PATHEXT") ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean) : [];
-  const suffixes = windows && !extensions.some((ext) => name.toLowerCase().endsWith(ext.toLowerCase())) ? [...extensions, ""] : [""];
-  const dirs = /[/\\]/.test(name) ? [""] : (pathValue(env, "PATH") ?? "").split(windows ? ";" : ":").filter(Boolean);
+  const explicit = /[/\\]/.test(name);
+  const suffixes = windows && !extensions.some((ext) => name.toLowerCase().endsWith(ext.toLowerCase()))
+    ? explicit || win32.extname(name) ? [...extensions, ""] : extensions
+    : [""];
+  const dirs = explicit ? [""] : (pathValue(env, "PATH") ?? "").split(windows ? ";" : ":").filter(Boolean);
   for (const dir of dirs) {
     for (const suffix of suffixes) {
       const file = dir ? join(dir.replace(/^"|"$/g, ""), `${name}${suffix}`) : name + suffix;

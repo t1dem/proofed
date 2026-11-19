@@ -62,6 +62,8 @@ test("a contradiction names the missing text and how it was read", () => {
   assert.equal(textContradiction(quoted, undefined), undefined);
   assert.equal(textContradiction(quoted, "ORDER\n complete"), undefined);
   assert.equal(textContradiction(quoted, "Order\ncomplete"), undefined);
+  assert.equal(textContradiction(quoted, ["Waiting", "Order complete"]), undefined);
+  assert.match(textContradiction(quoted, ["Order", "complete"])!, /no "Order complete"/);
   assert.equal(textContradiction(expectedText('Check that the discount is "−€9.10".'), "Discount -€9.10"), undefined);
   assert.equal(textContradiction(quoted, "Other text"), `Proofed could not confirm Kane's pass: the page text had no "Order complete" when Kane made its final check.`);
   const unquoted = expectedText("Check that Vos outils favoris contains Générateur de token.");
@@ -70,6 +72,13 @@ test("a contradiction names the missing text and how it was read", () => {
   assert.match(reason, /no "Vos outils favoris" when/);
   assert.doesNotMatch(reason, /"Générateur de token" when/);
   assert.match(reason, /unquoted check "Check that Vos outils favoris contains Générateur de token\."; quote the exact text/);
+});
+
+test("a disjunction needs one alternative and every surrounding conjunct", () => {
+  const expected = expectedText('Check that the receipt says "Order total" and the status shows either "Paid" or "Pending".');
+  assert.equal(textContradiction(expected, "Order total Paid"), undefined);
+  assert.match(textContradiction(expected, "Order total Cancelled")!, /no "Paid" or "Pending"/);
+  assert.match(textContradiction(expected, "Pending")!, /no "Order total"/);
 });
 
 test("the page is read at the start and end of the assert that decides", async () => {
@@ -82,13 +91,13 @@ test("the page is read at the start and end of the assert that decides", async (
     return { text: await snaps.text(), reads: reads.length };
   };
   const final = [step(1, "running", "assert: Vos outils favoris contains Générateur de token."), step(1, "done", "assert: Vos outils favoris contains Générateur de token.")];
-  assert.deepEqual(await run(final, ["A", "B"]), { text: "A\nB", reads: 2 });
+  assert.deepEqual(await run(final, ["A", "B"]), { text: ["A", "B"], reads: 2 });
   assert.deepEqual(await run(final, ["A", undefined]), { text: undefined, reads: 2 }, "an unreadable page can't contradict");
   // A later assert that doesn't name the literals doesn't replace one that does.
-  assert.deepEqual(await run([...final, step(2, "running", "assert: the page is French"), step(2, "done", "assert: the page is French")], ["A", "B"]), { text: "A\nB", reads: 2 });
+  assert.deepEqual(await run([...final, step(2, "running", "assert: the page is French"), step(2, "done", "assert: the page is French")], ["A", "B"]), { text: ["A", "B"], reads: 2 });
   // Kane translated the check: the last assert decides.
   const translated = [step(1, "running", "assert: Your favorite tools contains Token generator"), step(1, "done", "assert: x"), step(2, "running", "assert: favorites contain the token generator"), step(2, "done", "assert: x")];
-  assert.deepEqual(await run(translated, ["A", "B", "C", "D"]), { text: "C\nD", reads: 4 });
+  assert.deepEqual(await run(translated, ["A", "B", "C", "D"]), { text: ["C", "D"], reads: 4 });
   assert.deepEqual(await run([step(1, "running", "click: the heart"), step(1, "done", "click: the heart")], []), { text: undefined, reads: 0 });
   const none = assertSnapshots(expectedText("Check that the heading is visible."), async () => "page");
   none.step(final[0]!);
@@ -114,13 +123,13 @@ test("page text reads controls, labels, generated content and SVG; unreadable co
         '<input value="Typed value"><input placeholder="Search tools"><textarea>Long note</textarea><select><option>First</option><option selected>Chosen option</option></select>' +
         '<img alt="Company logo" src="data:,"><button aria-label="Add to favorites">♥</button><span title="Tooltip text">?</span>' +
         '<svg width="40" height="20"><title>Chart title</title><text x="0" y="15">Svg label</text></svg>' +
-        '<style>.tag::before { content: "Generated " attr(data-x); } .gone { display: none }</style><span class="tag" data-x="text"></span><span class="gone">Hidden words</span><input type="password" value="Secret pass">',
-      `document.querySelector('#host').attachShadow({mode:'open'}).innerHTML='<span>Shadow text</span>'; document.querySelector('iframe').contentDocument.body.innerHTML='<span>Frame text</span>';`,
+        '<style>.tag::before { content: "Generated " attr(data-x); } .gone { display: none }</style><span class="tag" data-x="text"></span><span class="gone">Hidden words</span><span style="opacity:0"><b>Transparent words</b></span><input type="password" value="Secret pass">',
+      `document.querySelector('#host').attachShadow({mode:'open'}).innerHTML='Direct shadow text <span>Shadow text</span>'; document.querySelector('iframe').contentDocument.body.innerHTML='<span>Frame text</span>';`,
     );
     assert.notEqual(page, null, "images, SVG icons, form controls and CSS content don't make the capture incomplete");
     const expect = (literals: string[]) => ({ check: "", literals, quoted: true });
-    assert.equal(textContradiction(expect(["Order complete", "Shadow text", "Frame text", "Typed value", "Search tools", "Long note", "Chosen option", "Company logo", "Add to favorites", "Tooltip text", "Chart title", "Svg label", "Generated text"]), page!), undefined);
-    for (const absent of ["Missing words", "Hidden words", "Secret pass"]) assert.match(textContradiction(expect([absent]), page!)!, new RegExp(absent));
+    assert.equal(textContradiction(expect(["Order complete", "Direct shadow text", "Shadow text", "Frame text", "Typed value", "Search tools", "Long note", "Chosen option", "Company logo", "Add to favorites", "Tooltip text", "Chart title", "Svg label", "Generated text"]), page!), undefined);
+    for (const absent of ["Missing words", "Hidden words", "Transparent words", "Secret pass"]) assert.match(textContradiction(expect([absent]), page!)!, new RegExp(absent));
     const incomplete: [string, string?][] = [
       ['<canvas width="200" height="100"></canvas>'],
       ['<video width="200" height="100"></video>'],

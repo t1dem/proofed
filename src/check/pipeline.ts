@@ -24,7 +24,7 @@ type RunAllOptions = {
   headless?: boolean;
   noRetry?: boolean;
   onEvent?: (event: RunEvent) => void;
-  grouped?: boolean;
+  preselected?: boolean;
 };
 
 export function runConcurrency(env: NodeJS.ProcessEnv, explicit?: number) {
@@ -41,26 +41,32 @@ export function runConcurrency(env: NodeJS.ProcessEnv, explicit?: number) {
 // A start page that crashes while loading fails its scenarios without Kane (see precheck.ts).
 export async function runAll(scenarios: Scenario[], outDir: string, requestedConcurrency?: number, o: RunAllOptions = {}) {
   const concurrency = runConcurrency(process.env, requestedConcurrency);
-  scenarios = targetScenarios(scenarios);
+  if (!o.preselected) scenarios = targetScenarios(scenarios);
   const baseUrl = o.baseUrl ?? process.env.PROOFED_URL ?? "";
-  const web = scenarios.filter((s) => s.resolvedTarget!.kind === "web");
-  if (web.length && !baseUrl) throw new Error("Missing PROOFED_URL for web scenarios");
-  if (!o.grouped && scenarios.some((s) => s.resolvedTarget!.kind !== "web")) {
-    const groups = new Map<string, Scenario[]>();
-    for (const s of scenarios) {
-      const key = s.resolvedTarget!.kind;
-      groups.set(key, [...(groups.get(key) ?? []), s]);
-    }
-    const results: ScenarioResult[] = [];
-    for (const [kind, group] of groups) results.push(...await runAll(group, outDir, kind === "web" ? concurrency : 1, { ...o, grouped: true }));
-    return scenarios.map((s) => results.find((r) => r.scenario.id === s.id)!);
+  if (!baseUrl && scenarios.some((s) => s.resolvedTarget!.kind === "web")) throw new Error("Missing PROOFED_URL for web scenarios");
+  live.track(scenarios);
+  if (!scenarios.some((s) => s.resolvedTarget!.kind !== "web")) return runGroup(scenarios, concurrency, outDir, baseUrl, o);
+  const groups = new Map<string, { scenario: Scenario; index: number }[]>();
+  for (const [index, scenario] of scenarios.entries()) {
+    const kind = scenario.resolvedTarget!.kind;
+    const group = groups.get(kind) ?? [];
+    group.push({ scenario, index });
+    groups.set(kind, group);
   }
+  const results: ScenarioResult[] = new Array(scenarios.length);
+  for (const [kind, group] of groups) {
+    const ran = await runGroup(group.map(({ scenario }) => scenario), kind === "web" ? concurrency : 1, outDir, baseUrl, o);
+    for (const [i, { index }] of group.entries()) results[index] = ran[i]!;
+  }
+  return results;
+}
+
+async function runGroup(scenarios: Scenario[], concurrency: number, outDir: string, baseUrl: string, o: RunAllOptions) {
   const emit = o.onEvent ?? (() => {});
   for (const s of scenarios) emit({ type: "waiting", id: s.id });
   const urlOf = (s: Scenario) => new URL(s.url, baseUrl).href;
-  live.track(scenarios);
   const checking = Date.now();
-  const crashes = await findCrashes([...new Set(web.map(urlOf))], outDir);
+  const crashes = await findCrashes([...new Set(scenarios.filter((s) => s.resolvedTarget!.kind === "web").map(urlOf))], outDir);
   const checkSeconds = Math.round((Date.now() - checking) / 1000);
   const results: ScenarioResult[] = new Array(scenarios.length);
   let next = 0;
@@ -102,7 +108,14 @@ export async function runAll(scenarios: Scenario[], outDir: string, requestedCon
       emit({ type: "finished", id: scenario.id, result: timed });
     }
   };
-  await Promise.all(Array.from({ length: Math.min(concurrency, scenarios.length) }, worker));
+  // Preserve the first error to occur while the other workers finish.
+  let failure: { reason: unknown } | undefined;
+  const workers = Array.from({ length: Math.min(concurrency, scenarios.length) }, () => worker().catch((reason: unknown) => {
+    failure ??= { reason };
+    throw reason;
+  }));
+  await Promise.allSettled(workers);
+  if (failure) throw failure.reason;
   return results;
 }
 

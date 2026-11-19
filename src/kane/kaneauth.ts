@@ -46,24 +46,29 @@ const reasonIn = (output: string) =>
 export function kaneLogin(bin: string, env: NodeJS.ProcessEnv, timeout = 20_000): Promise<Login> {
   const creds = kaneCredentials(env);
   return new Promise((resolve) => {
-    const cmd = executableCommand(bin, ["balance", ...creds], env);
-    execFile(cmd.file, cmd.args, { env, timeout, windowsHide: true }, (error, stdout, stderr) => {
-      const output = `${stdout}\n${stderr}`.replace(ANSI, "");
-      if (!error) {
-        return resolve(creds.length ? { state: "keys", detail: "LT_USERNAME and LT_ACCESS_KEY work; Kane uses them", balance: output } : { state: "signed_in", detail: "signed in", balance: output });
-      }
-      const e = error as NodeJS.ErrnoException & { killed?: boolean };
-      const secrets = secretValues(env);
-      if (e.killed || typeof e.code !== "number") return resolve({ state: "unknown", detail: `kane-cli balance didn't answer${e.killed ? ` within ${timeout / 1000} s` : `: ${maskSecrets(e.message, secrets)}`}` });
-      const said = maskSecrets(reasonIn(output), secrets);
-      if (REJECTED.test(output) || NOT_SIGNED_IN.test(output)) {
-        return resolve(
-          creds.length
-            ? { state: "keys_rejected", detail: `Kane rejected LT_USERNAME and LT_ACCESS_KEY${said ? ` (${said})` : ""}` }
-            : { state: "not_signed_in", detail: REJECTED.test(output) ? `the login was rejected${said ? ` (${said})` : ""}` : "not signed in" },
-        );
-      }
-      resolve({ state: "unknown", detail: `kane-cli balance failed${said ? `: ${said}` : ` with exit ${e.code}`}` });
-    });
+    try {
+      const cmd = executableCommand(bin, ["balance", ...creds], env);
+      execFile(cmd.file, cmd.args, { env, timeout, windowsHide: true }, (error, stdout, stderr) => {
+        const output = `${stdout}\n${stderr}`.replace(ANSI, "");
+        if (!error) {
+          return resolve(creds.length ? { state: "keys", detail: "LT_USERNAME and LT_ACCESS_KEY work; Kane uses them", balance: output } : { state: "signed_in", detail: "signed in", balance: output });
+        }
+        const e = error as NodeJS.ErrnoException & { killed?: boolean };
+        const secrets = secretValues(env);
+        if (e.killed || typeof e.code !== "number") return resolve({ state: "unknown", detail: `kane-cli balance didn't answer${e.killed ? ` within ${timeout / 1000} s` : `: ${maskSecrets(e.message, secrets)}`}` });
+        const said = maskSecrets(reasonIn(output), secrets);
+        if (REJECTED.test(output) || NOT_SIGNED_IN.test(output)) {
+          return resolve(
+            creds.length
+              ? { state: "keys_rejected", detail: `Kane rejected LT_USERNAME and LT_ACCESS_KEY${said ? ` (${said})` : ""}` }
+              : { state: "not_signed_in", detail: REJECTED.test(output) ? `the login was rejected${said ? ` (${said})` : ""}` : "not signed in" },
+          );
+        }
+        resolve({ state: "unknown", detail: `kane-cli balance failed${said ? `: ${said}` : ` with exit ${e.code}`}` });
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      resolve({ state: "unknown", detail: `kane-cli balance didn't answer: ${maskSecrets(message, secretValues(env))}` });
+    }
   });
 }

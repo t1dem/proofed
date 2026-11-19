@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { cacheKey, estimate, historyKey, readCache, writeCache } from "./cache.ts";
+import { cacheKey, estimate, historyKey, readCache, relevantChanges, writeCache } from "./cache.ts";
 import type { Scenario } from "../scenarios.ts";
 
 const scenario = (paths: string[]): Scenario => ({ id: "promo", file: ".proofed/scenarios/promo.md", name: "Promo", paths, url: "/", objective: "Apply welcome10." });
@@ -61,4 +61,39 @@ test("a pass doesn't survive a new base commit: a pull or a rebase changes code 
   const key = cacheKey(s, "http://x/", ["src/a.ts"], read, "base-1");
   assert.equal(cacheKey(s, "http://x/", ["src/a.ts"], read, "base-1"), key);
   assert.notEqual(cacheKey(s, "http://x/", ["src/a.ts"], read, "base-2"), key);
+});
+
+test("globs cover changed dotfiles in the cache key", () => {
+  const s = scenario(["src/**"]);
+  const files: Record<string, string> = { "src/.config/settings": "before" };
+  const changed = Object.keys(files);
+  const read = (file: string) => files[file];
+  const key = cacheKey(s, "http://x/", changed, read);
+  files["src/.config/settings"] = "after";
+  assert.notEqual(cacheKey(s, "http://x/", changed, read), key);
+  const workflow = ".github/workflows/check.yml";
+  assert.deepEqual(relevantChanges(scenario(["**/check.yml"]), [workflow]), [workflow]);
+  assert.deepEqual(relevantChanges(scenario([".github/**"]), [workflow]), [workflow]);
+  assert.deepEqual(relevantChanges(scenario(["{src/app,src/server}/**"]), ["src/app/.env", "src/server/.env", "src/vendor/.env"]), ["src/app/.env", "src/server/.env"]);
+  assert.deepEqual(relevantChanges(scenario(["src/{**,test}/.env"]), ["src/.app/frontend/.env"]), ["src/.app/frontend/.env"]);
+  assert.deepEqual(relevantChanges(scenario(["src/?.env"]), ["src/.env", "src/..env", "src/sub/a.env"]), ["src/..env"]);
+});
+
+test("the cache follows a symlinked app directory without following the links within it", { skip: process.platform === "win32" }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "proofed-cache-"));
+  try {
+    const app = join(dir, "current.app");
+    const bundle = join(dir, "build.app");
+    mkdirSync(bundle);
+    symlinkSync(bundle, app);
+    symlinkSync(bundle, join(bundle, "loop"));
+    const contents = join(bundle, "executable");
+    writeFileSync(contents, "before");
+    const s: Scenario = { ...scenario([]), resolvedTarget: { kind: "desktop", execution: "local", app, reuse: false, sources: {}, dir } };
+    const key = cacheKey(s, "", []);
+    writeFileSync(contents, "after");
+    assert.notEqual(cacheKey(s, "", []), key);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

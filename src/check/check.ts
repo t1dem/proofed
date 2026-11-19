@@ -20,6 +20,7 @@ import { affectedBy, readScenarios, type Scenario } from "../scenarios.ts";
 import { answers, buildApp, startApp, type RunningApp } from "../targets/serve.ts";
 import { SetupError } from "../setuperror.ts";
 import { isHttpUrl, resolveTarget, resolveScenarioTarget, type Setting } from "../targets/target.ts";
+import { targetFilter } from "./targetfilter.ts";
 import { readKaneVersion } from "../kane/kaneversion.ts";
 import type { RunEvent, ScenarioResult } from "../types.ts";
 import { targetChecks } from "../targets/targetchecks.ts";
@@ -230,19 +231,17 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       }
     }
 
-    const targetFilter = flags.target ?? io.env.PROOFED_TARGET;
-    selected = selected.map((s) => ({ ...s, resolvedTarget: resolveScenarioTarget(s, flags, io.env, io.cwd) }));
-    if (targetFilter && !text) {
-      const matches = (s: Scenario) => (s.target ?? "web") === targetFilter;
-      if (flags.only && selected.some((s) => !matches(s))) throw new SetupError("target_selection", "--only contains scenarios incompatible with --target", "Select ids with the requested target.");
-      skipped.push(...selected.filter((s) => !matches(s)).map((s) => ({ id: s.id, name: s.name, why: "different target" })));
+    if (!text) {
+      const matches = targetFilter(flags, io);
+      const incompatible = selected.filter((s) => !matches(s));
+      if (flags.only && incompatible.length) throw new SetupError("target_selection", "--only contains scenarios incompatible with --target", "Select ids with the requested target.");
+      skipped.push(...incompatible.map((s) => ({ id: s.id, name: s.name, why: "different target" })));
       selected = selected.filter(matches);
     }
-    const needsWeb = selected.some((s) => s.resolvedTarget!.kind === "web");
+    selected = selected.map((s) => ({ ...s, resolvedTarget: resolveScenarioTarget(s, flags, io.env, io.cwd) }));
     const target = resolveTarget({ flags: { url: flags.url, serve: flags.serve, build: flags.build, install: flags.install }, env: io.env, cwd: io.cwd });
-    const needsHttp = needsWeb;
     const url = target.url?.value;
-    if (needsHttp && url !== undefined && !isHttpUrl(url)) {
+    if (selected.some((s) => s.resolvedTarget!.kind === "web") && url !== undefined && !isHttpUrl(url)) {
       throw new SetupError("url_invalid", `"${url}" (${target.url!.from}) is not an http(s) URL.`, "Pass a full URL, e.g. --url http://localhost:5173");
     }
     const baseId = base?.rev ? mergeBaseOf(io.cwd, base.rev) : "";
@@ -268,6 +267,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       if (!items.has(s.id)) items.set(s.id, { scenario: s, estimate: estimate(cache, s, kaneVersion) });
     }
     const toRun = selected.filter((s) => "estimate" in items.get(s.id)!);
+    const needsHttp = toRun.some((s) => s.resolvedTarget!.kind === "web");
     const cachedPasses = selected.flatMap((s) => {
       const item = items.get(s.id)!;
       return "cached" in item ? [{ id: s.id, name: s.name, cachedAt: item.cached.passedAt }] : [];
@@ -304,7 +304,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
     if (!kane.path) {
       throw new SetupError("kane_missing", `Kane CLI not found (${kane.from}).`, io.env.KANE_CLI ? "Point KANE_CLI at the kane-cli binary, or unset it." : "npm install -g @testmuai/kane-cli, then kane-cli login");
     }
-    if (selected.some((s) => ["web", "desktop"].includes(s.resolvedTarget!.kind)) && !findChrome()) throw new SetupError("chrome_missing", "Chrome not found.", "Install Google Chrome, or set CHROME_PATH to its binary.");
+    if (toRun.some((s) => ["web", "desktop"].includes(s.resolvedTarget!.kind)) && !findChrome(io.env)) throw new SetupError("chrome_missing", "Chrome not found.", "Install Google Chrome, or set CHROME_PATH to its binary.");
     if (needsHttp && !url) {
       throw new SetupError("no_url", "Proofed doesn't know where the app runs.", `Pass --url http://localhost:5173 (and --serve "npm run dev" to have Proofed start it), set PROOFED_URL, or write .proofed/config.json: { "url": "http://localhost:5173", "serve": "npm run dev" }`);
     }
@@ -380,7 +380,7 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       }
       writeCache(cacheFile, cache);
     };
-    const results = await runAll(toRun, out, plan.concurrency, { baseUrl: url ?? "", headless: !flags.headed, noRetry: flags.noRetry, onEvent });
+    const results = await runAll(toRun, out, plan.concurrency, { baseUrl: url ?? "", headless: !flags.headed, noRetry: flags.noRetry, onEvent, preselected: true });
     // A login can run out between the login check and the runs; running the check again wouldn't help then either.
     if (results.some((r) => r.notSignedIn)) throw notSignedIn("Kane CLI refused to run a scenario: it is not signed in. The scenarios it refused weren't checked.");
     const byId = new Map(results.map((r) => [r.scenario.id, r]));

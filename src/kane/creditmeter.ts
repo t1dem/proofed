@@ -1,76 +1,56 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, existsSync, readFileSync, readdirSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
 import { kaneLogin } from "./kaneauth.ts";
 
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
-export const creditLockPath = (temp = tmpdir()) => join(temp, "proofed-kane.lock");
-const STALE_MS = 60_000;
+const uid = process.getuid?.();
+// The Windows profile has per-user ACLs; POSIX uses a uid-scoped private temp directory.
+export const creditLockPath = (dir = uid === undefined ? homedir() : tmpdir()) =>
+  join(dir, uid === undefined ? ".proofed-kane-meter.lock" : `proofed-kane-${uid}.lock`);
+const registration = /^(\d+)-[\da-f-]{36}(\.done)?$/;
 const alive = (pid: number) => {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; }
 };
-const ownerRecord = (lock: string) => {
-  try { return readFileSync(`${lock}/meter`, "utf8").trim(); } catch { return ""; }
-};
-const ownerOf = (lock: string) => Number(ownerRecord(lock).split(/\s+/, 1)[0]);
 
-// A lock gone mid-run (a /tmp cleaner, a manual delete) makes the snapshot unattributable, not an error.
-const contended = (lock: string) => {
-  try { return existsSync(`${lock}/contended`) || readdirSync(lock).some((file) => /^contended-\d+$/.test(file)); } catch { return true; }
+const privateDirectory = (dir: string) => {
+  const stat = lstatSync(dir);
+  return stat.isDirectory() && (uid === undefined || (stat.uid === uid && (stat.mode & 0o077) === 0));
 };
-
-function reclaim(lock: string, record: string) {
-  try {
-    const original = statSync(lock);
-    const owner = ownerOf(lock);
-    if (alive(owner) || ((!Number.isSafeInteger(owner) || owner <= 0) && Date.now() - original.mtimeMs < STALE_MS)) return;
-    const guard = `${lock}/reclaim`;
-    // Serialize takeover, including recovery after a reclaimer was killed.
-    // Remove only dead pid markers; rmdir cannot remove a live, nonempty guard.
-    try {
-      const markers = readdirSync(guard);
-      for (const pid of markers) if (/^\d+$/.test(pid) && !alive(Number(pid))) rmSync(`${guard}/${pid}`, { force: true });
-      if (markers.length || Date.now() - statSync(guard).mtimeMs >= STALE_MS) rmdirSync(guard);
-    } catch {}
-    try { mkdirSync(guard); writeFileSync(`${guard}/${process.pid}`, "", { flag: "wx" }); } catch { return; }
-    try {
-      if (readdirSync(guard).length !== 1) return;
-      const current = statSync(lock);
-      if (current.dev !== original.dev || current.ino !== original.ino || alive(ownerOf(lock))) return;
-      // Keep live contenders' markers when taking over the directory. A run
-      // that lost this race can already be about to spend credits.
-      for (const file of readdirSync(lock)) {
-        const pid = /^contended-(\d+)$/.exec(file)?.[1];
-        if (pid && !alive(Number(pid))) rmSync(`${lock}/${file}`, { force: true });
-      }
-      rmSync(`${lock}/contended`, { force: true });
-      writeFileSync(`${lock}/meter`, record);
-      return true;
-    } finally {
-      try { rmSync(`${guard}/${process.pid}`, { force: true }); rmdirSync(guard); } catch {}
-    }
-  } catch {}
-}
 
 export async function creditMeter(env: NodeJS.ProcessEnv, lock = creditLockPath()) {
-  const record = `${process.pid} ${randomUUID()}`;
-  let owned = false;
-  for (let attempt = 0; attempt < 2 && !owned; attempt++) {
-    try {
-      mkdirSync(lock);
-      try { writeFileSync(`${lock}/meter`, record); owned = true; }
-      catch { rmSync(lock, { recursive: true, force: true }); break; }
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") break;
-      if (attempt === 0) owned = reclaim(lock, record) === true;
+  const id = `${process.pid}-${randomUUID()}`;
+  const active = join(lock, id);
+  const warning = join(active, "contended");
+  let registered = false;
+  let contended = false;
+  try {
+    try { mkdirSync(lock, { mode: 0o700 }); }
+    catch (e) { if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e; }
+    if (privateDirectory(lock)) {
+      mkdirSync(active, { mode: 0o700 });
+      registered = true;
+      // A run registers before looking for overlap and stays registered until it finishes.
+      // Each peer keeps its own warning, even after the run that set it has finished.
+      for (const name of readdirSync(lock)) {
+        if (name === id) continue;
+        const peer = registration.exec(name);
+        if (!peer) continue;
+        if (peer[2] || !alive(Number(peer[1]))) {
+          rmSync(join(lock, name), { recursive: true, force: true });
+          continue;
+        }
+        contended = true;
+        try { writeFileSync(join(lock, name, "contended"), "", { flag: "wx" }); }
+        catch (e) {
+          const code = (e as NodeJS.ErrnoException).code;
+          if (code !== "ENOENT" && code !== "EEXIST") throw e;
+        }
+      }
     }
-  }
-  if (!owned) {
-    // A competing Proofed run invalidates attribution for the lock owner too.
-    try { writeFileSync(`${lock}/contended-${process.pid}`, ""); writeFileSync(`${lock}/contended`, ""); } catch {}
-  }
+  } catch { contended = true; }
+
   const balance = async () => {
     const login = await kaneLogin(env.KANE_CLI ?? "kane-cli", env);
     const value = /^Available credits:\s*(\d+(?:\.\d+)?)\s*$/im.exec(login.balance ?? "")?.[1];
@@ -78,14 +58,26 @@ export async function creditMeter(env: NodeJS.ProcessEnv, lock = creditLockPath(
   };
   // The CLI has no transaction ledger. A balance delta can include remote account
   // activity, which no local process scan or filesystem lock can rule out.
-  const stillOwned = () => owned && ownerRecord(lock) === record;
-  const before = owned ? await balance() : undefined;
+  const attributable = () => {
+    try { return privateDirectory(lock) && privateDirectory(active) && !existsSync(warning); }
+    catch { return false; }
+  };
+  const before = registered && !contended ? await balance() : undefined;
   return async () => {
     try {
-      const after = before === undefined || !stillOwned() ? undefined : await balance();
-      return before !== undefined && after !== undefined && after <= before && stillOwned() && !contended(lock)
+      const after = before === undefined || !attributable() ? undefined : await balance();
+      return before !== undefined && after !== undefined && after <= before && attributable()
         ? { before, after, debit: Math.round((before - after) * 10_000) / 10_000 }
         : undefined;
-    } finally { if (stillOwned()) rmSync(lock, { recursive: true, force: true }); }
+    } finally {
+      try {
+        if (registered && privateDirectory(lock)) {
+          // Retire the registration before cleanup, so a peer cannot add a marker mid-removal.
+          const done = `${active}.done`;
+          renameSync(active, done);
+          rmSync(done, { recursive: true, force: true });
+        }
+      } catch {}
+    }
   };
 }

@@ -40,11 +40,12 @@ export type KaneResult = {
   accountBalance?: { before: number; after: number; debit: number };
 };
 
-type KaneOptions = {
+type KaneTarget =
+  | { kaneArgs: string[]; url?: never; cdpEndpoint?: never }
+  | { kaneArgs?: undefined; url: string; cdpEndpoint: string };
+
+type KaneOptions = KaneTarget & {
   objective: string;
-  url?: string;
-  cdpEndpoint?: string;
-  kaneArgs?: string[];
   rawFile?: string;
   signal?: AbortSignal;
   username?: string;
@@ -73,7 +74,7 @@ function runUnmetered(o: KaneOptions, secrets: string[]): Promise<KaneResult> {
     "run",
     o.objective,
     "--agent",
-    ...(o.kaneArgs ?? ["--target", "desktop", "--url", o.url!, "--cdp-endpoint", o.cdpEndpoint!]),
+    ...(o.kaneArgs ?? ["--target", "desktop", "--url", o.url, "--cdp-endpoint", o.cdpEndpoint]),
     "--timeout",
     String(o.timeoutSeconds ?? 300),
     ...(o.username && o.accessKey ? ["--username", o.username, "--access-key", o.accessKey] : []),

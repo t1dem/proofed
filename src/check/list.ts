@@ -11,6 +11,7 @@ import { errorDoc } from "../report/result.ts";
 import { affectedBy, readScenarios } from "../scenarios.ts";
 import { SetupError } from "../setuperror.ts";
 import { isHttpUrl, resolveTarget, resolveScenarioTarget } from "../targets/target.ts";
+import { targetFilter } from "./targetfilter.ts";
 import { findKane } from "../which.ts";
 
 export function list(flags: Flags, io: Io): number {
@@ -35,8 +36,7 @@ export function list(flags: Flags, io: Io): number {
     const url = target.url?.value;
     const version = readKaneVersion(findKane(io.env).path ?? "kane-cli", io.env);
     const cache = readCache(join(outDirOf(flags, io), CACHE_FILE));
-    const filter = flags.target ?? io.env.PROOFED_TARGET;
-    const scenarios = loaded.scenarios.filter((s) => !filter || (s.target ?? "web") === filter).map((s) => {
+    const scenarios = loaded.scenarios.filter(targetFilter(flags, io)).map((s) => {
       s = { ...s, resolvedTarget: resolveScenarioTarget(s, flags, io.env, io.cwd) };
       const hit = cache.passes[s.id];
       const cached = !!(hit && canReusePass(s, target.build?.value) && (s.resolvedTarget!.kind !== "web" || (url && isHttpUrl(url))) && changed && version !== "unknown" && hit.key === cacheKey(s, s.resolvedTarget!.kind === "web" ? new URL(s.url, url!).href : "", changed, undefined, baseId, version, target));
