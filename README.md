@@ -196,7 +196,9 @@ A web scenario takes 1 to 4 minutes and is estimated at 30 Kane credits the firs
 
 <br>
 
-Add `LT_USERNAME` and `LT_ACCESS_KEY` (TestMu: Settings → Keys) and either `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `CODEX_API_KEY` (an OpenAI API key) to the repo secrets, then add one workflow. The whole file, working, is [proofed-demo-store's](https://github.com/t1dem/proofed-demo-store/blob/main/.github/workflows/proofed.yml); the part that matters:
+Add `LT_USERNAME` and `LT_ACCESS_KEY` (TestMu: Settings → Keys) and either `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `CODEX_API_KEY` (an OpenAI API key) to the repo secrets. If you use Codex, choose a Codex model in Proofed's repository settings or set the repository Actions variable `PROOFED_PROVIDER` to `codex` before running the workflow.
+
+Then add one workflow. The whole file, working, is [proofed-demo-store's](https://github.com/t1dem/proofed-demo-store/blob/main/.github/workflows/proofed.yml); the part that matters:
 
 ```yaml
 on:
@@ -291,6 +293,8 @@ Proofed can also read the free `kane-cli balance` before and after a scenario an
 Node 22.18+ runs the checkout's TypeScript directly, so the GitHub Action needs no build or package install. `pnpm build` emits the CLI and its imports to `dist/` for npm; `npm pack` builds it automatically. `pnpm typecheck` and `pnpm test` check the source. `pnpm check:package` builds a tarball, checks its contents, installs it into a temporary prefix and runs its version and help, then removes its temp files.
 
 Releasing to npm is manual: [docs/release.md](https://github.com/t1dem/proofed/blob/main/docs/release.md).
+
+Before deploying the Worker, run `pnpm exec wrangler d1 migrations apply proofed --remote` from `site/`. This applies migration `0008_codex_key.sql` before the Worker needs the `codex_key` column. Then run `pnpm deploy` from `site/`.
 
 | File | What it does |
 |---|---|

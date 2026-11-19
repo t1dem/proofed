@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
+import { extname } from "node:path";
 import { test, type TestContext } from "node:test";
 import { FIRST_ANDROID_SCENARIO, FIRST_SCENARIO } from "../../src/action/setup.ts";
 
+const source = new URL("../src/", import.meta.url).href;
 const hook = registerHooks({
   resolve(specifier, context, next) {
-    return next(specifier.startsWith(".") && context.parentURL?.includes("/src/") && !/\.[cm]?tsx?$/.test(specifier) ? specifier + ".ts" : specifier, context);
+    return next(specifier.startsWith(".") && context.parentURL?.startsWith(source) && !extname(specifier) ? specifier + ".ts" : specifier, context);
   },
 });
 const { openSetupPr } = await import("../src/worker/setup.ts");
@@ -80,10 +82,31 @@ test("a servable web package takes precedence over an Android application", asyn
     "site/package.json": '{"scripts":{"build":"vite build","preview":"vite preview"}}',
     "package-lock.json": "{}",
   });
-  assert.match(workflow, /          url: http:\/\/localhost:4173\n          working-directory: site\n          install: npm ci\n          build: npm run build\n          serve: npm run preview --port 4173\n          cache: npm/);
+  assert.match(workflow, /          url: http:\/\/localhost:4173\n          working-directory: site\n          install: npm install\n          build: npm run build\n          serve: npm run preview --port 4173/);
+  assert.doesNotMatch(workflow, /^          cache:/m);
   assert.doesNotMatch(workflow, /setup-java|target: android/);
   assert.equal(scenario, FIRST_SCENARIO);
   assert.match(body, /checks every pull request in Chrome/);
+});
+
+test("an npm workspace uses the root lockfile", async (t) => {
+  const { workflow } = await setup(t, {
+    "package.json": '{"workspaces":["./apps/*/"]}',
+    "apps/web/package.json": '{"scripts":{"start":"node server.js"}}',
+    "package-lock.json": "{}",
+  });
+  assert.match(workflow, /          working-directory: apps\/web\n          install: npm ci/);
+  assert.match(workflow, /^          cache: npm$/m);
+});
+
+test("a nested app excluded by the workspace uses its own install", async (t) => {
+  const { workflow } = await setup(t, {
+    "package.json": '{"workspaces":{"packages":["apps/*","!apps/web"]}}',
+    "apps/web/package.json": '{"scripts":{"start":"node server.js"}}',
+    "package-lock.json": "{}",
+  });
+  assert.match(workflow, /          working-directory: apps\/web\n          install: npm install/);
+  assert.doesNotMatch(workflow, /^          cache:/m);
 });
 
 test("a Gradle library keeps the static web fallback", async (t) => {

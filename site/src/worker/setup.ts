@@ -19,7 +19,7 @@ async function readFile(token: string, repo: string, path: string, ref?: string)
   }
 }
 
-type Pkg = { scripts?: Record<string, string>; packageManager?: string };
+type Pkg = { scripts?: Record<string, string>; packageManager?: string; workspaces?: string[] | { packages?: string[] } };
 const join = (dir: string, file: string) => (dir === "." ? file : `${dir}/${file}`);
 const readPkg = async (token: string, repo: string, dir: string) => {
   const text = await readFile(token, repo, join(dir, "package.json"));
@@ -27,6 +27,20 @@ const readPkg = async (token: string, repo: string, dir: string) => {
 };
 // A package.json that can put an app on a port, as opposed to a library's or a monorepo root's.
 const servable = (pkg: Pkg | undefined) => !!pkg?.scripts && ["preview", "start", "dev"].some((s) => s in pkg.scripts!);
+
+async function inWorkspace(dir: string, workspaces: Pkg["workspaces"]) {
+  const patterns = Array.isArray(workspaces) ? workspaces : workspaces?.packages;
+  if (!Array.isArray(patterns) || patterns.length === 0) return false;
+  const { default: picomatch } = await import("picomatch/posix.js");
+  let included = false;
+  for (const glob of patterns) {
+    if (typeof glob !== "string") continue;
+    const bangs = glob.match(/^!+/)?.[0].length ?? 0;
+    const pattern = glob.slice(bangs).replace(/^(?:\.\/)+|\/+$/g, "");
+    if (pattern && picomatch.isMatch(dir, pattern, { nonegate: true })) included = bangs % 2 === 0;
+  }
+  return included;
+}
 
 // Where the app lives. The root when it has an app's scripts; otherwise the shallowest folder that
 // does (site/, apps/web/…), since a root package.json is often only tooling around the app.
@@ -107,8 +121,11 @@ async function guessCommands(token: string, repo: string, ref: string): Promise<
 
   const scripts = pkg.scripts ?? {};
   // A workspace keeps its lockfile at the root; a folder with its own project keeps it next to package.json.
-  const lock = async (file: string) =>
-    (await readFile(token, repo, join(dir, file))) !== undefined ? dir : dir !== "." && (await readFile(token, repo, file)) !== undefined ? "." : undefined;
+  const lock = async (file: string) => {
+    if ((await readFile(token, repo, join(dir, file))) !== undefined) return dir;
+    if (dir === "." || (file === "package-lock.json" && !(await inWorkspace(dir, root?.workspaces)))) return;
+    if ((await readFile(token, repo, file)) !== undefined) return ".";
+  };
   const [pnpm, yarn, npmLock] = await Promise.all(["pnpm-lock.yaml", "yarn.lock", "package-lock.json"].map(lock));
   const pm = pnpm ? "pnpm" : yarn ? "yarn" : "npm";
   const lockDir = pnpm ?? yarn ?? npmLock;
@@ -116,7 +133,7 @@ async function guessCommands(token: string, repo: string, ref: string): Promise<
   const run = (script: string) => (pm === "npm" ? `npm run ${script}` : `${pm} ${script}`);
   const notes: string[] = [];
   if (dir !== ".") notes.push(`The app is in \`${dir}/\`: the root has no script that serves one. Commands run there.`);
-  notes.push(`Package manager: ${pm}, from the lockfile.`);
+  notes.push(lockDir ? `Package manager: ${pm}, from the lockfile.` : "Package manager: npm. No lockfile found for this app.");
 
   const install = pm === "pnpm" ? "pnpm install --frozen-lockfile" : pm === "yarn" ? "yarn install --frozen-lockfile" : npmLock ? "npm ci" : "npm install";
   const build = scripts.build ? run("build") : "true";
@@ -252,7 +269,7 @@ This PR adds:
 
 **Proofed will add scenarios to this PR itself.** On this PR's check, the selected provider reads the app and writes a few for its main flows, Kane runs each one ${where}, and only the ones Kane saw pass are committed here; the comment below lists them. It needs \`CLAUDE_CODE_OAUTH_TOKEN\` or \`CODEX_API_KEY\`, and happens only while \`home.md\` is the only scenario. They are plain Markdown: edit or delete them before you merge, like any other file.
 
-**Keys.** The checks need repository secrets: \`LT_USERNAME\`, \`LT_ACCESS_KEY\` (TestMu) and either \`CLAUDE_CODE_OAUTH_TOKEN\` (from \`claude setup-token\`) or \`CODEX_API_KEY\` (an OpenAI API key). If you saved them at https://proofed.neptunescodm.workers.dev/app, Proofed has already added them; otherwise add them under [Settings → Secrets → Actions](https://github.com/${repo}/settings/secrets/actions).
+**Keys.** The checks need repository secrets: \`LT_USERNAME\`, \`LT_ACCESS_KEY\` (TestMu) and either \`CLAUDE_CODE_OAUTH_TOKEN\` (from \`claude setup-token\`) or \`CODEX_API_KEY\` (an OpenAI API key). If you saved them at https://proofed.neptunescodm.workers.dev/app, Proofed has already added them; otherwise add them under [Settings → Secrets → Actions](https://github.com/${repo}/settings/secrets/actions). If you add the Codex key in GitHub, choose a Codex model in Proofed's repository settings or set the Actions variable \`PROOFED_PROVIDER\` to \`codex\` before running the setup check.
 
 **Check what was guessed about your build:**
 

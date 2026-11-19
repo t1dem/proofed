@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
+import { extname } from "node:path";
 import { test } from "node:test";
 
 test("the dashboard ignores legacy data from a different sign-in", async (t) => {
@@ -16,9 +17,10 @@ test("the dashboard ignores legacy data from a different sign-in", async (t) => 
     },
   });
   t.mock.method(globalThis, "fetch", async () => Response.json([{ title: "My pull request" }]));
+  const source = new URL("../src/", import.meta.url).href;
   const hook = registerHooks({
     resolve(specifier, context, next) {
-      return next(specifier.startsWith(".") && context.parentURL?.includes("/src/") && !/\.[cm]?tsx?$/.test(specifier) ? specifier + ".ts" : specifier, context);
+      return next(specifier.startsWith(".") && context.parentURL?.startsWith(source) && !extname(specifier) ? specifier + ".ts" : specifier, context);
     },
   });
   try {

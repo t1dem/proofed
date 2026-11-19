@@ -105,6 +105,8 @@ const SETUP = [
       <>
         Proofed drives Chrome with Kane CLI: two keys come from TestMu. For fixes, use{" "}
         <code className="font-mono text-[0.9em]">claude setup-token</code> or an OpenAI API key for Codex. Runs and fixes use your own accounts.
+        If you add the Codex key in GitHub, choose a Codex model in Proofed's repository settings or set the Actions variable{" "}
+        <code className="font-mono text-[0.9em]">PROOFED_PROVIDER</code> to <code className="font-mono text-[0.9em]">codex</code> before running the setup check.
       </>
     ),
     scene: <GlyphScene draw={drawSecrets} loop={SECRETS_LOOP} rest={5} label="Three keys in a padlock, locked and green" />,

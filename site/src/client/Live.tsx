@@ -122,7 +122,9 @@ function LiveFrame({ frame, on, now, startedAt }: { frame: Frame | undefined; on
 // Kane's steps as they come: the one it's on turns, the rest are done or broke.
 function LiveSteps({ scenario }: { scenario: LiveScenario }) {
   if (scenario.status === "waiting") return <p className="text-dim">Waiting for this scenario to start.</p>;
-  if (scenario.steps.length === 0) return <p className="text-dim">Kane is starting the check.</p>;
+  if (scenario.steps.length === 0) {
+    return <p className="text-dim">{scenario.status === "running" ? "Kane is starting the check." : "No steps were recorded."}</p>;
+  }
   const shown = scenario.steps.flatMap((step, i) => {
     // Kane doesn't always say a step ended before it starts the next: only the last one can be going.
     const running = step.status === "running" && i === scenario.steps.length - 1;

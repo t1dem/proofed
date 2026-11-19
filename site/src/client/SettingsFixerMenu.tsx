@@ -1,5 +1,5 @@
 import { Check, ChevronDown } from "lucide-react";
-import { useCallback, useRef, useState, type FormEvent } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import type { FixerView, RepoView } from "../worker/api";
 import { defaultModel, effortsFor, modelLabel, MODELS, PROVIDERS, providerLabel, providerOf, type Provider } from "../worker/models";
 import type { PullDetail, PullView } from "../worker/runs";
@@ -19,6 +19,10 @@ export function FixerMenu({ repo }: { repo: RepoView }) {
   const saves = useRef(Promise.resolve());
   const latestSave = useRef(0);
   const confirmed = useRef(fixer);
+  const pending = useRef(false);
+  useLayoutEffect(() => {
+    if (!pending.current) confirmed.current = fixer;
+  }, [fixer]);
   const [saving, setSaving] = useState<"model" | "effort" | "auto">();
   const [error, setError] = useState<string>();
   const [open, setOpen] = useState(false);
@@ -29,7 +33,7 @@ export function FixerMenu({ repo }: { repo: RepoView }) {
     setTyping(false);
   }, []);
   useDismiss(open, close, box);
-  const sheet = useSheetDrag(close);
+  const sheet = useSheetDrag(open && !!fixer, close);
 
   if (!fixer) {
     return (
@@ -55,6 +59,7 @@ export function FixerMenu({ repo }: { repo: RepoView }) {
   };
   const save = (next: FixerView, what: "model" | "effort" | "auto") => {
     const id = ++latestSave.current;
+    pending.current = true;
     setFixer(next);
     setSaving(what);
     setError(undefined);
@@ -70,7 +75,10 @@ export function FixerMenu({ repo }: { repo: RepoView }) {
           setError(message(e));
         }
       } finally {
-        if (id === latestSave.current) setSaving(undefined);
+        if (id === latestSave.current) {
+          pending.current = false;
+          setSaving(undefined);
+        }
       }
     });
     return saves.current;

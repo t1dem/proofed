@@ -1,17 +1,19 @@
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
+import { extname } from "node:path";
 import { test } from "node:test";
 import type { UserRow } from "../src/worker/auth.ts";
 import type { Env } from "../src/worker/index.ts";
 
 // The Worker uses extensionless imports that Vite resolves for it.
+const source = new URL("../src/", import.meta.url).href;
 const hook = registerHooks({
   resolve(specifier, context, next) {
-    return next(specifier.startsWith(".") && context.parentURL?.includes("/src/") && !/\.[cm]?tsx?$/.test(specifier) ? specifier + ".ts" : specifier, context);
+    return next(specifier.startsWith(".") && context.parentURL?.startsWith(source) && !extname(specifier) ? specifier + ".ts" : specifier, context);
   },
 });
 const { default: worker } = await import("../src/worker/index.ts");
-const { pushSecrets } = await import("../src/worker/api.ts");
+const { handleApi, pushSecrets } = await import("../src/worker/api.ts");
 const { encrypt } = await import("../src/worker/crypto.ts");
 const { forget, memo } = await import("../src/worker/memo.ts");
 hook.deregister();
@@ -57,6 +59,41 @@ test("malformed demo and account requests return 400 before changing anything", 
   assert.equal(reads, 12, "only authenticated requests read a session");
 });
 
+test("a rejected GitHub comment can be retried but an uncertain result cannot", async (t) => {
+  const secret = Buffer.alloc(32, 1).toString("base64");
+  const user = { token: await encrypt(secret, "comment-fixture"), token_expires: null };
+  const env = {
+    SECRETS_KEY: secret,
+    DB: {
+      prepare: (sql: string) => {
+        assert.match(sql, /SELECT users\.\*/);
+        return { bind: () => ({ first: async () => user }) };
+      },
+    },
+  } as unknown as Env;
+  let status = 403;
+  t.mock.method(globalThis, "fetch", async (input: string, init: RequestInit) => {
+    const path = new URL(input).pathname;
+    if (path === "/user/installations") return Response.json({ installations: [{ id: 7 }] });
+    if (path === "/user/installations/7/repositories") {
+      return Response.json({ repositories: [{ full_name: "fixture/app", permissions: { push: true } }] });
+    }
+    assert.equal(path, "/repos/fixture/app/issues/1/comments");
+    assert.equal(init.method, "POST");
+    return Response.json({}, { status });
+  });
+  const path = "/api/pulls/fixture/app/1/fix";
+  const ask = () => handleApi(new Request("https://example.test" + path, {
+    method: "POST", headers: { cookie: "proofed_session=fixture" },
+  }), env, path);
+  const rejected = await ask();
+  assert.equal(rejected.status, 403);
+  assert.equal((await rejected.json() as { retryable?: boolean }).retryable, true);
+
+  status = 502;
+  await assert.rejects(ask(), /POST .*\/comments: 502/);
+});
+
 test("syncing a Codex-only key selects Codex for repositories without a configured provider", async (t) => {
   const secret = Buffer.alloc(32, 1).toString("base64");
   const user = {
@@ -70,7 +107,7 @@ test("syncing a Codex-only key selects Codex for repositories without a configur
   const env = { SECRETS_KEY: secret } as Env;
   const writes: unknown[] = [];
   t.mock.method(globalThis, "fetch", async (input: string, init: RequestInit) => {
-    const path = new URL(input).pathname;
+    const { pathname: path, searchParams } = new URL(input);
     if (path.endsWith("/public-key")) return Response.json({ key: Buffer.alloc(32, 2).toString("base64"), key_id: "fixture" });
     if (path.endsWith("/secrets/CODEX_API_KEY")) return new Response(null, { status: 204 });
     if (path.endsWith("/secrets/CLAUDE_CODE_OAUTH_TOKEN")) {
@@ -78,7 +115,11 @@ test("syncing a Codex-only key selects Codex for repositories without a configur
     }
     assert.ok(path.endsWith("/actions/variables"));
     if (init.method === "GET") {
-      return Response.json({ variables: path.includes("/with-model/") ? [{ name: "PROOFED_MODEL" }] : [] });
+      if (!path.includes("/with-model/")) return Response.json({ total_count: 0, variables: [] });
+      const variables = searchParams.get("page") === "2"
+        ? [{ name: "PROOFED_MODEL", value: "opus" }]
+        : Array.from({ length: 100 }, (_, i) => ({ name: `VAR_${i}`, value: "fixture" }));
+      return Response.json({ total_count: 101, variables });
     }
     assert.equal(init.method, "POST");
     writes.push({ path, variable: JSON.parse(String(init.body)) });

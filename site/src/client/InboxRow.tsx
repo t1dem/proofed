@@ -2,7 +2,7 @@ import { RotateCw, Wrench } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { NOTHING_CHECKED } from "../../../src/report/runfile";
 import type { PullView } from "../worker/runs";
-import { ago, fixerName, movingName, plural, prefetch, titleName, type Ask, type Route, type useAsk } from "./lib";
+import { ago, canAskAgain, fixLabel, fixerName, movingName, plural, prefetch, titleName, type Ask, type Route, type useAsk } from "./lib";
 import { kindOf, Link, Mark, NEEDS_WRITE, outline, Pips, plain, sha7, soft, solid } from "./ui";
 
 export type AskedOf = ReturnType<typeof useAsk>[0];
@@ -79,7 +79,7 @@ function Action({ pull, asked, ask }: { pull: PullView; asked: AskedOf; ask: Ask
   const kind = kindOf(pull);
   const state = asked(pull);
   if (pull.paused || (kind !== "failed" && kind !== "error")) return null;
-  if (typeof state === "object") return <span className="text-[13px] text-bad" title={state.error}>Couldn't ask</span>;
+  if (typeof state === "object" && !state.retryable) return null;
   const gaveUp = pull.fix?.status === "gave-up";
   const fix = kind === "failed" && !gaveUp;
   return (
@@ -90,7 +90,7 @@ function Action({ pull, asked, ask }: { pull: PullView; asked: AskedOf; ask: Ask
       title={pull.readOnly ? NEEDS_WRITE : `Comments /proofed${fix ? " fix" : ""} on the pull request as you`}
       onClick={() => ask(pull, fix ? "fix" : "rerun")}
     >
-      {fix ? `Fix with ${fixerName(pull)}` : "Run again"}
+      {fix ? fixLabel(pull) : "Run again"}
     </button>
   );
 }
@@ -100,7 +100,7 @@ type RowProps = { pull: PullView; selected: boolean; go: (route: Route) => void;
 // What a phone's swipe on a row offers: the same one action the desktop row has (Action).
 function swipeAction(pull: PullView, asked: AskedOf) {
   const kind = kindOf(pull);
-  if (pull.paused || pull.readOnly || asked(pull) || (kind !== "failed" && kind !== "error")) return undefined;
+  if (pull.paused || pull.readOnly || !canAskAgain(asked(pull)) || (kind !== "failed" && kind !== "error")) return undefined;
   return kind === "failed" && pull.fix?.status !== "gave-up"
     ? { does: "fix" as const, label: "Fix", icon: Wrench, tone: "bg-work text-bg" }
     : { does: "rerun" as const, label: "Run again", icon: RotateCw, tone: "bg-busy text-bg" };
@@ -152,13 +152,19 @@ function useSwipe(enabled: boolean) {
       if (axis !== "x") return;
       slide((isOpen.current ? -SWIPE : 0) + dx < -SWIPE / 2 ? -SWIPE : 0);
     };
+    const cancel = () => {
+      if (axis === "x") slide(isOpen.current ? -SWIPE : 0);
+      axis = undefined;
+    };
     el.addEventListener("touchstart", down, { passive: true });
     el.addEventListener("touchmove", move, { passive: false });
     el.addEventListener("touchend", up);
+    el.addEventListener("touchcancel", cancel);
     return () => {
       el.removeEventListener("touchstart", down);
       el.removeEventListener("touchmove", move);
       el.removeEventListener("touchend", up);
+      el.removeEventListener("touchcancel", cancel);
     };
   }, [enabled, slide]);
 
@@ -178,6 +184,7 @@ function useSwipe(enabled: boolean) {
 export function Row({ pull, selected, go, asked, ask, showRepo }: RowProps) {
   const ref = useRef<HTMLLIElement>(null);
   const detail = `/api/pulls/${pull.repo}/${pull.pr}`;
+  const state = asked(pull);
   const swipe = swipeAction(pull, asked);
   const { content, open, close } = useSwipe(!!swipe);
   useEffect(() => {
@@ -187,7 +194,7 @@ export function Row({ pull, selected, go, asked, ask, showRepo }: RowProps) {
   }, [selected, detail]);
   // The action waits in its own column: shown on the keyboard's row and under the mouse, so the
   // column doesn't jump from row to row. Once asked, the answer stays in view.
-  const shown = selected || !!asked(pull) ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100";
+  const shown = selected || !!state ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100";
   return (
     <li ref={ref} data-glide={`${pull.repo}#${pull.pr}`} onPointerEnter={() => prefetch(detail)} className="relative max-md:overflow-hidden">
       {swipe && (
@@ -237,6 +244,7 @@ export function Row({ pull, selected, go, asked, ask, showRepo }: RowProps) {
             {showRepo && <span className="text-faint max-md:hidden">{pull.repo.split("/")[1]} · </span>}
             <Why pull={pull} />
           </span>
+          {typeof state === "object" && <span role="status" className="mt-0.5 block text-[13px] text-bad">{state.error}</span>}
           {/* No hover on a tablet: the action sits under the text there. A phone has it under a swipe. */}
           <span className="relative z-10 mt-2 flex empty:hidden max-md:hidden lg:hidden">
             <Action pull={pull} asked={asked} ask={ask} />

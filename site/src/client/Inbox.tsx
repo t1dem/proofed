@@ -4,7 +4,7 @@ import type { PullView } from "../worker/runs";
 import { FilterMenu, NO_FILTER, type InboxFilter, type Status } from "./InboxFilterMenu";
 import { Glide } from "./InboxGlide";
 import { Row, type AskedOf } from "./InboxRow";
-import { DEMO, installed, type Ask, type Load, type Route } from "./lib";
+import { canAskAgain, DEMO, installed, type Ask, type Load, type Route } from "./lib";
 import { bone, focus, kindOf, outline, PageTitle } from "./ui";
 
 export { NO_FILTER, type InboxFilter };
@@ -140,14 +140,15 @@ export function Inbox({ pulls, onRefresh, repo, onRepo, filter, onFilter, go, as
   const keys = useRef<(e: KeyboardEvent) => void>(() => {});
   keys.current = (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
+    if (e.key === "Enter" && e.target instanceof HTMLElement && e.target.closest("button")) return;
     const move = (by: number) => selected && setAt(Math.max(0, Math.min(ordered.length - 1, ordered.indexOf(selected) + by)));
     if (e.key === "/") setFilterOpen(true);
     else if (!selected) return;
     else if (e.key === "j" || e.key === "ArrowDown") move(1);
     else if (e.key === "k" || e.key === "ArrowUp") move(-1);
     else if (e.key === "Enter") go({ page: "pull", repo: selected.repo, pr: selected.pr });
-    else if (e.key === "f" && kindOf(selected) === "failed" && !selected.paused && !selected.readOnly && !asked(selected)) ask(selected, "fix");
-    else if (e.key === "r" && !selected.paused && !selected.readOnly && !asked(selected)) ask(selected, "rerun");
+    else if (e.key === "f" && kindOf(selected) === "failed" && !selected.paused && !selected.readOnly && canAskAgain(asked(selected))) ask(selected, "fix");
+    else if (e.key === "r" && !selected.paused && !selected.readOnly && canAskAgain(asked(selected))) ask(selected, "rerun");
     else return;
     e.preventDefault();
   };

@@ -95,7 +95,10 @@ export function Recording({ clip, steps, seek, onTime }: { clip: NonNullable<Run
           preload="metadata"
           muted
           playsInline
-          onLoadedMetadata={(e) => setLength(e.currentTarget.duration)}
+          onLoadedMetadata={(e) => {
+            const duration = e.currentTarget.duration;
+            setLength(Number.isFinite(duration) && duration > 0 ? duration : undefined);
+          }}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
           onTimeUpdate={(e) => {
@@ -127,7 +130,24 @@ export function Recording({ clip, steps, seek, onTime }: { clip: NonNullable<Run
           }}
           onPointerMove={(e) => e.currentTarget.hasPointerCapture(e.pointerId) && scrub(e)}
         >
-          <span className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-edge" />
+          <input
+            type="range"
+            aria-label="Playback position"
+            aria-valuetext={`${clock(time)} of ${clock(length)}`}
+            min={0}
+            max={length ?? 0}
+            step="any"
+            value={time}
+            disabled={length === undefined}
+            onChange={(e) => {
+              const v = video.current;
+              if (!v) return;
+              v.currentTime = e.currentTarget.valueAsNumber;
+              setTime(v.currentTime);
+            }}
+            className="peer pointer-events-none absolute inset-0 size-full opacity-0"
+          />
+          <span className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-edge peer-focus-visible:ring-2 peer-focus-visible:ring-fg/50" />
           <span ref={fill} className="absolute left-0 top-1/2 h-1 w-0 -translate-y-1/2 rounded-full bg-dim" />
           {length &&
             steps?.map((step, i) =>
@@ -173,12 +193,12 @@ export function Compare({ before, after }: { before: string; after: string }) {
       }}
       onPointerMove={(e) => e.currentTarget.hasPointerCapture(e.pointerId) && move(e)}
     >
-      <img src={after} alt="After the fix: where Kane's run ended" draggable={false} className="block aspect-video w-full object-cover" />
+      <img src={after} alt="After the fix: where Kane's run ended" draggable={false} className="block aspect-video w-full bg-black object-contain" />
       <img
         src={before}
         alt="Before the fix: where Kane's run ended"
         draggable={false}
-        className="absolute inset-0 size-full object-cover"
+        className="absolute inset-0 size-full bg-black object-contain"
         style={{ clipPath: `inset(0 ${100 - x}% 0 0)` }}
       />
       <span className={`${chip} left-3`}>Before</span>

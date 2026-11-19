@@ -94,9 +94,23 @@ async function fetchRepos(token: string) {
   return perInstallation.flat();
 }
 
+type RepoVariable = { name: string; value: string };
+
+async function repoVariables(token: string, repoName: string) {
+  const all: RepoVariable[] = [];
+  const path = `/repos/${repoName}/actions/variables?per_page=100`;
+  for (let page = 1; ; page++) {
+    const { variables, total_count } = await gh<{ variables: RepoVariable[]; total_count: number }>(
+      token, "GET", page === 1 ? path : `${path}&page=${page}`,
+    );
+    all.push(...variables);
+    if (all.length >= total_count || variables.length === 0) return all;
+  }
+}
+
 export const repoFixer = (token: string, repoName: string) => memo(`fixer:${repoName}`, 60_000, () =>
-  gh<{ variables: { name: string; value: string }[] }>(token, "GET", `/repos/${repoName}/actions/variables?per_page=100`).then(
-    ({ variables }) => {
+  repoVariables(token, repoName).then(
+    (variables) => {
       const provider = variables.find((v) => v.name === "PROOFED_PROVIDER")?.value;
       const choice = resolveFixer({
         ...(provider && isProvider(provider) ? { provider } : {}),
@@ -203,10 +217,9 @@ async function selectCodex(token: string, repoName: string) {
   if (hasClaude) return;
 
   // Keep an explicit fixer choice. A new setup with only a Codex key otherwise defaults to Claude.
-  const path = `${actions}/variables`;
-  const { variables } = await gh<{ variables: { name: string }[] }>(token, "GET", `${path}?per_page=100`);
+  const variables = await repoVariables(token, repoName);
   if (variables.some(({ name }) => name === "PROOFED_PROVIDER" || name === "PROOFED_MODEL")) return;
-  await gh(token, "POST", path, { name: "PROOFED_PROVIDER", value: "codex" });
+  await gh(token, "POST", `${actions}/variables`, { name: "PROOFED_PROVIDER", value: "codex" });
   forget(`fixer:${repoName}`);
 }
 
@@ -362,8 +375,8 @@ export async function handleApi(request: Request, env: Env, path: string) {
       try {
         await gh(token, "POST", `/repos/${repoName}/issues/${number}/comments`, { body: command });
       } catch (e) {
-        if (e instanceof GitHubError && (e.status === 403 || e.status === 404)) {
-          return json({ error: "GitHub didn't let Proofed comment on this pull request for you. Comment /proofed there yourself." }, 403);
+        if (e instanceof GitHubError && [403, 404, 410, 422].includes(e.status)) {
+          return json({ error: "GitHub didn't let Proofed comment on this pull request for you. Comment /proofed there yourself.", retryable: true }, 403);
         }
         throw e;
       }

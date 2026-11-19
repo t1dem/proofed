@@ -30,8 +30,9 @@ export function RunMeta({ runs, at, onAt, checking }: { runs: Run[]; at: number;
   const box = useRef<HTMLSpanElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useDismiss(open, close, box);
-  const sheet = useSheetDrag<HTMLSpanElement>(close);
   const run = runs[at];
+  const hasHistory = runs.length > 1 || !!checking;
+  const sheet = useSheetDrag<HTMLSpanElement>(open && !!run && hasHistory, close);
   if (!run) return null;
   const seconds = Math.round(run.scenarios.reduce((sum, s) => sum + (s.seconds ?? 0), 0));
   const cost = [seconds > 0 ? duration(seconds) : undefined, creditSummary(runs.slice(at), at === 0)].filter((part): part is string => !!part);
@@ -42,7 +43,7 @@ export function RunMeta({ runs, at, onAt, checking }: { runs: Run[]; at: number;
       <span className="text-dim">{runLabel(run, runs.slice(at))}</span>
       {dot}
       <span>{when} on</span>
-      {runs.length > 1 || checking ? (
+      {hasHistory ? (
         <span ref={box} className="relative">
           <button
             type="button"

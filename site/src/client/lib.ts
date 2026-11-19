@@ -6,7 +6,11 @@ import type { PullDetail, PullView } from "../worker/runs";
 export const fixerName = (pull?: Pick<PullView, "fixer" | "fix" | "live">) =>
   providerLabel(providerOf(pull?.live?.fix?.model || pull?.fixer?.model || pull?.fix?.model || ""));
 
+export const fixLabel = ({ fixer }: Pick<PullView, "fixer">) =>
+  fixer ? `Fix with ${providerLabel(fixer.provider ?? providerOf(fixer.model))}` : "Fix";
+
 export class SignedOut extends Error {}
+class CommentRejected extends Error {}
 
 // /app?demo: the app runs on sample data (demo.ts, its own chunk), in `pnpm dev` and in the built
 // site alike. No sign-in, no request to the API, and nothing stored: a signed-in user's cached
@@ -19,12 +23,15 @@ const PUBLIC = location.pathname === "/try" || location.pathname.startsWith("/tr
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (DEMO) return (await import("./demo")).demo(path, init) as T;
   const res = await fetch(PUBLIC ? path.replace(/^\/api\/pulls\//, "/api/try/pulls/") : path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
-  const body = (await res.json().catch(() => ({}))) as T & { error?: string };
+  const body = (await res.json().catch(() => ({}))) as T & { error?: string; retryable?: boolean };
   if (res.status === 401) {
     forgetAll();
     throw new SignedOut();
   }
-  if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
+  if (!res.ok) {
+    const error = body.error ?? `Request failed (${res.status})`;
+    throw body.retryable === true ? new CommentRejected(error) : new Error(error);
+  }
   return body;
 }
 
@@ -230,7 +237,8 @@ export function ago(ts: number) {
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-type Asked = "sending" | { error: string };
+type Asked = "sending" | { error: string; retryable: boolean };
+export const canAskAgain = (state: Asked | undefined) => !state || (typeof state === "object" && state.retryable);
 // "check": Kane checks `what`, as a "/proofed <what to check>" comment would have it.
 export type Ask = (pull: { repo: string; pr: number }, action: "fix" | "rerun" | "check", what?: string) => void;
 
@@ -250,7 +258,7 @@ export function useAsk(reload: () => void) {
     set("sending");
     api(`${detail}/${action}`, { method: "POST", ...(what && { body: JSON.stringify({ what }) }) }).then(
       () => set(undefined),
-      (e: unknown) => set({ error: message(e) }),
+      (e: unknown) => set({ error: message(e), retryable: e instanceof CommentRejected }),
     ).finally(() => {
       reload();
       fetchInto(detail).catch(() => {});

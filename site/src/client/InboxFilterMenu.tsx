@@ -35,7 +35,7 @@ export function FilterMenu({ filter, onFilter, open, onOpen, repos, repo, onRepo
   const input = useRef<HTMLInputElement>(null);
   const close = useCallback(() => onOpen(false), [onOpen]);
   useDismiss(open, close, box);
-  const sheet = useSheetDrag(close);
+  const sheet = useSheetDrag(open, close);
   // With a mouse, straight into the field. A phone would throw its keyboard over the sheet.
   useEffect(() => {
     if (open && matchMedia("(pointer: fine)").matches) input.current?.focus();

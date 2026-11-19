@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight, RotateCw } from "lucide-react";
 import { useState } from "react";
 import type { PullDetail, PullView } from "../worker/runs";
-import { fixerName, movingName, titleName, useLoad, type Ask, type Route, type useAsk } from "./lib";
+import { fixLabel, movingName, titleName, useLoad, type Ask, type Route, type useAsk } from "./lib";
 import { LiveRun } from "./Live";
 import { RunMeta } from "./PullRunMeta";
 import { Scenarios } from "./PullScenarios";
@@ -96,7 +96,7 @@ export function Pull({ repo, pr, scenario, listed, go, asked, ask }: PullProps) 
               {typeof state === "object" && <span className="text-[13px] text-bad">{state.error}</span>}
               {fixable && (
                 <button type="button" className={solid} {...locked} onClick={() => ask(pull, "fix")}>
-                  Fix with {fixerName(pull)}
+                  {fixLabel(pull)}
                 </button>
               )}
               {canRerun && (
@@ -160,7 +160,7 @@ export function Pull({ repo, pr, scenario, listed, go, asked, ask }: PullProps) 
           <div className="flex gap-2">
             {fixable && (
               <button type="button" className={`${solid} h-11 flex-1 text-[15px]`} {...locked} onClick={() => ask(pull, "fix")}>
-                Fix with {fixerName(pull)}
+                {fixLabel(pull)}
               </button>
             )}
             {canRerun && (

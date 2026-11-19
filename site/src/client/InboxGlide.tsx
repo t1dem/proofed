@@ -10,6 +10,7 @@ export class Glide extends Component<{ children: ReactNode }> {
   // Where each element sits in the layout, without its glide, in page coordinates (so scrolling
   // between two answers doesn't read as a move).
   placed = new Map<string, number>();
+  private lifts = new WeakMap<HTMLElement, () => void>();
 
   els = () => [...(this.box.current?.querySelectorAll<HTMLElement>("[data-glide]") ?? [])];
   onScreen = (el: HTMLElement) => el.getBoundingClientRect().top + scrollY;
@@ -40,6 +41,7 @@ export class Glide extends Component<{ children: ReactNode }> {
       // Not moved by this answer: a glide under way just carries on.
       if (Math.abs(was - top) <= 1) continue;
       const from = seen.get(key) ?? was;
+      this.lifts.get(el)?.();
       for (const a of gliding) a.cancel();
       const glide = el.animate([{ transform: `translateY(${from - top}px)` }, { transform: "none" }], {
         id: "glide",
@@ -52,9 +54,13 @@ export class Glide extends Component<{ children: ReactNode }> {
       if (Math.abs(from - top) > el.offsetHeight) {
         const lift = { zIndex: "20", transition: "none", ...(getComputedStyle(el).backgroundColor === "rgba(0, 0, 0, 0)" && { backgroundColor: "var(--color-bg)" }) };
         Object.assign(el.style, lift);
-        glide.onfinish = glide.oncancel = () => {
+        const clear = () => {
+          if (this.lifts.get(el) !== clear) return;
+          this.lifts.delete(el);
           for (const prop of Object.keys(lift)) el.style.removeProperty(prop.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`));
         };
+        this.lifts.set(el, clear);
+        glide.onfinish = glide.oncancel = clear;
       }
     }
     this.placed = placed;
