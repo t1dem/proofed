@@ -1,23 +1,46 @@
 import { executableCommand, killTree } from "../process.ts";
-import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, type ChildProcess } from "node:child_process";
+import { appendFileSync, closeSync, constants, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { adopt } from "../children.ts";
 import { launchChrome } from "./chrome.ts";
-import { command, kaneTarget, localDevice, renderer, targetChecks } from "./targetchecks.ts";
+import { cdpOccupied, command, isAppBundle, kaneTarget, localDevice, renderer, targetChecks } from "./targetchecks.ts";
 import { startRecorder } from "./recorder.ts";
 import type { Clip } from "../types.ts";
 import type { Target } from "./target.ts";
 
-function owned(bin: string, args: string[], cwd?: string, env = process.env, shell = false) {
+function owned(bin: string, args: string[], cwd?: string, env = process.env, shell = false, logDir?: string) {
   const command = shell ? { file: bin, args } : executableCommand(bin, args, env);
-  const proc = spawn(command.file, command.args, { cwd, env, shell, windowsHide: true, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+  const stderrLog = logDir && join(logDir, "launch.stderr.log");
+  let stdout: number | undefined;
+  let stderr: number | undefined;
+  let proc: ChildProcess;
+  try {
+    if (logDir) stdout = openSync(join(logDir, "launch.stdout.log"), "w");
+    if (stderrLog) stderr = openSync(stderrLog, "w");
+    proc = spawn(command.file, command.args, { cwd, env, shell, windowsHide: true, detached: true, stdio: ["ignore", stdout ?? "pipe", stderr ?? "pipe"] });
+  } finally {
+    if (stderr !== undefined) closeSync(stderr);
+    if (stdout !== undefined) closeSync(stdout);
+  }
   let output = "";
   let error = "";
-  proc.stdout.on("data", (data) => { output += data; });
-  proc.stderr.on("data", (data) => { error += data; });
-  const exited = new Promise<void>((resolve) => { proc.once("exit", () => resolve()); proc.once("error", (e) => { error += String(e); resolve(); }); });
+  proc.stdout?.on("data", (data: Buffer) => {
+    // Keep the beginning of adb's output, where the recording PID is printed.
+    if (output.length < 4096) output += data.toString().slice(0, 4096 - output.length);
+  });
+  proc.stderr?.on("data", (data: Buffer) => { error = (error + data.toString()).slice(-4096); });
+  const exited = new Promise<void>((resolve) => {
+    proc.once("exit", () => resolve());
+    proc.once("error", (e) => {
+      error += String(e);
+      if (stderrLog) {
+        try { appendFileSync(stderrLog, String(e)); } catch {}
+      }
+      resolve();
+    });
+  });
   const kill = (signal: NodeJS.Signals) => killTree(proc.pid, signal);
   const release = adopt({ kill, exited });
   let done = false;
@@ -45,6 +68,7 @@ async function nativeRecorder(target: Extract<Target, { kind: "ios" | "android" 
   let stopped = false;
   let current: ReturnType<typeof owned> | undefined;
   let remotePid: string | undefined;
+  let pendingPid: Promise<void> | undefined;
   const prefix = `proofed-${process.pid}-${Date.now()}`;
   const started = Date.now() / 1000;
   let began = () => {};
@@ -59,21 +83,31 @@ async function nativeRecorder(target: Extract<Target, { kind: "ios" | "android" 
         : owned("adb", ["-s", id, "shell", `screenrecord --time-limit 175 ${remote} & p=$!; echo $p; wait $p`]);
       remotePid = undefined;
       if (target.kind === "android") {
+        const pid = Promise.withResolvers<void>();
+        pendingPid = pid.promise;
         for (let i = 0; i < 50 && !current.done(); i++) {
           remotePid = /^\d+/m.exec(current.output())?.[0];
           if (remotePid) break;
           await new Promise((r) => setTimeout(r, 100));
         }
+        pendingPid = undefined;
+        pid.resolve();
       }
       if (target.kind === "android" && !remotePid) { await current.stop(); throw new Error(`screenrecord did not return its PID: ${current.error()}`); }
       began();
       await current.exited;
       remotePid = undefined;
-      if (target.kind === "android") {
-        await required("adb", ["-s", id, "pull", remote, file], recordingTimeout);
-        await required("adb", ["-s", id, "shell", "rm", remote]);
-      }
       await current.stop();
+      if (target.kind === "android") {
+        const remove = ["-s", id, "shell", "rm", remote];
+        try {
+          await required("adb", ["-s", id, "pull", remote, file], recordingTimeout);
+        } catch (error) {
+          await command("adb", remove);
+          throw error;
+        }
+        await required("adb", remove);
+      }
       segments.push(file);
       if (!stopped && target.kind === "ios") break;
     } while (!stopped);
@@ -87,12 +121,15 @@ async function nativeRecorder(target: Extract<Target, { kind: "ios" | "android" 
     stop(): Promise<Clip> {
       return stopping ??= (async () => {
         stopped = true;
-        if (target.kind === "android" && remotePid) {
-          const signal = await command("adb", ["-s", id, "shell", "kill", "-2", remotePid]);
-          // The segment can expire while adb is delivering the signal.
-          if (!signal.ok && !/no such process/i.test(signal.text)) throw new Error(signal.text);
-        }
-        if (target.kind === "ios") await current?.stop();
+        if (target.kind === "android") {
+          // A new segment can already be recording while adb is still reporting its PID.
+          if (!remotePid && pendingPid) await pendingPid;
+          if (remotePid) {
+            const signal = await command("adb", ["-s", id, "shell", "kill", "-2", remotePid]);
+            // The segment can expire while adb is delivering the signal.
+            if (!signal.ok && !/no such process/i.test(signal.text)) throw new Error(signal.text);
+          }
+        } else await current?.stop();
         await loop;
         const list = join(dir, "segments.txt");
         writeFileSync(list, segments.map((f) => `file '${f.replaceAll("\\", "/").replaceAll("'", "'\\''")}'`).join("\n"));
@@ -133,28 +170,53 @@ const alive = (pid: number) => {
   try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; }
 };
 
-// One run per local device. The lock holds the owner's pid, so a lock left by a run that was killed
-// outright (or an old directory-style lock) is taken over instead of blocking the device for good.
+// Darwin's O_EXLOCK is missing from Node's constants. Local devices only run on macOS.
+const O_EXLOCK = 0x20;
+
 export function lockDevice(id: string, dir = tmpdir()) {
+  if (process.platform !== "darwin") throw new Error("Local mobile device locks require macOS");
   const lock = join(dir, `proofed-device-${id.replace(/[^\w-]/g, "_")}.lock`);
-  for (let attempt = 0; ; attempt++) {
+  const inUse = (owner?: number) => new Error(`Device ${id} is in use by another Proofed run${owner ? ` (pid ${owner})` : ""}. Wait for it to finish.`);
+  // Keep the guard inode so every contender locks the same file, even during stale PID cleanup.
+  // The kernel releases the guard if its owner dies.
+  let guard: number;
+  try {
+    guard = openSync(`${lock}.guard`, constants.O_WRONLY | constants.O_CREAT | constants.O_NONBLOCK | constants.O_NOFOLLOW | O_EXLOCK, 0o600);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EAGAIN") throw inUse();
+    throw e;
+  }
+  try {
     try {
       writeFileSync(lock, String(process.pid), { flag: "wx" });
-      return () => rmSync(lock, { force: true });
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
       let owner = 0;
       try { owner = Number(readFileSync(lock, "utf8").trim()); } catch {}
-      if (attempt > 0 || alive(owner)) throw new Error(`Device ${id} is in use by another Proofed run${owner ? ` (pid ${owner})` : ""}. Wait for it to finish, or delete ${lock}.`);
+      if (alive(owner)) throw inUse(owner);
       rmSync(lock, { recursive: true, force: true });
+      writeFileSync(lock, String(process.pid), { flag: "wx" });
     }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      try { rmSync(lock, { force: true }); } finally { closeSync(guard); }
+    };
+  } catch (e) {
+    closeSync(guard);
+    throw e;
   }
 }
 
 export async function prepareTarget(target: Target, options: { dir: string; url?: string; headless?: boolean }): Promise<PreparedTarget> {
   mkdirSync(options.dir, { recursive: true });
   const cleanups: (() => Promise<unknown> | unknown)[] = [];
-  const cleanup = async () => { for (const fn of cleanups.reverse()) await Promise.resolve(fn()).catch(() => {}); };
+  const cleanup = async () => {
+    for (const fn of cleanups.reverse()) {
+      try { await fn(); } catch {}
+    }
+  };
   try {
     if (target.kind === "web") {
       const chrome = await launchChrome({ headless: options.headless ?? true });
@@ -167,8 +229,7 @@ export async function prepareTarget(target: Target, options: { dir: string; url?
       if (!target.cdp_endpoint || (!target.launch && !target.app && !target.reuse)) throw new Error("Desktop requires cdp_endpoint and launch or app, or explicit --reuse");
       if (target.launch || target.app) {
         // Refuse to launch over an endpoint belonging to another process.
-        const occupied = await fetch(new URL("/json/version", target.cdp_endpoint), { signal: AbortSignal.timeout(1000) }).then(() => true, () => false);
-        if (occupied) throw new Error("CDP endpoint already answers; omit launch and pass --reuse");
+        if (await cdpOccupied(target.cdp_endpoint)) throw new Error("CDP endpoint already answers; omit launch and app and pass --reuse");
         const env = { ...process.env };
         // Electron inherits this from some Node hosts and exits as a Node CLI instead of an app.
         delete env.ELECTRON_RUN_AS_NODE;
@@ -183,12 +244,8 @@ export async function prepareTarget(target: Target, options: { dir: string; url?
           const endpoint = new URL(target.cdp_endpoint);
           args.push(`--remote-debugging-port=${endpoint.port || (endpoint.protocol === "https:" ? "443" : "80")}`);
         }
-        const app = owned(bin, args, target.dir, env, !!target.launch);
-        cleanups.push(async () => {
-          await app.stop();
-          writeFileSync(join(options.dir, "launch.stdout.log"), app.output());
-          writeFileSync(join(options.dir, "launch.stderr.log"), app.error());
-        });
+        const app = owned(bin, args, target.dir, env, !!target.launch, options.dir);
+        cleanups.push(() => app.stop());
       }
       let page: Awaited<ReturnType<typeof renderer>> | undefined;
       for (let i = 0; i < 100; i++) {
@@ -206,7 +263,7 @@ export async function prepareTarget(target: Target, options: { dir: string; url?
     const failed = checks.filter((c) => c.status === "fail");
     if (failed.length) throw new Error(failed.map((c) => `${c.name}: ${c.detail}. Fix: ${c.fix}`).join("\n"));
     let app = target.app!;
-    if (app.endsWith(".app")) {
+    if (isAppBundle(app)) {
       const temp = mkdtempSync(join(tmpdir(), "proofed-app-"));
       cleanups.push(() => rmSync(temp, { recursive: true, force: true }));
       const zip = join(temp, "simulator.zip");

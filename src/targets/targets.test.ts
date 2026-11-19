@@ -2,6 +2,7 @@ import { delimiter } from "node:path";
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import type { Duplex } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -11,7 +12,7 @@ import { runKane } from "../kane/kane.ts";
 import { outcomeOf } from "../check/run.ts";
 import { parseScenario } from "../scenarios.ts";
 import { resolveScenarioTarget } from "./target.ts";
-import { kaneTarget, localDevice, renderer, targetChecks } from "./targetchecks.ts";
+import { command, kaneTarget, localDevice, renderer, targetChecks } from "./targetchecks.ts";
 
 const temp = () => mkdtempSync(join(tmpdir(), "proofed-target-test-"));
 function executable(dir: string, name: string, source: string) {
@@ -78,6 +79,9 @@ test("fake device tools select one booted device; doctor only discovers and reje
     const checks = await targetChecks(ios, { env, platform: "darwin", arch: "arm64" });
     assert.ok(checks.some((c) => c.name === "App artifact type" && c.status === "fail"));
     assert.ok(checks.every((c) => c.fix));
+    mkdirSync(join(dir, "Counter.APP"));
+    const bundle = await targetChecks({ ...ios, app: join(dir, "Counter.APP") }, { env, platform: "darwin", arch: "arm64" });
+    assert.equal(bundle.find((c) => c.name === "App artifact")?.status, "ok");
     const android = resolveScenarioTarget({ target: "android", device: "Pixel", os_version: "15" }, {}, {}, dir);
     assert.ok(android.kind === "android");
     assert.equal(await localDevice(android, env), "emulator-5554");
@@ -87,16 +91,27 @@ test("fake device tools select one booted device; doctor only discovers and reje
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("CDP discovery accepts exactly one page and rejects a popup", async () => {
+test("a command failure with empty stderr still reports the error", async () => {
+  const result = await command(process.execPath, ["-e", "console.log('partial output'); process.stderr.write('  '); process.exitCode = 1;"]);
+  assert.equal(result.ok, false);
+  assert.match(result.text, /^partial output\nCommand failed:/);
+});
+
+test("CDP discovery accepts one page for reuse and requires a free endpoint for launches", async () => {
   let pages = [{ id: "workbench", type: "page", url: "file:///app/workbench.html" }];
   const server = createServer((req, res) => { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify(req.url === "/json/version" ? { webSocketDebuggerUrl: "ws://unused" } : pages)); });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   try {
     const addr = server.address(); assert.ok(addr && typeof addr !== "string");
-    const endpoint = `http://127.0.0.1:${addr.port}`;
+    const endpoint = `http://127.0.0.1:${addr.port}/`;
     assert.equal((await renderer(endpoint)).id, "workbench");
+    const desktop = { kind: "desktop", execution: "local", dir: process.cwd(), sources: {}, reuse: true, cdp_endpoint: endpoint } as const;
+    const launching = { ...desktop, launch: "my-app", reuse: false };
+    assert.equal((await targetChecks(desktop))[0]?.status, "ok");
+    assert.equal((await targetChecks(launching, { launchPending: true }))[0]?.status, "fail");
     pages = [...pages, { id: "popup", type: "page", url: "about:blank" }];
     await assert.rejects(renderer(endpoint), /found 2/);
+    assert.equal((await targetChecks(launching, { launchPending: true }))[0]?.status, "fail");
   } finally { server.closeAllConnections(); await new Promise<void>((r) => server.close(() => r())); }
 });
 
@@ -112,16 +127,22 @@ test("cache changes with target, app content, device, OS and Kane version", () =
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("the desktop recorder injects into the loaded renderer and refuses to follow another page", async () => {
+test("the recorder checks listener injection in desktop and page identity for web text", async () => {
   const { createHash } = await import("node:crypto");
   const { startRecorder } = await import("./recorder.ts");
   const dir = temp();
   const methods: { method: string; params: Record<string, unknown> }[] = [];
+  const upgraded = new Set<Duplex>();
+  let mode: "desktop" | "exception" | "web" = "desktop";
+  let addPopup = false;
   const server = createServer((req, res) => {
     const addr = server.address(); assert.ok(addr && typeof addr !== "string");
+    if (req.url !== "/json/version") { res.writeHead(404).end(); return; }
     res.end(JSON.stringify({ webSocketDebuggerUrl: `ws://127.0.0.1:${addr.port}/cdp` }));
   });
   server.on("upgrade", (req, socket) => {
+    upgraded.add(socket);
+    socket.once("close", () => upgraded.delete(socket));
     const accept = createHash("sha1").update(`${req.headers["sec-websocket-key"]}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
     const send = (value: object) => {
@@ -129,6 +150,8 @@ test("the desktop recorder injects into the loaded renderer and refuses to follo
       const header = data.length < 126 ? Buffer.from([129, data.length]) : Buffer.from([129, 126, data.length >> 8, data.length & 255]);
       socket.write(Buffer.concat([header, data]));
     };
+    const page = (targetId: string) => ({ targetId, type: "page" });
+    const popup = () => send({ method: "Target.targetCreated", params: { targetInfo: page("popup") } });
     let buffer = Buffer.alloc(0);
     socket.on("data", (chunk: Buffer) => {
       buffer = Buffer.concat([buffer, chunk]);
@@ -141,26 +164,55 @@ test("the desktop recorder injects into the loaded renderer and refuses to follo
         buffer = buffer.subarray(offset + 4 + length);
         if (opcode === 8) { socket.end(); return; }
         for (let i = 0; i < payload.length; i++) payload[i] = payload[i]! ^ mask[i % 4]!;
-        const m = JSON.parse(payload.toString()) as { id: number; method: string; params: Record<string, unknown> };
-        methods.push(m); send({ id: m.id, result: {} });
-        if (m.method === "Target.setDiscoverTargets") {
-          send({ method: "Target.targetCreated", params: { targetInfo: { targetId: "workbench", type: "page" } } });
-          send({ method: "Target.targetCreated", params: { targetInfo: { targetId: "popup", type: "page" } } });
+        const m = JSON.parse(payload.toString()) as { id: number; method: string; params: Record<string, unknown>; sessionId?: string };
+        methods.push(m);
+        if (m.method === "Runtime.evaluate" && mode === "exception") {
+          send({ id: m.id, result: { exceptionDetails: { text: "listener could not run" } } });
+          continue;
         }
-        if (m.method === "Target.attachToTarget") send({ method: "Target.attachedToTarget", params: { sessionId: "chosen", targetInfo: { targetId: "workbench", type: "page" } } });
+        if (m.method === "Runtime.evaluate" && mode === "web") {
+          if (addPopup) popup();
+          send({ id: m.id, result: { result: { value: m.sessionId === "workbench" ? "Counter" : "Background tab" } } });
+          continue;
+        }
+        send({ id: m.id, result: {} });
+        if (m.method === "Target.setDiscoverTargets") {
+          send({ method: "Target.targetCreated", params: { targetInfo: page("workbench") } });
+          if (mode === "desktop") popup();
+        }
+        if (m.method === "Target.attachToTarget") {
+          const targetId = String(m.params.targetId);
+          send({ method: "Target.attachedToTarget", params: { sessionId: targetId, targetInfo: page(targetId) } });
+        }
       }
     });
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   try {
     const addr = server.address(); assert.ok(addr && typeof addr !== "string");
-    const recorder = await startRecorder(`http://127.0.0.1:${addr.port}`, dir, "workbench");
+    const endpoint = `http://127.0.0.1:${addr.port}/`;
+    const recorder = await startRecorder(endpoint, dir, "workbench");
     assert.ok(methods.some((m) => m.method === "Runtime.evaluate" && String(m.params.expression).includes("pointerdown")));
     assert.deepEqual(methods.filter((m) => m.method === "Target.attachToTarget").map((m) => m.params.targetId), ["workbench"]);
     assert.ok(recorder.unexpectedPage);
     assert.ok(!methods.some((m) => m.method === "Target.createTarget"));
     recorder.stop();
-  } finally { server.closeAllConnections(); await new Promise<void>((r) => server.close(() => r())); rmSync(dir, { recursive: true, force: true }); }
+
+    mode = "exception";
+    await assert.rejects(startRecorder(endpoint, dir, "workbench"), /listener could not run/);
+
+    mode = "web";
+    const web = await startRecorder(endpoint, dir);
+    assert.equal(await web.visibleText(), "Counter");
+    addPopup = true;
+    assert.equal(await web.visibleText(), undefined);
+    web.stop();
+  } finally {
+    for (const socket of upgraded) socket.destroy();
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("quoted executable arguments remain a shell command rather than an outer quoted scalar", () => {
@@ -182,6 +234,7 @@ test("desktop app paths and launch commands relaunch the rebuilt renderer for ea
   const launches = join(dir, "launches.txt");
   writeFileSync(app, `const fs=require('node:fs'); const {spawn}=require('node:child_process');
 fs.appendFileSync(${JSON.stringify(launches)}, fs.readFileSync(${JSON.stringify(built)},'utf8')+'\\n');
+console.log('desktop stdout'); console.error('desktop stderr');
 const child=spawn(${JSON.stringify(chrome)}, ['--headless=new','--no-sandbox','--no-first-run','--no-default-browser-check','--use-mock-keychain',${JSON.stringify(`--user-data-dir=${join(dir, "profile")}`)},...process.argv.slice(2),'data:text/html,<h1>Counter</h1>'], {stdio:'ignore'});
 child.on('exit',code=>process.exit(code??0));`);
   try {
@@ -196,10 +249,13 @@ child.on('exit',code=>process.exit(code??0));`);
         const target = resolveScenarioTarget({ target: "desktop", cdp_endpoint: endpoint,
           ...(mode === "app" ? { app } : { launch: `"${process.execPath}" "${app}" --remote-debugging-port=${addr.port}` }),
         }, {}, {}, dir);
-        const prepared = await prepareTarget(target, { dir: join(dir, `${mode}-${phase}`) });
+        const output = join(dir, `${mode}-${phase}`);
+        const prepared = await prepareTarget(target, { dir: output });
         try {
           assert.ok((await renderer(endpoint)).url.startsWith("data:text/html"));
           assert.deepEqual(prepared.kaneArgs, ["--target", "desktop", "--cdp-endpoint", endpoint, "--allow-missing-url"]);
+          assert.equal(readFileSync(join(output, "launch.stdout.log"), "utf8").trim(), "desktop stdout");
+          assert.equal(readFileSync(join(output, "launch.stderr.log"), "utf8").trim(), "desktop stderr");
         } finally { await prepared.cleanup(); }
         await assert.rejects(renderer(endpoint), /fetch failed/);
       }

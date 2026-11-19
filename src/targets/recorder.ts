@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { VISIBLE_TEXT } from "../check/textcheck.ts";
-import { connectCdp, type ScreencastMetadata, type TargetInfo } from "./cdp.ts";
+import { connectCdp, type ExceptionDetails, type ScreencastMetadata } from "./cdp.ts";
 import type { LiveCursor } from "../report/livefile.ts";
 
 export type Rect = { x: number; y: number; width: number; height: number };
@@ -119,12 +119,27 @@ export async function startRecorder(endpoint: string, outDir: string, targetId?:
 
   let unexpectedPage = false;
   let onUnexpectedPage: (() => void) | undefined;
-  const attached = new Set<string>();
-  cdp.on("Target.targetCreated", ({ targetInfo }) => {
-    if (targetId && targetInfo.type === "page" && targetInfo.targetId !== targetId) { unexpectedPage = true; onUnexpectedPage?.(); }
-    if ((targetId && targetInfo.targetId !== targetId) || targetInfo.type !== "page" || attached.has(targetInfo.targetId)) return;
-    attached.add(targetInfo.targetId);
-    void cdp.send("Target.attachToTarget", { targetId: targetInfo.targetId, flatten: true }).catch(() => {});
+  const openPages = new Map<string, string | undefined>();
+  const ready = Promise.withResolvers<void>();
+  cdp.on("Target.targetCreated", ({ targetInfo: { type, targetId: id } }) => {
+    if (type !== "page" || openPages.has(id)) return;
+    openPages.set(id, undefined);
+    if (targetId && id !== targetId) {
+      unexpectedPage = true;
+      onUnexpectedPage?.();
+      return;
+    }
+    void cdp.send("Target.attachToTarget", { targetId: id, flatten: true }).catch((error: unknown) => {
+      if (targetId) ready.reject(error);
+    });
+  });
+  cdp.on("Target.targetDestroyed", ({ targetId }) => openPages.delete(targetId));
+  cdp.on("Target.detachedFromTarget", ({ sessionId }) => {
+    for (const [id, session] of openPages) {
+      if (session !== sessionId) continue;
+      openPages.delete(id);
+      break;
+    }
   });
 
   const prepare = async (sessionId: string) => {
@@ -132,23 +147,34 @@ export async function startRecorder(endpoint: string, outDir: string, targetId?:
     await cdp.send("Runtime.enable", {}, sessionId);
     await cdp.send("Runtime.addBinding", { name: BINDING }, sessionId);
     await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: LISTENER }, sessionId);
-    if (targetId) await cdp.send("Runtime.evaluate", { expression: LISTENER }, sessionId);
+    if (targetId) {
+      const { exceptionDetails } = await cdp.send<{ exceptionDetails?: ExceptionDetails }>("Runtime.evaluate", { expression: LISTENER }, sessionId);
+      if (exceptionDetails) {
+        ready.reject(new Error(`Could not install the desktop recorder listener: ${exceptionDetails.exception?.description ?? exceptionDetails.text}`));
+        return;
+      }
+    }
     await cdp.send("Page.startScreencast", { format: "jpeg", quality: 80, maxWidth: MAX_WIDTH, maxHeight: MAX_HEIGHT }, sessionId);
+    ready.resolve();
   };
-  let firstPage: (info: TargetInfo) => void = () => {};
-  const ready = new Promise<TargetInfo>((resolve) => (firstPage = resolve));
   cdp.on("Target.attachedToTarget", ({ sessionId, targetInfo }) => {
-    if (targetInfo.type !== "page" || (targetId && targetInfo.targetId !== targetId)) return;
-    prepare(sessionId).then(
-      () => firstPage(targetInfo),
-      () => {}, // The page closed while we were setting it up.
-    );
+    const id = targetInfo.targetId;
+    if (!openPages.has(id) || (targetId && id !== targetId)) return;
+    openPages.set(id, sessionId);
+    // The page can close or navigate during setup.
+    void prepare(sessionId).catch(() => {});
   });
 
   cdp.on("Page.screencastFrame", ({ data, metadata, sessionId: ack }, sessionId) => {
     const file = join(outDir, `${String(frames.length).padStart(5, "0")}.jpg`);
     const jpeg = Buffer.from(data, "base64");
-    writeFileSync(file, jpeg);
+    try {
+      writeFileSync(file, jpeg);
+    } catch {
+      return;
+    } finally {
+      void cdp.send("Page.screencastFrameAck", { sessionId: ack }, sessionId).catch(() => {});
+    }
     const scale = Math.min(1, MAX_WIDTH / metadata.deviceWidth, MAX_HEIGHT / metadata.deviceHeight);
     frames.push({
       file,
@@ -160,7 +186,6 @@ export async function startRecorder(endpoint: string, outDir: string, targetId?:
     });
     lastSession = sessionId;
     if (sessionId) latest.set(sessionId, { jpeg, meta: metadata });
-    void cdp.send("Page.screencastFrameAck", { sessionId: ack }, sessionId).catch(() => {});
   });
 
   cdp.on("Runtime.bindingCalled", ({ name, payload }, sessionId) => {
@@ -184,19 +209,19 @@ export async function startRecorder(endpoint: string, outDir: string, targetId?:
     return { jpeg: frame.jpeg, at: Date.now(), cursor: { x: action.x / page.w, y: action.y / page.h } };
   };
 
-  await cdp.send("Target.setDiscoverTargets", { discover: true });
-  // Don't let Kane navigate before the listener is installed on the starting tab.
-  await Promise.race([ready, new Promise((r) => setTimeout(r, 5000))]);
-
   const recorder = {
     async visibleText(): Promise<string | undefined> {
-      // The page is known from its first screencast frame, which can come after Kane's first step.
-      for (let i = 0; !lastSession && i < 20; i++) await new Promise((r) => setTimeout(r, 100));
-      if (!lastSession) return;
+      // Kane doesn't report which tab it checked, so only read when one page is open.
+      let sessionId = openPages.values().next().value;
+      for (let i = 0; !sessionId && openPages.size < 2 && i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        sessionId = openPages.values().next().value;
+      }
+      if (!sessionId || openPages.size !== 1) return;
       try {
         const busy = new Promise<never>((_, reject) => setTimeout(reject, 5000).unref());
-        const { result } = await Promise.race([cdp.send<{ result: { value?: unknown } }>("Runtime.evaluate", { expression: VISIBLE_TEXT, returnByValue: true }, lastSession), busy]);
-        return typeof result.value === "string" ? result.value : undefined;
+        const { result } = await Promise.race([cdp.send<{ result: { value?: unknown } }>("Runtime.evaluate", { expression: VISIBLE_TEXT, returnByValue: true }, sessionId), busy]);
+        if (openPages.size === 1 && openPages.values().next().value === sessionId && typeof result.value === "string") return result.value;
       } catch { return undefined; }
     },
     get unexpectedPage() { return unexpectedPage; },
@@ -244,5 +269,23 @@ export async function startRecorder(endpoint: string, outDir: string, targetId?:
       return { frames, actions };
     },
   };
+
+  // Don't let Kane navigate before the listener is installed on the starting tab.
+  const timer = setTimeout(() => ready.resolve(), 5000);
+  try {
+    const discovery = cdp.send("Target.setDiscoverTargets", { discover: true });
+    if (targetId) {
+      // Desktop setup can continue even if discovery stalls or fails.
+      void discovery.catch(() => {});
+      await ready.promise;
+    } else {
+      await Promise.all([discovery, ready.promise]);
+    }
+  } catch (error) {
+    cdp.close();
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
   return recorder;
 }

@@ -7,7 +7,9 @@ export type ExceptionDetails = { text: string; exception?: { description?: strin
 
 type Events = {
   "Target.targetCreated": { targetInfo: TargetInfo };
+  "Target.targetDestroyed": { targetId: string };
   "Target.attachedToTarget": { sessionId: string; targetInfo: TargetInfo };
+  "Target.detachedFromTarget": { sessionId: string };
   "Page.screencastFrame": { data: string; sessionId: number; metadata: ScreencastMetadata };
   "Runtime.bindingCalled": { name: string; payload: string };
   "Runtime.exceptionThrown": { exceptionDetails: ExceptionDetails };
@@ -25,8 +27,10 @@ type Message = {
 
 export type Cdp = Awaited<ReturnType<typeof connectCdp>>;
 
+export const cdpUrl = (endpoint: string, path: "version" | "list") => new URL(`/json/${path}`, endpoint);
+
 export async function connectCdp(endpoint: string) {
-  const { webSocketDebuggerUrl } = (await (await fetch(`${endpoint}/json/version`)).json()) as {
+  const { webSocketDebuggerUrl } = (await (await fetch(cdpUrl(endpoint, "version"))).json()) as {
     webSocketDebuggerUrl: string;
   };
   const ws = new WebSocket(webSocketDebuggerUrl);

@@ -2,6 +2,7 @@ import { executableCommand } from "../process.ts";
 import { execFile } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { promisify } from "node:util";
+import { cdpUrl } from "./cdp.ts";
 import type { Target } from "./target.ts";
 
 const exec = promisify(execFile);
@@ -15,14 +16,21 @@ export async function command(bin: string, args: string[], env = process.env, ti
     return { ok: true, text: `${stdout}\n${stderr}`.trim() };
   } catch (error) {
     const e = error as { stdout?: string; stderr?: string; message?: string };
-    return { ok: false, text: `${e.stdout ?? ""}\n${e.stderr ?? e.message ?? "Command failed"}`.trim() };
+    const detail = e.stderr?.trim() ? e.stderr : e.message || "Command failed";
+    return { ok: false, text: `${e.stdout?.trimEnd() ?? ""}\n${detail}`.trim() };
   }
 }
 
+export const isAppBundle = (app: string) => /\.app$/i.test(app);
+
+export async function cdpOccupied(endpoint: string) {
+  return fetch(cdpUrl(endpoint, "version"), { signal: AbortSignal.timeout(1000) }).then(() => true, () => false);
+}
+
 export async function renderer(endpoint: string) {
-  const version = await fetch(new URL("/json/version", endpoint), { signal: AbortSignal.timeout(1500) });
+  const version = await fetch(cdpUrl(endpoint, "version"), { signal: AbortSignal.timeout(1500) });
   if (!version.ok || !(await version.json() as { webSocketDebuggerUrl?: string }).webSocketDebuggerUrl) throw new Error("CDP /json/version has no browser websocket");
-  const response = await fetch(new URL("/json/list", endpoint), { signal: AbortSignal.timeout(1500) });
+  const response = await fetch(cdpUrl(endpoint, "list"), { signal: AbortSignal.timeout(1500) });
   const pages = (await response.json() as { id: string; type: string; url: string }[]).filter((p) => p.type === "page");
   if (pages.length !== 1) throw new Error(`Expected one page renderer, found ${pages.length}`);
   return pages[0]!;
@@ -62,8 +70,20 @@ export async function targetChecks(target: Target, options: { env?: NodeJS.Proce
   if (target.kind === "desktop") {
     if (!target.cdp_endpoint) add("Desktop CDP", false, "No cdp_endpoint", "Set --cdp-endpoint http://127.0.0.1:<port> and --launch, or --reuse for an existing app.");
     else {
-      try { const page = await renderer(target.cdp_endpoint); add("Desktop CDP", true, `Experimental Electron renderer: ${page.url}`, "Keep exactly one page renderer."); }
-      catch (e) { checks.push({ name: "Desktop CDP", status: (target.launch || target.app) && options.launchPending ? "ok" : "fail", detail: (target.launch || target.app) && options.launchPending ? `not running, as expected: proofed check launches it (${String(e)})` : String(e), fix: target.launch || target.app ? "proofed check will launch the app; doctor never launches it." : "Start the app with remote debugging and exactly one page renderer." }); }
+      try {
+        if (target.launch || target.app) {
+          if (await cdpOccupied(target.cdp_endpoint)) {
+            add("Desktop CDP", false, "CDP endpoint already answers", "Stop the running app, or omit launch and app and pass --reuse.");
+          } else {
+            add("Desktop CDP", !!options.launchPending, options.launchPending ? "not running, as expected: proofed check launches it" : "CDP endpoint is not running", "proofed check will launch the app; doctor never launches it.");
+          }
+        } else {
+          const page = await renderer(target.cdp_endpoint);
+          add("Desktop CDP", true, `Experimental Electron renderer: ${page.url}`, "Keep exactly one page renderer.");
+        }
+      } catch (e) {
+        add("Desktop CDP", false, String(e), target.launch || target.app ? "Set a valid CDP endpoint for the app to launch." : "Start the app with remote debugging and exactly one page renderer.");
+      }
     }
     if (!target.launch && !target.app && !target.reuse) add("Desktop ownership", false, "Existing endpoints require --reuse", "Pass --reuse; Proofed will not close the existing app.");
     if (target.app && !target.launch) {
@@ -72,10 +92,13 @@ export async function targetChecks(target: Target, options: { env?: NodeJS.Proce
     return checks;
   }
   const app = target.app;
-  const validType = !!app && (/^APP[\w-]+$/.test(app) || (target.kind === "ios" ? (target.execution === "local" ? /\.(app|zip)$/i : /\.ipa$/i) : (target.execution === "local" ? /\.apk$/i : /\.(apk|aab)$/i)).test(app));
+  const validType = !!app && (/^APP[\w-]+$/.test(app) ||
+    (target.kind === "ios"
+      ? target.execution === "local" ? isAppBundle(app) || /\.zip$/i.test(app) : /\.ipa$/i.test(app)
+      : (target.execution === "local" ? /\.apk$/i : /\.(apk|aab)$/i).test(app)));
   add("App artifact type", validType, app ?? "No app artifact", `Set --app to ${target.kind === "ios" ? target.execution === "local" ? "a simulator .app or .zip" : "a device .ipa" : target.execution === "local" ? "an .apk" : "an .apk or .aab"}, or an APP ID.`);
   if (app && !/^APP[\w-]+$/.test(app)) {
-    const present = existsSync(app) && (app.endsWith(".app") ? statSync(app).isDirectory() : statSync(app).isFile());
+    const present = existsSync(app) && (isAppBundle(app) ? statSync(app).isDirectory() : statSync(app).isFile());
     checks.push({ name: "App artifact", status: present || options.pendingBuild ? "ok" : "fail", detail: present ? app : options.pendingBuild ? `artifact_pending_build: proofed check builds ${app} first` : `Missing ${app}`, fix: "Build the app before running the check." });
   }
   if (target.execution === "cloud") {

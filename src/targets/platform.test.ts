@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, win32 } from "node:path";
 import { test } from "node:test";
 import { chromeCandidates } from "./chrome.ts";
@@ -24,7 +24,8 @@ test("Windows PATH uses semicolons, case-insensitive env keys and PATHEXT", () =
     const bin = join(dir, "tools with spaces"); mkdirSync(bin);
     const kane = join(bin, "kane-cli.cmd"); writeFileSync(kane, "shim");
     writeFileSync(join(bin, "ffmpeg.exe"), "binary");
-    const env = { Path: `${join(dir, "missing")};"${bin}"`, PathExt: ".EXE;.CMD" };
+    writeFileSync(join(dir, "kane-cli"), "extensionless");
+    const env = { Path: `${dir};"${bin}"`, PathExt: ".EXE;.CMD" };
     assert.equal(findOnPath("kane-cli", env, "win32")?.toLowerCase(), kane.toLowerCase());
     assert.equal(findOnPath("ffmpeg", env, "win32")?.toLowerCase(), join(bin, "ffmpeg.exe").toLowerCase());
     assert.equal(findOnPath("kane-cli.cmd", env, "win32"), kane);
@@ -99,9 +100,11 @@ test("Chrome discovery includes Windows installs and prefers CHROME_PATH", () =>
   assert.ok(chromeCandidates({}, "linux").includes("/usr/bin/google-chrome"));
 });
 
-test("credit lock uses the OS temporary folder", () => {
-  assert.equal(creditLockPath(), join(tmpdir(), "proofed-kane.lock"));
-  assert.equal(creditLockPath("custom temp"), join("custom temp", "proofed-kane.lock"));
+test("credit lock uses a per-user path", () => {
+  const uid = process.getuid?.();
+  const file = uid === undefined ? ".proofed-kane-meter.lock" : `proofed-kane-${uid}.lock`;
+  assert.equal(creditLockPath(), join(uid === undefined ? homedir() : tmpdir(), file));
+  assert.equal(creditLockPath("custom dir"), join("custom dir", file));
 });
 
 test("scenario selection and fixer guards compare native paths with git paths", () => {
