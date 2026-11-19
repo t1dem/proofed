@@ -49,14 +49,16 @@ export async function localDevice(target: Extract<Target, { kind: "ios" | "andro
   const devices = await command("adb", ["devices"], env);
   if (!devices.ok) throw new Error(devices.text);
   const matches: string[] = [];
-  for (const line of devices.text.split("\n")) {
-    const serial = /^(\S+)\s+device$/.exec(line)?.[1];
+  for (const line of devices.stdout.split(/\r?\n/)) {
+    const serial = /^(emulator-\S+)\s+device\s*$/.exec(line)?.[1];
     if (!serial) continue;
     const name = await command("adb", ["-s", serial, "emu", "avd", "name"], env);
     const model = await command("adb", ["-s", serial, "shell", "getprop", "ro.product.model"], env);
     const os = await command("adb", ["-s", serial, "shell", "getprop", "ro.build.version.release"], env);
     // `adb emu avd name` answers "Pixel_8_API_34\r\nOK\r\n".
-    if ((name.text.split(/\r?\n/)[0]?.trim() === target.device || model.text === target.device) && os.text === target.os_version) matches.push(serial);
+    if (!os.ok || os.stdout.trim() !== target.os_version) continue;
+    if ((name.ok && name.stdout.split(/\r?\n/)[0]?.trim() === target.device) ||
+        (model.ok && model.stdout.trim() === target.device)) matches.push(serial);
   }
   if (matches.length !== 1) throw new Error(`Expected one online ${target.device} Android ${target.os_version}, found ${matches.length}`);
   return matches[0]!;

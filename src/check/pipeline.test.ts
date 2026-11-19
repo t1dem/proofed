@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { changedFiles } from "../changes.ts";
+import { baseRev, changedFiles } from "../changes.ts";
 import { live } from "../report/live.ts";
 import { publish, runAll } from "./pipeline.ts";
 import type { RunFile } from "../report/runfile.ts";
@@ -51,6 +51,17 @@ test("PR changes preserve non-ASCII names and embedded newlines", () => inRepo((
   git("add", "-A");
   git("commit", "-qm", "change");
   assert.deepEqual(changedFiles("main"), ["café.ts", "two\nlines.ts"]);
+}));
+
+test("the latest remote base wins over a tag with the same short name", () => inRepo((git) => {
+  git("commit", "--allow-empty", "-qm", "old base");
+  const sha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  git("tag", "origin/main");
+  git("commit", "--allow-empty", "-qm", "latest base");
+  const latest = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  git("update-ref", "refs/remotes/origin/main", latest);
+  assert.equal(baseRev({ ref: "main", sha }), latest);
+  assert.equal(baseRev({ ref: "missing", sha }), sha);
 }));
 
 test("invalid concurrency cannot leave a batch of scenarios unchecked", async () => {

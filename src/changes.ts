@@ -7,20 +7,6 @@ import { realpathSync } from "node:fs";
 import { join, relative } from "node:path";
 import { SetupError } from "./setuperror.ts";
 
-export const changedFiles = (base: string, head = "HEAD") =>
-  execFileSync("git", ["diff", "--name-only", "--no-renames", "-z", `${base}...${head}`], { encoding: "utf8" }).split("\0").filter(Boolean);
-
-// The base branch as the runner sees it (origin/main), so the diff and any scenarios read from it
-// are current even for a PR whose recorded base commit is weeks old. Falls back to that commit.
-export function baseRev(base: { ref: string; sha: string }) {
-  try {
-    execFileSync("git", ["rev-parse", "--verify", "--quiet", `origin/${base.ref}`], { stdio: "ignore" });
-    return `origin/${base.ref}`;
-  } catch {
-    return base.sha;
-  }
-}
-
 // A repo with an unignored node_modules lists megabytes of untracked names; the default is 1 MB.
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 256 * 1024 * 1024 });
@@ -32,6 +18,14 @@ const tries = (fn: () => string) => {
     return undefined;
   }
 };
+
+export const changedFiles = (base: string, head = "HEAD") =>
+  git(process.cwd(), "diff", "--name-only", "--no-renames", "-z", `${base}...${head}`).split("\0").filter(Boolean);
+
+// Use the runner's current remote-tracking commit for both the diff and fallback scenarios.
+export function baseRev(base: { ref: string; sha: string }) {
+  return tries(() => git(process.cwd(), "rev-parse", "--verify", "--quiet", `refs/remotes/origin/${base.ref}^{commit}`)) ?? base.sha;
+}
 
 export const BASES = ["origin/HEAD", "origin/main", "origin/master", "main", "master"];
 

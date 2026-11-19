@@ -67,11 +67,6 @@ export function focusWords(end: RunEnd) {
 // Only an assert compares the page with what the scenario expects.
 const checked = (steps: Step[]) => steps.some((s) => s.status === "done" && /^assert:/i.test(s.remark));
 
-// Kane read the page and the scenario's own check came out false. When the app is wrong all over
-// (a changed threshold shown in its banner too), Kane sides with the app and blames the test; the
-// scenario is what the app was meant to do, so that is a failure. runScenario runs it a second time.
-const refuted = (steps: Step[]) => steps.some((s) => s.status === "failed" && /^assert:/i.test(s.remark));
-
 // A later successful result for the same step supersedes a failed attempt at that step.
 const failedAssert = (steps: Step[]) => steps.findLast((s, i) =>
   s.status === "failed" && /^assert:/i.test(s.remark) && !steps.slice(i + 1).some((later) => later.step === s.step && later.status === "done"));
@@ -82,11 +77,11 @@ function reconciledEnd(end: RunEnd | undefined, steps: Step[]): RunEnd | undefin
 }
 
 export function outcomeOf(end: RunEnd | undefined, steps: Step[]): Outcome {
-  if (!end || INFRA.test(end.reason ?? "")) return "error";
   // A vague objective lets Kane open the page, wait, and call that a pass.
-  if (end.status === "passed") return failedAssert(steps) ? "failed" : checked(steps) ? "passed" : "unsure";
-  if (end.status !== "failed") return "error";
-  return end.verdict?.family === "automation_bug" && !refuted(steps) ? "unsure" : "failed";
+  if (end?.status === "passed") return failedAssert(steps) ? "failed" : checked(steps) ? "passed" : "unsure";
+  if (end?.status !== "failed" || INFRA.test(end.reason ?? "")) return "error";
+  // An unresolved false assertion is a failure even when Kane blames the scenario.
+  return end.verdict?.family === "automation_bug" && !failedAssert(steps) ? "unsure" : "failed";
 }
 
 const RECHECK = "the check failed, but Kane blames the scenario; running it once more to be sure";
@@ -175,7 +170,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
       let recordingNote = prepared.metadata.recordingNote;
       const clip = await stopNative()?.catch((e: unknown) => { recordingNote = `Native recording failed: ${String(e)}`; return undefined; });
       const end = reconciledEnd(kane.end, kane.steps);
-      const outcome = outcomeOf(end, kane.steps);
+      const outcome = outcomeOf(kane.end, kane.steps);
       try { writeFileSync(join(dir, "metadata.json"), JSON.stringify({ ...prepared.metadata, recordingNote })); }
       catch (e) { logRecordingFailure("recording metadata", e); }
       const error = kane.timedOut
@@ -247,7 +242,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     }
     const verdict = reconciledEnd(kane.end, kane.steps);
     const contradiction = verdict?.status === "passed" ? textContradiction(expected, assertedText) : undefined;
-    const outcome = recorder.unexpectedPage ? "error" : contradiction ? "unsure" : outcomeOf(verdict, kane.steps);
+    const outcome = recorder.unexpectedPage ? "error" : contradiction ? "unsure" : outcomeOf(kane.end, kane.steps);
     // Kane left without a verdict: all it said goes to the log, where the cause can be read later.
     if (!kane.end) log(`Kane exited with code ${kane.exitCode} and no verdict${kane.timedOut ? " (cut off by Proofed's time limit)" : ""}. Its stderr:\n${kane.stderr.trim() || "(empty)"}`);
     // Kane's reason for such a pass is "Objective completed"; the report, the run file and the fixer show ours.

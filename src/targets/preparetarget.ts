@@ -4,6 +4,7 @@ import { appendFileSync, closeSync, constants, mkdirSync, mkdtempSync, openSync,
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { adopt } from "../children.ts";
+import { log } from "../log.ts";
 import { launchChrome } from "./chrome.ts";
 import { cdpOccupied, command, isAppBundle, kaneTarget, localDevice, renderer, targetChecks } from "./targetchecks.ts";
 import { startRecorder } from "./recorder.ts";
@@ -114,8 +115,12 @@ async function nativeRecorder(target: Extract<Target, { kind: "ios" | "android" 
             await command("adb", remove);
             throw error;
           }
-          await required("adb", remove);
           segments.push(file);
+          const removed = await command("adb", remove);
+          if (!removed.ok) {
+            try { log(`Could not remove Android recording ${remote}: ${removed.text}`); }
+            catch { /* A log write failure should not discard the local segment. */ }
+          }
         }).catch((cause: unknown) => { transferError ??= { cause }; });
       }
     } finally {

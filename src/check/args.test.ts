@@ -47,6 +47,8 @@ test("a typo gets the closest command or flag, in one line", () => {
 test("values and combinations that can't work are refused", () => {
   assert.match(usage(["check", "--url"]), /^--url needs a value, e\.g\. --url http:\/\/localhost:5173$/);
   assert.match(usage(["check", "--url", "--json"]), /--url needs a value/);
+  assert.match(usage(["check", "--target="]), /--target needs a value/);
+  assert.match(usage(["check", "--execution="]), /--execution needs a value/);
   assert.match(usage(["check", "--concurrency", "0"]), /whole number/);
   assert.match(usage(["check", "--all", "--only", "a"]), /either --only or --all/);
   assert.match(usage(["check", "words", "--all"]), /Text runs on its own/);

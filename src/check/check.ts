@@ -371,7 +371,12 @@ export async function check(flags: Flags, text: string | undefined, io: Io, view
       finished.set(e.id, e.result);
       const key = keys.get(e.id);
       if (e.result.end?.credits_consumed !== undefined) cache.last[historyKey(selected.find((s) => s.id === e.id)!, kaneVersion)] = { credits: creditsOf(e.result) };
-      if (!key) { writeCache(cacheFile, cache); return; }
+      if (!key) {
+        // A forced failure invalidates the saved pass even when the version probe could not key it.
+        if (flags.noCache && kaneVersion === "unknown" && e.result.scenario.file && e.result.outcome !== "passed") delete cache.passes[e.id];
+        writeCache(cacheFile, cache);
+        return;
+      }
       if (e.result.outcome === "passed" && cacheable && (!flags.noCache || cache.passes[e.id]?.key === key)) {
         const clip = e.result.clip && { ...(e.result.clip.mp4 && { mp4: resolve(e.result.clip.mp4) }), jpg: resolve(e.result.clip.jpg) };
         cache.passes[e.id] = { key, passedAt: new Date().toISOString(), seconds: e.result.seconds, ...(clip && { clip }) } satisfies CachedPass;

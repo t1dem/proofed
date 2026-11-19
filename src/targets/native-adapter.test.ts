@@ -16,6 +16,7 @@ const nativeCases = {
   "android-during-pull": "Android finalizes the clip when stopped during a completed segment's pull",
   "android-pending-pid": "Android signals a new segment when its PID arrives after stop",
   "android-failed-pull": "Android cleans up a failed transfer and reports the pull error",
+  "android-failed-remove": "Android encodes a pulled segment even when remote removal fails",
 };
 for (const [mode, title] of Object.entries(nativeCases)) test(title, { skip: process.platform !== "darwin" || process.arch !== "arm64" ? "Kane local mobile requires an Apple Silicon Mac" : false }, async () => {
   const kind = mode === "ios" ? "ios" : "android";
@@ -67,8 +68,8 @@ else if(a.includes('pull')) {
 }
 else if(a.includes('rm')) {
   const index = /-(\\d+)\\.mp4/.exec(a.at(-1))[1];
-  fs.unlinkSync(${JSON.stringify(join(dir, "remote-"))}+index+'.mp4');
-  if (${mode === "android-failed-pull"}) { console.error('rm failed'); process.exitCode=1; }
+  if (!${mode === "android-failed-remove"}) fs.unlinkSync(${JSON.stringify(join(dir, "remote-"))}+index+'.mp4');
+  if (${mode === "android-failed-pull" || mode === "android-failed-remove"}) { console.error('rm failed'); process.exitCode=1; }
 }`);
     tool("ffmpeg", `if (a[0] === '-hide_banner') {
   console.error('  Duration: 00:00:${kind === "android" ? "05.80" : "03.00"}, start: 0.000000');
@@ -111,6 +112,11 @@ else if(a.includes('rm')) {
     assert.equal(result.outcome, "passed", result.error ?? "unexpected result");
     assert.ok(result.clip?.mp4, result.recordingNote ?? "missing native recording");
     for (const file of [result.clip.mp4, result.clip.jpg, result.clip.gif]) assert.ok(file && existsSync(file));
+    if (mode === "android-failed-remove") {
+      assert.ok(existsSync(remote));
+      assert.match(readFileSync(join(dirname(result.clip.mp4), "segments.txt"), "utf8"), /native-0\.mp4'/);
+      return;
+    }
     assert.ok(!existsSync(join(dirname(result.clip.mp4), "clip-untrimmed.mp4")));
     const firstInstall = readFileSync(log, "utf8").split("\n").find((l) => l.startsWith("installed "));
     if (kind === "ios") writeFileSync(join(app, "Info.plist"), "rebuilt fixture"); else writeFileSync(app, "rebuilt apk");

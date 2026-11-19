@@ -144,7 +144,8 @@ function parseFlags(command: Command, args: string[]) {
           : `Unknown flag ${t.rawName} for proofed ${command}. Did you mean: ${closest(t.rawName, known)}?`,
       );
     }
-    if (type === "string" && (t.value === undefined || (t.inlineValue !== true && t.value.startsWith("--")))) {
+    const needsNonblank = t.name === "target" || t.name === "execution";
+    if (type === "string" && (t.value === undefined || (needsNonblank && !t.value.trim()) || (t.inlineValue !== true && t.value.startsWith("--")))) {
       throw new UsageError(`${t.rawName} needs a value, e.g. ${t.rawName} ${EXAMPLES[t.name] ?? "<value>"}`);
     }
     if (type === "boolean" && t.inlineValue) throw new UsageError(`${t.rawName} takes no value.`);

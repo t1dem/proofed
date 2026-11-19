@@ -58,6 +58,7 @@ test("a pass counts only when Kane asserted something on the page", () => {
   assert.equal(outcomeOf(pass, looked), "unsure");
   const asserted = [...looked, step("analyze: the page shows no error message"), step("assert: the main heading is visible and the page shows no error message")];
   assert.equal(outcomeOf(pass, asserted), "passed");
+  assert.equal(outcomeOf({ ...pass, reason: 'The message "Your account has been closed" is visible' }, asserted), "passed");
   assert.equal(outcomeOf({ ...pass, status: "failed", verdict: { family: "application_issue" } }, looked), "failed");
   assert.equal(outcomeOf({ ...pass, status: "failed", verdict: { family: "automation_bug" } }, looked), "unsure");
 });
@@ -88,6 +89,17 @@ test("a passing end cannot hide a failed assertion from another step", () => {
   const assertion = (step: number, status: "done" | "failed") => ({ step, status, remark: "assert: total is correct", ts: "" });
   assert.equal(outcomeOf(pass, [assertion(1, "done"), assertion(2, "failed")]), "failed");
   assert.equal(outcomeOf(pass, [assertion(1, "failed"), assertion(1, "done")]), "passed");
+});
+
+test("a successful retry leaves a later automation failure unsure", () => {
+  const steps = [
+    step("assert: total is correct", "failed"),
+    step("assert: total is correct"),
+    { ...step("click: Continue", "failed"), step: 1 },
+  ];
+  const end = { ...pass, status: "failed", verdict: { family: "automation_bug" } };
+  assert.equal(outcomeOf(end, steps), "unsure");
+  assert.equal(outcomeOf({ ...end, reason: "TargetClosedError" }, steps), "error");
 });
 
 test("an interrupted Kane verdict is an error even without an infrastructure message", () => {

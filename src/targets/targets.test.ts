@@ -75,7 +75,9 @@ test("fake device tools select one booted device; doctor only discovers and reje
     executable(dir, "xcodebuild", record + "console.log('Xcode 26');");
     // Real kane-cli prints notices with "not installed" around its check lines.
     const bin = executable(dir, "kane", record + "console.log('Skill update available: not installed → 0.1.4\\nAndroid toolchain\\n ✓ adb — platform-tools');");
-    executable(dir, "adb", record + `const a=process.argv.slice(2); console.log(a[0]==='devices'?'List of devices attached\\nemulator-5554\\tdevice':a.includes('name')?'Pixel\\r\\nOK\\r':a.includes('ro.build.version.release')?'15':'sdk_gphone64_arm64');`);
+    executable(dir, "adb", record + `const a=process.argv.slice(2);
+console.log(a[0]==='devices'?'List of devices attached\\r\\nemulator-5554\\tdevice\\r\\nPHONE\\tdevice':a.includes('name')?'Pixel_API_35\\r\\nOK\\r':a.includes('ro.build.version.release')?'15':'Pixel');
+console.error('adb warning');`);
     const env = { ...process.env, PATH: `${dir}${delimiter}${process.env.PATH}`, KANE_CLI: bin };
     const ios = resolveScenarioTarget({ target: "ios", app: "bad.ipa", device: "iPhone 17", os_version: "26.4" }, {}, {}, dir);
     assert.ok(ios.kind === "ios");
@@ -89,9 +91,10 @@ test("fake device tools select one booted device; doctor only discovers and reje
     const android = resolveScenarioTarget({ target: "android", device: "Pixel", os_version: "15" }, {}, {}, dir);
     assert.ok(android.kind === "android");
     assert.equal(await localDevice(android, env), "emulator-5554");
+    assert.equal(await localDevice({ ...android, device: "Pixel_API_35" }, env), "emulator-5554");
     const androidChecks = await targetChecks(android, { env, platform: "darwin", arch: "arm64" });
     assert.equal(androidChecks.find((c) => c.name === "Kane managed mobile dependencies")?.status, "ok");
-    assert.doesNotMatch(readFileSync(log, "utf8"), /install|boot|download|recordVideo|screenrecord/);
+    assert.doesNotMatch(readFileSync(log, "utf8"), /install|boot|download|recordVideo|screenrecord|PHONE/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -137,8 +140,9 @@ test("the recorder checks desktop listener injection and can read or capture a w
   const dir = temp();
   const methods: { method: string; params: Record<string, unknown> }[] = [];
   const upgraded = new Set<Duplex>();
-  let mode: "desktop" | "exception" | "web" = "desktop";
+  let mode: "desktop" | "exception" | "web" | "silent" = "desktop";
   let addPopup = false;
+  const popupReady = Promise.withResolvers<void>();
   let href = "about:blank";
   const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
   let screenshots = 0;
@@ -179,7 +183,8 @@ test("the recorder checks desktop listener injection and can read or capture a w
         }
         if (m.method === "Runtime.evaluate" && mode === "web") {
           if (String(m.params.expression).includes("devicePixelRatio")) {
-            send({ id: m.id, result: { result: { value: { href, visible: true, width: 1280, height: 720, scale: 1.5 } } } });
+            if (m.sessionId === "popup") send({ id: m.id, error: { message: "Popup detached" } });
+            else send({ id: m.id, result: { result: { value: { href, visible: true, width: screenshots ? 1280 : 800, height: 720, scale: 1.5 } } } });
             continue;
           }
           if (addPopup) popup();
@@ -187,6 +192,7 @@ test("the recorder checks desktop listener injection and can read or capture a w
           continue;
         }
         if (m.method === "Page.startScreencast") {
+          if (m.sessionId === "popup") popupReady.resolve();
           if (mode === "desktop") send({
             method: "Page.screencastFrame", sessionId: m.sessionId,
             params: { data: jpeg.toString("base64"), sessionId: 1, metadata: { timestamp: 1, deviceWidth: 1280, deviceHeight: 720 } },
@@ -198,8 +204,12 @@ test("the recorder checks desktop listener injection and can read or capture a w
             : { id: m.id, result: { data: jpeg.toString("base64") } });
           continue;
         }
-        send({ id: m.id, result: {} });
+        if (mode !== "silent" || m.method !== "Target.setDiscoverTargets") send({ id: m.id, result: {} });
         if (m.method === "Target.setDiscoverTargets") {
+          if (mode === "silent") {
+            const fallback = setTimeout(() => socket.destroy(), 7000);
+            socket.once("close", () => clearTimeout(fallback));
+          }
           send({ method: "Target.targetCreated", params: { targetInfo: page("workbench") } });
           if (mode === "desktop") popup();
         }
@@ -242,8 +252,13 @@ test("the recorder checks desktop listener injection and can read or capture a w
     assert.deepEqual(await web.visibleText(), { session: "workbench", document: 1, href, text: "Counter" });
     addPopup = true;
     assert.equal(await web.visibleText(), undefined);
+    await popupReady.promise;
+    assert.deepEqual((await web.captureFrame())?.width, 1920);
     web.stop();
     await assert.rejects(web.captureFrame(), /CDP connection closed/);
+
+    mode = "silent";
+    await assert.rejects(startRecorder(endpoint, dir, undefined, 1000), /Timed out discovering Chrome targets/);
   } finally {
     for (const socket of upgraded) socket.destroy();
     server.closeAllConnections();

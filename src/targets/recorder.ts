@@ -113,7 +113,7 @@ export const samePage = (a: Page, b: Page) =>
 // Kane doesn't record video, so we attach to the same Chrome over CDP and keep every
 // screencast frame with its timestamp. Frames are only sent when the page repaints,
 // which is why the clip later replays them with their real durations.
-export async function startRecorder(endpoint: string, outDir: string, targetId?: string) {
+export async function startRecorder(endpoint: string, outDir: string, targetId?: string, discoveryTimeoutMs = 30_000) {
   mkdirSync(outDir, { recursive: true });
   const cdp = await connectCdp(endpoint, targetId ? AbortSignal.timeout(5000) : undefined);
   const frames: Frame[] = [];
@@ -282,29 +282,41 @@ export async function startRecorder(endpoint: string, outDir: string, targetId?:
     // A static page may still be visible when Chrome has sent no usable screencast frame.
     async captureFrame(): Promise<Frame | undefined> {
       const sessions = [...openPages.values()].filter((session) => session !== undefined).reverse();
-      for (const session of sessions) {
+      const capture = async (session: string) => {
         const { result } = await cdp.send<{ result: { value?: { href: string; visible: boolean; width: number; height: number; scale: number } } }>(
           "Runtime.evaluate",
           { expression: "({ href: location.href, visible: document.visibilityState === 'visible', width: innerWidth, height: innerHeight, scale: devicePixelRatio })", returnByValue: true },
           session,
         );
         const page = result.value;
-        if (!page || page.href === "about:blank" || (!page.visible && sessions.length > 1)) continue;
-        const capture = () => cdp.send<{ data: string }>("Page.captureScreenshot", { format: "jpeg", quality: 80 }, session);
-        const { data } = await capture().catch(async (error: unknown) => {
-          if (!(error instanceof Error) || error.message !== "Unable to capture screenshot") throw error;
-          // Give Chrome a chance to present a surface after navigation.
-          await cdp.send("Page.bringToFront", {}, session);
-          await delay(250);
-          return capture();
-        });
-        const time = Date.now() / 1000;
-        const jpeg = Buffer.from(data, "base64");
-        const file = join(outDir, "fallback.jpg");
-        writeFileSync(file, jpeg);
-        const { width, height, scale } = page;
-        return { file, time, scale, width: Math.round(width * scale), height: Math.round(height * scale), bytes: jpeg.length };
+        if (!page || page.href === "about:blank" || (!page.visible && sessions.length > 1)) return;
+        const { data } = await cdp.send<{ data: string }>("Page.captureScreenshot", { format: "jpeg", quality: 80 }, session);
+        return { ...page, data };
+      };
+      let lastError: { cause: unknown } | undefined;
+      for (const session of sessions) {
+        try {
+          const shot = await capture(session).catch(async (error: unknown) => {
+            if (!(error instanceof Error) || error.message !== "Unable to capture screenshot") throw error;
+            // Give Chrome a chance to present a surface, then read the viewport again.
+            await cdp.send("Page.bringToFront", {}, session);
+            await delay(250);
+            const retry = await capture(session);
+            if (!retry) throw error;
+            return retry;
+          });
+          if (!shot) continue;
+          const { data, width, height, scale } = shot;
+          const time = Date.now() / 1000;
+          const jpeg = Buffer.from(data, "base64");
+          const file = join(outDir, "fallback.jpg");
+          writeFileSync(file, jpeg);
+          return { file, time, scale, width: Math.round(width * scale), height: Math.round(height * scale), bytes: jpeg.length };
+        } catch (cause) {
+          lastError = { cause };
+        }
       }
+      if (lastError) throw lastError.cause;
     },
     stop() {
       cdp.close();
@@ -314,6 +326,10 @@ export async function startRecorder(endpoint: string, outDir: string, targetId?:
 
   // Don't let Kane navigate before the listener is installed on the starting tab.
   const timer = setTimeout(() => ready.resolve(), 5000);
+  // A silent Chrome must not hang the run; a busy CI runner can take well over 5 s to answer.
+  const discoveryTimeout = Promise.withResolvers<never>();
+  const discoveryTimer = setTimeout(() => discoveryTimeout.reject(new Error("Timed out discovering Chrome targets")), discoveryTimeoutMs);
+  discoveryTimeout.promise.catch(() => {}); // Only the web path awaits it.
   try {
     const discovery = cdp.send("Target.setDiscoverTargets", { discover: true });
     if (targetId) {
@@ -321,13 +337,14 @@ export async function startRecorder(endpoint: string, outDir: string, targetId?:
       void discovery.catch(() => {});
       await ready.promise;
     } else {
-      await Promise.all([discovery, ready.promise]);
+      await Promise.all([Promise.race([discovery, discoveryTimeout.promise]), ready.promise]);
     }
   } catch (error) {
     cdp.close();
     throw error;
   } finally {
     clearTimeout(timer);
+    clearTimeout(discoveryTimer);
   }
   return recorder;
 }

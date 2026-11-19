@@ -56,18 +56,23 @@ test("flags win over the environment, the config file and the workflow, each val
   const cwd = mkdtempSync(join(tmpdir(), "proofed-target-"));
   try {
     mkdirSync(join(cwd, ".github/workflows"), { recursive: true });
-    writeFileSync(join(cwd, ".github/workflows/proofed.yml"), DEMO);
+    writeFileSync(join(cwd, ".github/workflows/proofed.yml"), DEMO + "          working-directory: site\n");
     const fromWorkflow = resolveTarget({ flags: {}, env: {}, cwd });
     assert.deepEqual(fromWorkflow.url, { value: "http://localhost:4173", from: ".github/workflows/proofed.yml" });
     assert.equal(fromWorkflow.serve?.value, "pnpm preview --port 4173");
     assert.equal(fromWorkflow.build?.value, "pnpm build");
     assert.deepEqual(fromWorkflow.install, { value: "pnpm install --frozen-lockfile", from: ".github/workflows/proofed.yml" });
+    assert.equal(fromWorkflow.dir, join(cwd, "site"));
+    assert.equal(resolveTarget({ flags: { serve: "node server.js" }, env: {}, cwd }).dir, cwd);
+    assert.equal(resolveTarget({ flags: {}, env: { PROOFED_SERVE: "node server.js" }, cwd }).dir, cwd);
+    assert.equal(resolveTarget({ flags: { serve: "node server.js" }, env: { PROOFED_DIR: "override" }, cwd }).dir, join(cwd, "override"));
 
     mkdirSync(join(cwd, ".proofed"));
     writeFileSync(join(cwd, ".proofed/config.json"), JSON.stringify({ url: "http://localhost:5173", serve: "npm run dev" }));
     const fromConfig = resolveTarget({ flags: {}, env: { PROOFED_URL: "http://127.0.0.1:9000" }, cwd });
     assert.deepEqual(fromConfig.url, { value: "http://127.0.0.1:9000", from: "PROOFED_URL" });
     assert.deepEqual(fromConfig.serve, { value: "npm run dev", from: ".proofed/config.json" });
+    assert.equal(fromConfig.dir, cwd);
     // The workflow's build is for the workflow's serve, not for the config file's.
     assert.equal(fromConfig.build, undefined);
     assert.equal(fromConfig.install, undefined);

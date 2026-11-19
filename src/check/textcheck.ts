@@ -8,6 +8,8 @@ export type Expected = { check: string; literals: string[]; quoted: boolean; lit
 const NEGATION = /\b(?:not|no|never|none|nothing|without|longer|cannot|neither|nor|hidden|gone|absent|missing|empty|removed|disappears?|disappeared)\b|n['’]t\b/i;
 const QUOTED = /"([^"]+)"|“([^”]+)”|(?<![\p{L}\p{N}])'([^']+)'(?![\p{L}\p{N}])|‘([^’]+)’(?![\p{L}\p{N}])/gu;
 const TRANSITION_SOURCE = /\b(?:chang(?:e[sd]?|ing)|go(?:es|ing)?|went|switch(?:es|ed|ing)?|transition(?:s|ed|ing)?|mov(?:e[sd]?|ing)|updat(?:e[sd]?|ing))\s+from\s+(?:either\s+)?\u0000\d+\u0000(?:\s+or\s+\u0000\d+\u0000)*(?=\s+to\s+)/gi;
+// A comma-separated list ending in "or" is one group of alternatives.
+const ALTERNATIVE_LIST = /\u0000\d+\u0000(?:\s*,\s*\u0000\d+\u0000)+\s*,?\s*or\s+\u0000\d+\u0000/gi;
 // "list" alone is left out: in "Todo list contains Buy milk" it is a noun.
 const VERB = /(?<=\s)(?:contains?|shows?|lists|includes?)(?=\s)/gi;
 // Words of a description rather than of a label: "the cart", "Buy milk in the list", "now Free".
@@ -32,14 +34,14 @@ export function expectedText(objective: string): Expected {
   const check = restore(sentence);
   const body = /^(?:Check|Assert|Verify|Confirm|Ensure)(?: that)?\s+(.+?)\.?$/i.exec(sentence)?.[1];
   if (!body || NEGATION.test(body)) return { check, literals: [], quoted: false };
-  const finalState = body.replace(TRANSITION_SOURCE, "");
+  const finalState = body.replace(TRANSITION_SOURCE, "").replace(ALTERNATIVE_LIST, (list) => list.replace(/,\s*(?:or\s+)?/gi, " or "));
   const literalGroups: string[][] = [];
   let previousEnd = 0;
   for (const match of finalState.matchAll(/\u0000(\d+)\u0000/g)) {
     const literal = quotes[Number(match[1])]!.trim().replace(/[.,]+$/, "");
     const previous = literalGroups.at(-1);
     if (literal) {
-      if (previous && /^\s+or\s+$/i.test(finalState.slice(previousEnd, match.index))) previous.push(literal);
+      if (previous && /^\s*(?:,\s*)?or\s+$/i.test(finalState.slice(previousEnd, match.index))) previous.push(literal);
       else literalGroups.push([literal]);
     }
     previousEnd = literal ? match.index + match[0].length : 0;
@@ -70,18 +72,32 @@ export function textContradiction(expected: Expected, text: string | string[] | 
 export type TextSnapshot = { session: string; document: number; href: string; text: string };
 
 // Read the page when Kane starts an assert and when it reports it done. A literal is missing only
-// if it is absent from both reads of the same page. The last assert naming every literal
-// decides. If Kane paraphrased or translated them, the last assert decides.
+// if it is absent from both reads of the same page. After the last action, prefer an assert that
+// names the expected text. If Kane paraphrased or translated it, use its last completed assert.
 export function assertSnapshots(expected: Expected, read: () => Promise<TextSnapshot | undefined>) {
   let chosen: { step: number; names: boolean; reads: Promise<TextSnapshot | undefined>[] } | undefined;
+  let announced: number | undefined;
   return {
     step(s: Step) {
-      if (!expected.literals.length || !/^assert:/i.test(s.remark)) return;
+      if (!expected.literals.length) return;
+      if (!/^assert:/i.test(s.remark)) {
+        // Retain evidence across read-only analysis. An action or wait can change the page.
+        if (!/^analyze:/i.test(s.remark)) {
+          chosen = undefined;
+          announced = undefined;
+        }
+        return;
+      }
       if (s.status === "running") {
+        announced = s.step;
         const remark = squash(s.remark);
         const names = expected.literals.every((literal) => remark.includes(squash(literal)));
-        if (names || !chosen?.names) chosen = { step: s.step, names, reads: [read()] };
-      } else if (chosen?.step === s.step && chosen.reads.length === 1) chosen.reads.push(read());
+        if (names || !chosen?.names || chosen.step === s.step) chosen = { step: s.step, names, reads: [read()] };
+      } else if (announced !== s.step || (chosen?.step === s.step && s.status === "failed")) {
+        chosen = undefined;
+      } else if (chosen?.step === s.step && chosen.reads.length === 1) {
+        chosen.reads.push(read());
+      }
     },
     async text() {
       const [start, end] = await Promise.all(chosen?.reads ?? []);

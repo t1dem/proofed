@@ -79,6 +79,10 @@ test("a disjunction needs one alternative and every surrounding conjunct", () =>
   assert.equal(textContradiction(expected, "Order total Paid"), undefined);
   assert.match(textContradiction(expected, "Order total Cancelled")!, /no "Paid" or "Pending"/);
   assert.match(textContradiction(expected, "Pending")!, /no "Order total"/);
+  const list = expectedText('Check that the receipt says "Order total" and the status shows "Paid", "Pending", or "Reviewing".');
+  assert.equal(textContradiction(list, "Order total Reviewing"), undefined);
+  assert.match(textContradiction(list, "Pending")!, /no "Order total"/);
+  assert.match(textContradiction(list, "Order total Cancelled")!, /no "Paid" or "Pending" or "Reviewing"/);
 });
 
 test("only the destination of a transition is expected in the final state", () => {
@@ -112,6 +116,10 @@ test("the page is read at the start and end of the assert that decides", async (
   assert.deepEqual(await run(final.slice(0, 1), ["A"]), { text: undefined, reads: 1 });
   // A later assert that doesn't name the literals doesn't replace one that does.
   assert.deepEqual(await run([...final, step(2, "running", "assert: the page is French"), step(2, "done", "assert: the page is French")], ["A", "B"]), { text: ["A", "B"], reads: 2 });
+  const action = [step(2, "running", "click: Submit"), step(2, "done", "click: Submit")];
+  const confirmation = [step(3, "running", "assert: the confirmation is visible"), step(3, "done", "assert: the confirmation is visible")];
+  assert.deepEqual(await run([...final, ...action, ...confirmation], ["A", "B", "C", "D"]), { text: ["C", "D"], reads: 4 });
+  assert.deepEqual(await run([...final, ...action, confirmation[1]!], ["A", "B"]), { text: undefined, reads: 2 });
   // Kane translated the check: the last assert decides.
   const translated = [step(1, "running", "assert: Your favorite tools contains Token generator"), step(1, "done", "assert: x"), step(2, "running", "assert: favorites contain the token generator"), step(2, "done", "assert: x")];
   assert.deepEqual(await run(translated, ["A", "B", "C", "D"]), { text: ["C", "D"], reads: 4 });
