@@ -20,6 +20,14 @@ const REJECTED = /\b40[13]\b|\bauthentication failed\b|\bcredentials not valid\b
 export const kaneCredentials = (env: NodeJS.ProcessEnv) =>
   env.LT_USERNAME?.trim() && env.LT_ACCESS_KEY?.trim() ? ["--username", env.LT_USERNAME.trim(), "--access-key", env.LT_ACCESS_KEY.trim()] : [];
 
+export function kaneSecretValues(env: NodeJS.ProcessEnv) {
+  const secrets = secretValues(env);
+  const key = env.LT_ACCESS_KEY?.trim();
+  if (!key || key === env.LT_ACCESS_KEY) return secrets;
+  // Kane can echo the trimmed key passed on its command line.
+  return [...new Set([...secrets, ...secretValues({ LT_ACCESS_KEY: key })])].sort((a, b) => b.length - a.length);
+}
+
 export type Login = {
   state: "signed_in" | "keys" | "not_signed_in" | "keys_rejected" | "unknown";
   detail: string;
@@ -45,6 +53,7 @@ const reasonIn = (output: string) =>
 // or fails for another reason (no network) says nothing either way, and the check goes on.
 export function kaneLogin(bin: string, env: NodeJS.ProcessEnv, timeout = 20_000): Promise<Login> {
   const creds = kaneCredentials(env);
+  const secrets = kaneSecretValues(env);
   return new Promise((resolve) => {
     try {
       const cmd = executableCommand(bin, ["balance", ...creds], env);
@@ -54,7 +63,6 @@ export function kaneLogin(bin: string, env: NodeJS.ProcessEnv, timeout = 20_000)
           return resolve(creds.length ? { state: "keys", detail: "LT_USERNAME and LT_ACCESS_KEY work; Kane uses them", balance: output } : { state: "signed_in", detail: "signed in", balance: output });
         }
         const e = error as NodeJS.ErrnoException & { killed?: boolean };
-        const secrets = secretValues(env);
         if (e.killed || typeof e.code !== "number") return resolve({ state: "unknown", detail: `kane-cli balance didn't answer${e.killed ? ` within ${timeout / 1000} s` : `: ${maskSecrets(e.message, secrets)}`}` });
         const said = maskSecrets(reasonIn(output), secrets);
         if (REJECTED.test(output) || NOT_SIGNED_IN.test(output)) {
@@ -68,7 +76,7 @@ export function kaneLogin(bin: string, env: NodeJS.ProcessEnv, timeout = 20_000)
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      resolve({ state: "unknown", detail: `kane-cli balance didn't answer: ${maskSecrets(message, secretValues(env))}` });
+      resolve({ state: "unknown", detail: `kane-cli balance didn't answer: ${maskSecrets(message, secrets)}` });
     }
   });
 }

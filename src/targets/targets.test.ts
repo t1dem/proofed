@@ -1,6 +1,6 @@
 import { delimiter } from "node:path";
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { Duplex } from "node:stream";
 import { tmpdir } from "node:os";
@@ -49,14 +49,18 @@ test("fake Kane argv has no native URL; run_end wins over exit and missing run_e
   const old = process.env.KANE_CLI;
   try {
     process.env.KANE_CLI = executable(dir, "kane", `require('node:fs').writeFileSync(${JSON.stringify(join(dir, "argv"))}, JSON.stringify(process.argv.slice(2))); process.stdout.write('notice\\n' + JSON.stringify({step:1,status:'done',remark:'assert: café is visible',ts:new Date().toISOString()}) + '\\n' + JSON.stringify({type:'unknown',v:1}) + '\\n' + JSON.stringify({type:'run_end',status:'passed'}) + '\\n'); process.exitCode=9;`);
+    const cancelled = await runKane({ objective: "assert", kaneArgs: [], signal: AbortSignal.abort() });
+    assert.equal(cancelled.timedOut, false);
+    assert.match(cancelled.stderr, /cancelled/);
+    assert.ok(!existsSync(join(dir, "argv")));
     const result = await runKane({ objective: "assert", kaneArgs: ["--target", "simulator", "--app", "test.zip", "--device-name", "iPhone 17", "--os-version", "26.4"], rawFile: join(dir, "raw") });
     assert.equal(outcomeOf(result.end, result.steps), "passed");
     assert.equal(result.exitCode, 9);
     const args = JSON.parse(readFileSync(join(dir, "argv"), "utf8")) as string[];
     assert.ok(!args.includes("--url") && !args.includes("--cdp-endpoint"));
     assert.match(readFileSync(join(dir, "raw"), "utf8"), /unknown/);
-    process.env.KANE_CLI = executable(dir, "empty", "console.error('fatal: session disappeared');");
-    const missing = await runKane({ objective: "assert", kaneArgs: ["--target", "android"] });
+    process.env.KANE_CLI = executable(dir, "empty", "console.log('notice'); console.error('fatal: session disappeared');");
+    const missing = await runKane({ objective: "assert", kaneArgs: ["--target", "android"], rawFile: join(dir, "absent", "raw") });
     assert.equal(outcomeOf(missing.end, missing.steps), "error");
     assert.match(missing.stderr, /session disappeared/);
   } finally { if (old === undefined) delete process.env.KANE_CLI; else process.env.KANE_CLI = old; rmSync(dir, { recursive: true, force: true }); }
@@ -67,7 +71,7 @@ test("fake device tools select one booted device; doctor only discovers and reje
   try {
     const log = join(dir, "calls");
     const record = `require('node:fs').appendFileSync(${JSON.stringify(log)}, process.argv.slice(2).join(' ')+'\\n');`;
-    executable(dir, "xcrun", record + `console.log(JSON.stringify({devices:{'com.apple.CoreSimulator.SimRuntime.iOS-26-4':[{name:'iPhone 17',udid:'OWNED',state:'Booted'}]}}));`);
+    executable(dir, "xcrun", record + `console.error('simctl warning'); console.log(JSON.stringify({devices:{'com.apple.CoreSimulator.SimRuntime.iOS-26-4':[{name:'iPhone 17',udid:'OWNED',state:'Booted'}]}}));`);
     executable(dir, "xcodebuild", record + "console.log('Xcode 26');");
     // Real kane-cli prints notices with "not installed" around its check lines.
     const bin = executable(dir, "kane", record + "console.log('Skill update available: not installed → 0.1.4\\nAndroid toolchain\\n ✓ adb — platform-tools');");
@@ -179,8 +183,14 @@ test("the recorder checks desktop listener injection and can read or capture a w
             continue;
           }
           if (addPopup) popup();
-          send({ id: m.id, result: { result: { value: m.sessionId === "workbench" ? "Counter" : "Background tab" } } });
+          send({ id: m.id, result: { result: { value: { document: 1, href, text: m.sessionId === "workbench" ? "Counter" : "Background tab" } } } });
           continue;
+        }
+        if (m.method === "Page.startScreencast") {
+          if (mode === "desktop") send({
+            method: "Page.screencastFrame", sessionId: m.sessionId,
+            params: { data: jpeg.toString("base64"), sessionId: 1, metadata: { timestamp: 1, deviceWidth: 1280, deviceHeight: 720 } },
+          });
         }
         if (m.method === "Page.captureScreenshot") {
           send(++screenshots === 1
@@ -204,10 +214,13 @@ test("the recorder checks desktop listener injection and can read or capture a w
   try {
     const addr = server.address(); assert.ok(addr && typeof addr !== "string");
     const endpoint = `http://127.0.0.1:${addr.port}/`;
+    mkdirSync(join(dir, "00000.jpg"));
     const recorder = await startRecorder(endpoint, dir, "workbench");
     assert.ok(methods.some((m) => m.method === "Runtime.evaluate" && String(m.params.expression).includes("pointerdown")));
     assert.deepEqual(methods.filter((m) => m.method === "Target.attachToTarget").map((m) => m.params.targetId), ["workbench"]);
     assert.ok(recorder.unexpectedPage);
+    assert.equal(recorder.frames.length, 0);
+    assert.match(String(recorder.frameWriteError), /00000\.jpg/);
     assert.ok(!methods.some((m) => m.method === "Target.createTarget"));
     recorder.stop();
 
@@ -226,7 +239,7 @@ test("the recorder checks desktop listener injection and can read or capture a w
     assert.ok(methods.some((m) => m.method === "Page.bringToFront"));
     assert.deepEqual([frame.width, frame.height, frame.scale, frame.bytes], [1920, 1080, 1.5, jpeg.length]);
     assert.deepEqual(readFileSync(frame.file), jpeg);
-    assert.equal(await web.visibleText(), "Counter");
+    assert.deepEqual(await web.visibleText(), { session: "workbench", document: 1, href, text: "Counter" });
     addPopup = true;
     assert.equal(await web.visibleText(), undefined);
     web.stop();
@@ -329,8 +342,10 @@ test("a rejected Kane balance check masks the key in its diagnostic", async () =
       console.error("401 key " + process.argv.at(-1) + " was rejected");
       process.exitCode = 1;
     `);
-    const login = await kaneLogin(bin, { ...process.env, LT_USERNAME: "fixture-user", LT_ACCESS_KEY: "fixture-access-key" });
-    assert.equal(login.state, "keys_rejected");
-    assert.match(login.detail, /401 key \*\*\* was rejected/);
+    for (const key of ["fixture-access-key", "  fixture-access-key\n"]) {
+      const login = await kaneLogin(bin, { ...process.env, LT_USERNAME: "fixture-user", LT_ACCESS_KEY: key });
+      assert.equal(login.state, "keys_rejected");
+      assert.match(login.detail, /401 key \*\*\* was rejected/);
+    }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

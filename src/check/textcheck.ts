@@ -7,6 +7,7 @@ export type Expected = { check: string; literals: string[]; quoted: boolean; lit
 
 const NEGATION = /\b(?:not|no|never|none|nothing|without|longer|cannot|neither|nor|hidden|gone|absent|missing|empty|removed|disappears?|disappeared)\b|n['’]t\b/i;
 const QUOTED = /"([^"]+)"|“([^”]+)”|(?<![\p{L}\p{N}])'([^']+)'(?![\p{L}\p{N}])|‘([^’]+)’(?![\p{L}\p{N}])/gu;
+const TRANSITION_SOURCE = /\b(?:chang(?:e[sd]?|ing)|go(?:es|ing)?|went|switch(?:es|ed|ing)?|transition(?:s|ed|ing)?|mov(?:e[sd]?|ing)|updat(?:e[sd]?|ing))\s+from\s+(?:either\s+)?\u0000\d+\u0000(?:\s+or\s+\u0000\d+\u0000)*(?=\s+to\s+)/gi;
 // "list" alone is left out: in "Todo list contains Buy milk" it is a noun.
 const VERB = /(?<=\s)(?:contains?|shows?|lists|includes?)(?=\s)/gi;
 // Words of a description rather than of a label: "the cart", "Buy milk in the list", "now Free".
@@ -31,13 +32,14 @@ export function expectedText(objective: string): Expected {
   const check = restore(sentence);
   const body = /^(?:Check|Assert|Verify|Confirm|Ensure)(?: that)?\s+(.+?)\.?$/i.exec(sentence)?.[1];
   if (!body || NEGATION.test(body)) return { check, literals: [], quoted: false };
+  const finalState = body.replace(TRANSITION_SOURCE, "");
   const literalGroups: string[][] = [];
   let previousEnd = 0;
-  for (const match of body.matchAll(/\u0000(\d+)\u0000/g)) {
+  for (const match of finalState.matchAll(/\u0000(\d+)\u0000/g)) {
     const literal = quotes[Number(match[1])]!.trim().replace(/[.,]+$/, "");
     const previous = literalGroups.at(-1);
     if (literal) {
-      if (previous && /^\s+or\s+$/i.test(body.slice(previousEnd, match.index))) previous.push(literal);
+      if (previous && /^\s+or\s+$/i.test(finalState.slice(previousEnd, match.index))) previous.push(literal);
       else literalGroups.push([literal]);
     }
     previousEnd = literal ? match.index + match[0].length : 0;
@@ -65,12 +67,13 @@ export function textContradiction(expected: Expected, text: string | string[] | 
   return expected.quoted ? reason : `${reason} The words were taken as on-screen text from the unquoted check ${JSON.stringify(expected.check)}; quote the exact text the page should show to say what to compare.`;
 }
 
-// Kane announces an assert, checks, then reports it done. The page is read at both moments and a
-// literal counts as missing only when neither read has it, so text still rendering at the start
-// or replaced right after does not contradict. Of several asserts, the last one naming every
-// literal decides; when none names them (Kane paraphrased or translated), the last assert does.
-export function assertSnapshots(expected: Expected, read: () => Promise<string | undefined>) {
-  let chosen: { step: number; names: boolean; reads: Promise<string | undefined>[] } | undefined;
+export type TextSnapshot = { session: string; document: number; href: string; text: string };
+
+// Read the page when Kane starts an assert and when it reports it done. A literal is missing only
+// if it is absent from both reads of the same page. The last assert naming every literal
+// decides. If Kane paraphrased or translated them, the last assert decides.
+export function assertSnapshots(expected: Expected, read: () => Promise<TextSnapshot | undefined>) {
+  let chosen: { step: number; names: boolean; reads: Promise<TextSnapshot | undefined>[] } | undefined;
   return {
     step(s: Step) {
       if (!expected.literals.length || !/^assert:/i.test(s.remark)) return;
@@ -81,8 +84,10 @@ export function assertSnapshots(expected: Expected, read: () => Promise<string |
       } else if (chosen?.step === s.step && chosen.reads.length === 1) chosen.reads.push(read());
     },
     async text() {
-      const reads = await Promise.all(chosen?.reads ?? []);
-      return reads.length && reads.every((r) => r !== undefined) ? reads : undefined;
+      const [start, end] = await Promise.all(chosen?.reads ?? []);
+      if (start && end && start.session === end.session && start.document === end.document && start.href === end.href) {
+        return [start.text, end.text];
+      }
     },
   };
 }

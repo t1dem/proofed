@@ -29,15 +29,22 @@ export type Cdp = Awaited<ReturnType<typeof connectCdp>>;
 
 export const cdpUrl = (endpoint: string, path: "version" | "list") => new URL(`/json/${path}`, endpoint);
 
-export async function connectCdp(endpoint: string) {
-  const { webSocketDebuggerUrl } = (await (await fetch(cdpUrl(endpoint, "version"))).json()) as {
+export async function connectCdp(endpoint: string, signal?: AbortSignal) {
+  const { webSocketDebuggerUrl } = (await (await fetch(cdpUrl(endpoint, "version"), { signal })).json()) as {
     webSocketDebuggerUrl: string;
   };
+  signal?.throwIfAborted();
   const ws = new WebSocket(webSocketDebuggerUrl);
-  await new Promise<void>((resolve, reject) => {
-    ws.onopen = () => resolve();
-    ws.onerror = () => reject(new Error("Could not connect to Chrome over CDP"));
-  });
+  const opened = Promise.withResolvers<void>();
+  ws.onopen = () => opened.resolve();
+  ws.onerror = () => opened.reject(new Error("Could not connect to Chrome over CDP"));
+  const abort = () => {
+    opened.reject(signal?.reason);
+    ws.close();
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+  try { await opened.promise; }
+  finally { signal?.removeEventListener("abort", abort); }
 
   let lastId = 0;
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();

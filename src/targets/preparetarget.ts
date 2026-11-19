@@ -69,48 +69,59 @@ async function nativeRecorder(target: Extract<Target, { kind: "ios" | "android" 
   let current: ReturnType<typeof owned> | undefined;
   let remotePid: string | undefined;
   let pendingPid: Promise<void> | undefined;
+  let transferred = Promise.resolve();
+  let transferError: { cause: unknown } | undefined;
   const prefix = `proofed-${process.pid}-${Date.now()}`;
   const started = Date.now() / 1000;
   let began = () => {};
   const ready = new Promise<void>((r) => { began = r; });
   const loop = (async () => {
-    do {
-      const file = join(dir, `native-${segments.length}.mp4`);
-      const remote = `/sdcard/${prefix}-${segments.length}.mp4`;
-      current = target.kind === "ios"
-        ? owned("xcrun", ["simctl", "io", id, "recordVideo", file])
-        // One argument: adb joins shell arguments with spaces, so `sh -c <script>` would lose the script's arguments.
-        : owned("adb", ["-s", id, "shell", `screenrecord --time-limit 175 ${remote} & p=$!; echo $p; wait $p`]);
-      remotePid = undefined;
-      if (target.kind === "android") {
-        const pid = Promise.withResolvers<void>();
-        pendingPid = pid.promise;
-        for (let i = 0; i < 50 && !current.done(); i++) {
-          remotePid = /^\d+/m.exec(current.output())?.[0];
-          if (remotePid) break;
-          await new Promise((r) => setTimeout(r, 100));
+    try {
+      for (let index = 0; !stopped; index++) {
+        const file = join(dir, `native-${index}.mp4`);
+        const remote = `/sdcard/${prefix}-${index}.mp4`;
+        current = target.kind === "ios"
+          ? owned("xcrun", ["simctl", "io", id, "recordVideo", file])
+          // One argument: adb joins shell arguments with spaces, so `sh -c <script>` would lose the script's arguments.
+          : owned("adb", ["-s", id, "shell", `screenrecord --time-limit 175 ${remote} & p=$!; echo $p; wait $p`]);
+        remotePid = undefined;
+        if (target.kind === "android") {
+          const pid = Promise.withResolvers<void>();
+          pendingPid = pid.promise;
+          for (let i = 0; i < 50 && !current.done(); i++) {
+            remotePid = /^\d+/m.exec(current.output())?.[0];
+            if (remotePid) break;
+            await new Promise((r) => setTimeout(r, 100));
+          }
+          pendingPid = undefined;
+          pid.resolve();
         }
-        pendingPid = undefined;
-        pid.resolve();
-      }
-      if (target.kind === "android" && !remotePid) { await current.stop(); throw new Error(`screenrecord did not return its PID: ${current.error()}`); }
-      began();
-      await current.exited;
-      remotePid = undefined;
-      await current.stop();
-      if (target.kind === "android") {
-        const remove = ["-s", id, "shell", "rm", remote];
-        try {
-          await required("adb", ["-s", id, "pull", remote, file], recordingTimeout);
-        } catch (error) {
-          await command("adb", remove);
-          throw error;
+        if (target.kind === "android" && !remotePid) { await current.stop(); throw new Error(`screenrecord did not return its PID: ${current.error()}`); }
+        began();
+        await current.exited;
+        remotePid = undefined;
+        await current.stop();
+        if (target.kind === "ios") {
+          segments.push(file);
+          break;
         }
-        await required("adb", remove);
+        // Start the next capture immediately while completed segments transfer in order.
+        transferred = transferred.then(async () => {
+          const remove = ["-s", id, "shell", "rm", remote];
+          try {
+            await required("adb", ["-s", id, "pull", remote, file], recordingTimeout);
+          } catch (error) {
+            await command("adb", remove);
+            throw error;
+          }
+          await required("adb", remove);
+          segments.push(file);
+        }).catch((cause: unknown) => { transferError ??= { cause }; });
       }
-      segments.push(file);
-      if (!stopped && target.kind === "ios") break;
-    } while (!stopped);
+    } finally {
+      await transferred;
+    }
+    if (transferError) throw transferError.cause;
   })();
   // Attach the rejection handler now; stop() reports it after Kane finishes.
   void loop.catch(() => {});
@@ -228,8 +239,6 @@ export async function prepareTarget(target: Target, options: { dir: string; url?
     if (target.kind === "desktop") {
       if (!target.cdp_endpoint || (!target.launch && !target.app && !target.reuse)) throw new Error("Desktop requires cdp_endpoint and launch or app, or explicit --reuse");
       if (target.launch || target.app) {
-        // Refuse to launch over an endpoint belonging to another process.
-        if (await cdpOccupied(target.cdp_endpoint)) throw new Error("CDP endpoint already answers; omit launch and app and pass --reuse");
         const env = { ...process.env };
         // Electron inherits this from some Node hosts and exits as a Node CLI instead of an app.
         delete env.ELECTRON_RUN_AS_NODE;
@@ -244,6 +253,7 @@ export async function prepareTarget(target: Target, options: { dir: string; url?
           const endpoint = new URL(target.cdp_endpoint);
           args.push(`--remote-debugging-port=${endpoint.port || (endpoint.protocol === "https:" ? "443" : "80")}`);
         }
+        if (await cdpOccupied(target.cdp_endpoint)) throw new Error("CDP endpoint already answers; omit launch and app and pass --reuse");
         const app = owned(bin, args, target.dir, env, !!target.launch, options.dir);
         cleanups.push(() => app.stop());
       }

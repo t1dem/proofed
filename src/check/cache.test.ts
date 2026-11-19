@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { cacheKey, estimate, historyKey, readCache, relevantChanges, writeCache } from "./cache.ts";
+import { gitPath } from "../paths.ts";
 import type { Scenario } from "../scenarios.ts";
 
 const scenario = (paths: string[]): Scenario => ({ id: "promo", file: ".proofed/scenarios/promo.md", name: "Promo", paths, url: "/", objective: "Apply welcome10." });
@@ -34,6 +35,18 @@ test("a scenario without paths depends on every changed file", () => {
   const key = cacheKey(s, "http://x/", ["README.md"], (f) => files[f]);
   files["README.md"] = "b";
   assert.notEqual(cacheKey(s, "http://x/", ["README.md"], (f) => files[f]), key);
+});
+
+test("a POSIX filename with a backslash keeps its own cache identity", { skip: process.platform === "win32" }, () => {
+  const nested = "src/config.ts";
+  const flat = gitPath("src\\config.ts");
+  assert.notEqual(flat, nested);
+  assert.deepEqual(relevantChanges(scenario(["src/**"]), [flat, nested]), [nested]);
+  const files = { [flat]: "before", [nested]: "same" };
+  const key = () => cacheKey(scenario(["**/*.ts"]), "http://x/", [flat], (f) => files[f]);
+  const before = key();
+  files[flat] = "after";
+  assert.notEqual(key(), before);
 });
 
 test("the cache file round-trips; without history a web run is estimated at 30 credits and a desktop one is unknown", () => {

@@ -33,7 +33,7 @@ for (const [mode, title] of Object.entries(nativeCases)) test(title, { skip: pro
     process.env.PATH = `${dir}${delimiter}${PATH}`;
     tool("xcodebuild", "console.log('Xcode 26');");
     tool("xcrun", `if(a.includes('recordVideo')) { process.on('SIGINT',()=>{fs.writeFileSync(a.at(-1),'portrait-video');process.exit(0)}); setInterval(()=>{},100); } else console.log(JSON.stringify({devices:{'com.apple.CoreSimulator.SimRuntime.iOS-26-4':[{name:'iPhone 17',udid:'test-'+process.ppid,state:'Booted'}]}}));`);
-    const remote = join(dir, "remote.mp4");
+    const remote = join(dir, "remote-0.mp4");
     const finishSegment = join(dir, "finish-segment");
     const pulling = join(dir, "pulling");
     const finishPull = join(dir, "finish-pull");
@@ -43,28 +43,31 @@ for (const [mode, title] of Object.entries(nativeCases)) test(title, { skip: pro
 else if(a.includes('name') || a.includes('ro.product.model')) console.log('Pixel');
 else if(a.includes('ro.build.version.release')) console.log('15');
 else if(a.some((x)=>x.startsWith('screenrecord '))) {
-  const finish = () => {fs.writeFileSync(${JSON.stringify(remote)},'portrait-video');process.exit(0)};
+  const index = /-(\\d+)\\.mp4/.exec(a.at(-1))[1];
+  const finish = () => {fs.writeFileSync(${JSON.stringify(join(dir, "remote-"))}+index+'.mp4','portrait-video');process.exit(0)};
   process.on('SIGINT', finish);
-  if (${mode === "android-pending-pid"} && a.some(x=>x.includes('-1.mp4'))) {
-    fs.writeFileSync(${JSON.stringify(secondSegment)}, '');
+  if (index === '1') fs.writeFileSync(${JSON.stringify(secondSegment)}, '');
+  if (${mode === "android-pending-pid"} && index === '1') {
     const wait = setInterval(()=>{if(fs.existsSync(${JSON.stringify(announcePid)})) {clearInterval(wait);console.log(process.pid);}}, 20);
     setTimeout(finish, 4000);
   } else {
     console.log(process.pid);
-    setInterval(()=>{if(fs.existsSync(${JSON.stringify(finishSegment)})) finish();}, 20);
+    setInterval(()=>{if(index === '0' && fs.existsSync(${JSON.stringify(finishSegment)})) finish();}, 20);
   }
 }
 else if(a.includes('kill')) process.kill(Number(a.at(-1)),'SIGINT');
 else if(a.includes('pull')) {
-  const copy = () => fs.copyFileSync(${JSON.stringify(remote)},a.at(-1));
-  if (${mode === "android-during-pull"}) {
+  const index = /-(\\d+)\\.mp4/.exec(a.at(-2))[1];
+  const copy = () => fs.copyFileSync(${JSON.stringify(join(dir, "remote-"))}+index+'.mp4',a.at(-1));
+  if (${mode === "android-during-pull"} && index === '0') {
     fs.writeFileSync(${JSON.stringify(pulling)}, '');
     const wait = setInterval(()=>{if(fs.existsSync(${JSON.stringify(finishPull)})) {clearInterval(wait);copy();}}, 20);
   } else if (${mode === "android-failed-pull"}) { console.error('pull failed'); process.exitCode=1; }
   else copy();
 }
 else if(a.includes('rm')) {
-  fs.unlinkSync(${JSON.stringify(remote)});
+  const index = /-(\\d+)\\.mp4/.exec(a.at(-1))[1];
+  fs.unlinkSync(${JSON.stringify(join(dir, "remote-"))}+index+'.mp4');
   if (${mode === "android-failed-pull"}) { console.error('rm failed'); process.exitCode=1; }
 }`);
     tool("ffmpeg", `if (a[0] === '-hide_banner') {
@@ -86,15 +89,16 @@ else if(a.includes('rm')) {
         }
         writeFileSync(finishSegment, "");
         const marker = mode === "android-pending-pid" ? secondSegment : pulling;
-        for (let i = 0; i < 150 && !existsSync(marker); i++) await delay(20);
+        for (let i = 0; i < 150 && (!existsSync(marker) || !existsSync(secondSegment)); i++) await delay(20);
         assert.ok(existsSync(marker));
+        assert.ok(existsSync(secondSegment), "the next segment records while the first pull is blocked");
         const stopped = prepared.native!.stop();
         writeFileSync(finishPull, "");
         writeFileSync(announcePid, "");
         const clip = await stopped;
         assert.ok(clip.mp4 && existsSync(clip.mp4));
-        if (mode === "android-pending-pid") assert.match(readFileSync(log, "utf8"), /shell kill -2/);
-        else assert.doesNotMatch(readFileSync(log, "utf8"), /shell kill/);
+        assert.match(readFileSync(log, "utf8"), /shell kill -2/);
+        assert.match(readFileSync(join(dir, "segments.txt"), "utf8"), /native-0\.mp4'\n.*native-1\.mp4'/);
       } finally {
         writeFileSync(finishPull, "");
         writeFileSync(announcePid, "");

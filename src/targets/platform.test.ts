@@ -3,7 +3,7 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, win32 } from "node:path";
+import { join, relative, win32 } from "node:path";
 import { test } from "node:test";
 import { chromeCandidates } from "./chrome.ts";
 import { creditLockPath } from "../kane/creditmeter.ts";
@@ -67,6 +67,19 @@ test("Node shebang fixtures run through Node on Windows as well as Unix", () => 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("executable lookup returns an absolute path from a relative PATH entry", () => {
+  const dir = temp();
+  try {
+    const file = join(dir, "launcher");
+    writeFileSync(file, "", { mode: 0o755 });
+    writeFileSync(`${file}.cmd`, "");
+    const env = { PATH: relative(process.cwd(), dir) };
+    assert.equal(findOnPath("launcher", env, "linux"), file);
+    // macOS and Windows filesystems ignore case, so the probe for .CMD can match launcher.cmd.
+    assert.equal(findOnPath("launcher", env, "win32")?.toLowerCase(), `${file}.cmd`.toLowerCase());
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("process tree cleanup selects taskkill on Windows and process groups on Unix", () => {
   assert.deepEqual(treeKillCommand(123, "win32"), { file: "taskkill", args: ["/PID", "123", "/T", "/F"] });
   assert.equal(treeKillCommand(123, "darwin"), undefined);
@@ -108,15 +121,16 @@ test("credit lock uses a per-user path", () => {
 });
 
 test("scenario selection and fixer guards compare native paths with git paths", () => {
-  const scenario = parseScenario(".proofed\\scenarios\\cart.md", "---\npaths: [src/**]\n---\nCheck cart");
+  const scenario = parseScenario(join(".proofed", "scenarios", "cart.md"), "---\npaths: [src/**]\n---\nCheck cart");
+  const cart = join("src", "cart.ts");
   assert.equal(scenario.id, "cart");
   assert.equal(scenario.file, ".proofed/scenarios/cart.md");
   assert.equal(touches(scenario, ".proofed/scenarios/cart.md"), true);
-  assert.equal(touches(scenario, "src\\cart.ts"), true);
-  assert.deepEqual(relevantChanges(scenario, ["src\\cart.ts", "docs/readme.md"]), ["src\\cart.ts"]);
-  assert.equal(offLimits("e2e/flows/cart.md", "e2e\\flows\\"), true);
-  assert.equal(offLimits(".github\\workflows\\check.yml", ".proofed/scenarios"), true);
-  assert.equal(offLimits("e2e/flows-old/cart.md", "e2e\\flows"), false);
+  assert.equal(touches(scenario, cart), true);
+  assert.deepEqual(relevantChanges(scenario, [cart, "docs/readme.md"]), [cart]);
+  assert.equal(offLimits("e2e/flows/cart.md", join("e2e", "flows")), true);
+  assert.equal(offLimits(join(".github", "workflows", "check.yml"), ".proofed/scenarios"), true);
+  assert.equal(offLimits("e2e/flows-old/cart.md", join("e2e", "flows")), false);
 });
 
 test("scenario output ids reject Windows device names, streams and trailing dots", () => {

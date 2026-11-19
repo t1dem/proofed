@@ -13,11 +13,11 @@ export async function command(bin: string, args: string[], env = process.env, ti
   try {
     const cmd = executableCommand(bin, args, env);
     const { stdout, stderr } = await exec(cmd.file, cmd.args, { env, windowsHide: true, timeout, maxBuffer: 4 * 1024 * 1024 });
-    return { ok: true, text: `${stdout}\n${stderr}`.trim() };
+    return { ok: true as const, stdout, text: `${stdout}\n${stderr}`.trim() };
   } catch (error) {
     const e = error as { stdout?: string; stderr?: string; message?: string };
     const detail = e.stderr?.trim() ? e.stderr : e.message || "Command failed";
-    return { ok: false, text: `${e.stdout?.trimEnd() ?? ""}\n${detail}`.trim() };
+    return { ok: false as const, text: `${e.stdout?.trimEnd() ?? ""}\n${detail}`.trim() };
   }
 }
 
@@ -41,7 +41,7 @@ export async function localDevice(target: Extract<Target, { kind: "ios" | "andro
   if (target.kind === "ios") {
     const result = await command("xcrun", ["simctl", "list", "devices", "available", "--json"], env);
     if (!result.ok) throw new Error(result.text);
-    const data = JSON.parse(result.text) as { devices: Record<string, { name: string; udid: string; state: string }[]> };
+    const data = JSON.parse(result.stdout) as { devices: Record<string, { name: string; udid: string; state: string }[]> };
     const matches = Object.entries(data.devices).filter(([runtime]) => runtime.endsWith(`iOS-${target.os_version!.replaceAll(".", "-")}`)).flatMap(([, devices]) => devices).filter((d) => d.name === target.device && d.state === "Booted");
     if (matches.length !== 1) throw new Error(`Expected one booted ${target.device} iOS ${target.os_version}, found ${matches.length}`);
     return matches[0]!.udid;

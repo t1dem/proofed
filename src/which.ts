@@ -22,10 +22,10 @@ export function findOnPath(name: string, env: NodeJS.ProcessEnv = process.env, p
   for (const dir of dirs) {
     for (const suffix of suffixes) {
       const file = dir ? join(dir.replace(/^"|"$/g, ""), `${name}${suffix}`) : name + suffix;
-      if (executable(file, platform)) return file;
+      if (executable(file, platform)) return resolve(file);
       // Windows filesystems ignore case; this also lets injected-platform tests run on Unix.
       const lower = file.slice(0, file.length - suffix.length) + suffix.toLowerCase();
-      if (suffix && executable(lower, platform)) return lower;
+      if (suffix && executable(lower, platform)) return resolve(lower);
     }
   }
   return undefined;

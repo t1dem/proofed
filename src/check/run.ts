@@ -143,11 +143,11 @@ export async function runScenario(scenario: Scenario, o: RunOptions): Promise<Sc
 }
 
 async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResult> {
-  const log = (line: string) => logLine(`[${scenario.id}] ${line}`);
-  const logRecordingFailure = (what: string, error: unknown) => {
-    try { log(`${what} failed: ${String(error)}`); }
+  const log = (line: string) => {
+    try { logLine(`[${scenario.id}] ${line}`); }
     catch { /* An unwritable output directory can break both the recording and the log. */ }
   };
+  const logRecordingFailure = (what: string, error: unknown) => log(`${what} failed: ${String(error)}`);
   const name = JSON.stringify(maskSecrets(scenario.id));
   const kaneRun = (options: Parameters<typeof runKane>[0]) => timedAsync(`Kane scenario ${name}`, () => runKane(options));
   const dir = join(o.outDir, scenario.id);
@@ -260,8 +260,15 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     // A step starts when Kane announces it (the "running" event), not when it reports it done.
     const announced = new Map(kane.steps.filter((s) => s.status === "running").map((s) => [s.step, s.ts]));
     const marks = kane.steps.map((s) => Date.parse(announced.get(s.step) ?? s.ts) / 1000);
+    const recordingNote = !frames.length && recorder.frameWriteError
+      ? `Could not write screencast frames (${String(recorder.frameWriteError)})`
+      : undefined;
     const made = await timedAsync(`clip encode ${name}`, async () => {
       const { actions } = recorder.stop();
+      if (recordingNote) {
+        log(recordingNote);
+        return undefined;
+      }
       const film = { frames, actions, focus: focusRect };
       writeFileSync(join(dir, "film.json"), JSON.stringify(film));
       const endpoint = prepared.montage ? await prepared.montage() : prepared.clipEndpoint!;
@@ -279,6 +286,7 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
       steps: kane.steps.map((s, i) => ({ ...s, at: made?.marks[i] })),
       end,
       clip,
+      ...(recordingNote && { recordingNote }),
       ...(outcome === "error" && { error }),
       ...(!kane.end && NOT_SIGNED_IN.test(kane.stderr) && { notSignedIn: true }),
     };

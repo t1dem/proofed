@@ -28,7 +28,7 @@ If the app isn't running, Proofed starts it and stops it at the end. It installs
 
 ## Caching and output
 
-A passed scenario isn't run again until its file, the URL, the web serve/build/install commands, the resolved target, Kane version, the base commit or a changed file in its `paths` changes. Native and desktop checks with a build command always rebuild and run again; an old artifact's pass cannot skip the build. `--dry-run` shows what would run and the credit estimate, for free. In a terminal the scenarios update in place; in a pipe each event is one line, with a "still running" line at least every 30 seconds.
+A passed scenario isn't run again until its file, the URL, the web build/install commands, the resolved target, Kane version, the base commit or a changed file in its `paths` changes. Native and desktop checks with a build command always rebuild and run again; an old artifact's pass cannot skip the build. `--dry-run` shows what would run and the credit estimate, for free. In a terminal the scenarios update in place; in a pipe each event is one line, with a "still running" line at least every 30 seconds.
 
 ## For an agent
 

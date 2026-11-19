@@ -63,9 +63,9 @@ export async function creditMeter(env: NodeJS.ProcessEnv, lock = creditLockPath(
     catch { return false; }
   };
   const before = registered && !contended ? await balance() : undefined;
-  return async () => {
+  return async (measure = true) => {
     try {
-      const after = before === undefined || !attributable() ? undefined : await balance();
+      const after = !measure || before === undefined || !attributable() ? undefined : await balance();
       return before !== undefined && after !== undefined && after <= before && attributable()
         ? { before, after, debit: Math.round((before - after) * 10_000) / 10_000 }
         : undefined;

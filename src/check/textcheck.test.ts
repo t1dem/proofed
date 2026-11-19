@@ -81,34 +81,52 @@ test("a disjunction needs one alternative and every surrounding conjunct", () =>
   assert.match(textContradiction(expected, "Pending")!, /no "Order total"/);
 });
 
+test("only the destination of a transition is expected in the final state", () => {
+  const expected = expectedText('Check that the status changes from "Pending" to "Complete".');
+  assert.deepEqual(expected.literals, ["Complete"]);
+  assert.equal(textContradiction(expected, "Complete"), undefined);
+  assert.match(textContradiction(expected, "Pending")!, /no "Complete"/);
+  assert.deepEqual(literals('Check that the page shows a message from "Alice" to "Bob".'), ["Alice", "Bob"]);
+});
+
 test("the page is read at the start and end of the assert that decides", async () => {
   const expected = expectedText("Check that Vos outils favoris contains Générateur de token.");
   const step = (n: number, status: Step["status"], remark: string): Step => ({ step: n, status, remark, ts: "" });
-  const run = async (steps: Step[], pages: (string | undefined)[]) => {
+  const page = { session: "tab", document: 1, href: "https://shop.test/cart" };
+  const run = async (steps: Step[], pages: (string | undefined)[], replacement?: Partial<typeof page>) => {
     const reads: number[] = [];
-    const snaps = assertSnapshots(expected, async () => pages[reads.push(reads.length) - 1]);
+    const snaps = assertSnapshots(expected, async () => {
+      const i = reads.push(reads.length) - 1;
+      const text = pages[i];
+      if (text !== undefined) return { ...page, ...(i === 1 && replacement), text };
+    });
     for (const s of steps) snaps.step(s);
     return { text: await snaps.text(), reads: reads.length };
   };
   const final = [step(1, "running", "assert: Vos outils favoris contains Générateur de token."), step(1, "done", "assert: Vos outils favoris contains Générateur de token.")];
   assert.deepEqual(await run(final, ["A", "B"]), { text: ["A", "B"], reads: 2 });
   assert.deepEqual(await run(final, ["A", undefined]), { text: undefined, reads: 2 }, "an unreadable page can't contradict");
+  assert.deepEqual(await run(final, ["A", "B"], { session: "replacement" }), { text: undefined, reads: 2 });
+  assert.deepEqual(await run(final, ["A", "B"], { document: 2 }), { text: undefined, reads: 2 });
+  assert.deepEqual(await run(final, ["A", "B"], { href: "https://shop.test/checkout" }), { text: undefined, reads: 2 });
+  assert.deepEqual(await run(final.slice(0, 1), ["A"]), { text: undefined, reads: 1 });
   // A later assert that doesn't name the literals doesn't replace one that does.
   assert.deepEqual(await run([...final, step(2, "running", "assert: the page is French"), step(2, "done", "assert: the page is French")], ["A", "B"]), { text: ["A", "B"], reads: 2 });
   // Kane translated the check: the last assert decides.
   const translated = [step(1, "running", "assert: Your favorite tools contains Token generator"), step(1, "done", "assert: x"), step(2, "running", "assert: favorites contain the token generator"), step(2, "done", "assert: x")];
   assert.deepEqual(await run(translated, ["A", "B", "C", "D"]), { text: ["C", "D"], reads: 4 });
   assert.deepEqual(await run([step(1, "running", "click: the heart"), step(1, "done", "click: the heart")], []), { text: undefined, reads: 0 });
-  const none = assertSnapshots(expectedText("Check that the heading is visible."), async () => "page");
+  const none = assertSnapshots(expectedText("Check that the heading is visible."), async () => ({ ...page, text: "page" }));
   none.step(final[0]!);
   assert.equal(await none.text(), undefined);
 });
 
-test("page text reads controls, labels, generated content and SVG; unreadable content stops a contradiction", async () => {
+test("page text reads controls, labels, generated content and SVG; unreadable content stops a contradiction", async (t) => {
   const { launchChrome } = await import("../targets/chrome.ts");
   const { connectCdp } = await import("../targets/cdp.ts");
   const { VISIBLE_TEXT } = await import("./textcheck.ts");
   const chrome = await launchChrome({ headless: true });
+  t.after(() => chrome.close());
   const cdp = await connectCdp(chrome.endpoint);
   try {
     const { targetInfos } = await cdp.send<{ targetInfos: { type: string; targetId: string }[] }>("Target.getTargets");
@@ -141,7 +159,6 @@ test("page text reads controls, labels, generated content and SVG; unreadable co
     assert.notEqual(await capture('<canvas width="0" height="0"></canvas><canvas style="display:none"></canvas><p>Text</p>'), null, "an invisible canvas holds no text");
   } finally {
     cdp.close();
-    await chrome.close();
   }
 });
 

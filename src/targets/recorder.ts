@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { VISIBLE_TEXT } from "../check/textcheck.ts";
+import { VISIBLE_TEXT, type TextSnapshot } from "../check/textcheck.ts";
 import { connectCdp, type ExceptionDetails, type ScreencastMetadata } from "./cdp.ts";
 import type { LiveCursor } from "../report/livefile.ts";
 
@@ -29,6 +29,12 @@ const BINDING = "__proofedAction";
 // It also says which page the action was on, so the live view only draws a cursor over the same
 // page as it was then.
 const LISTENER = `(() => {
+  // Reusing a renderer can leave the previous recorder's handlers in this document.
+  const key = Symbol.for("proofed.actionListener");
+  globalThis[key]?.abort();
+  const controller = new AbortController();
+  globalThis[key] = controller;
+  const options = { capture: true, signal: controller.signal };
   const report = (kind, x, y, el) => {
     const r = el.getBoundingClientRect();
     const page = ${PAGE};
@@ -43,14 +49,14 @@ const LISTENER = `(() => {
     typingIn = null;
     clicked = { el: e.target, x: e.clientX, y: e.clientY };
     report("click", e.clientX, e.clientY, e.target);
-  }, true);
+  }, options);
   // A click dispatched from script has no pointer events before it: place it on the element.
   addEventListener("click", (e) => {
     if (Date.now() - pointerAt < 500 || !(e.target instanceof Element)) return;
     const r = e.target.getBoundingClientRect();
     clicked = { el: e.target, x: r.x + r.width / 2, y: r.y + r.height / 2 };
     report("click", clicked.x, clicked.y, e.target);
-  }, true);
+  }, options);
   // Typing in the field Kane just clicked stays at the click point, still inside the field unless it
   // scrolled away; its centre would make the cursor jump a few pixels within the same field.
   addEventListener("input", (e) => {
@@ -61,7 +67,7 @@ const LISTENER = `(() => {
       ? clicked
       : { x: r.x + r.width / 2, y: r.y + r.height / 2 };
     report("type", at.x, at.y, e.target);
-  }, true);
+  }, options);
 })();`;
 
 // Finds the smallest visible element that mentions most of the given words, so the end of the
@@ -109,8 +115,9 @@ export const samePage = (a: Page, b: Page) =>
 // which is why the clip later replays them with their real durations.
 export async function startRecorder(endpoint: string, outDir: string, targetId?: string) {
   mkdirSync(outDir, { recursive: true });
-  const cdp = await connectCdp(endpoint);
+  const cdp = await connectCdp(endpoint, targetId ? AbortSignal.timeout(5000) : undefined);
   const frames: Frame[] = [];
+  let frameWriteError: unknown;
   const actions: Action[] = [];
   let lastSession: string | undefined;
   let lastAction: (Action & { page: Page; session: string | undefined }) | undefined;
@@ -171,7 +178,8 @@ export async function startRecorder(endpoint: string, outDir: string, targetId?:
     const jpeg = Buffer.from(data, "base64");
     try {
       writeFileSync(file, jpeg);
-    } catch {
+    } catch (error) {
+      frameWriteError ??= error;
       return;
     } finally {
       void cdp.send("Page.screencastFrameAck", { sessionId: ack }, sessionId).catch(() => {});
@@ -211,7 +219,7 @@ export async function startRecorder(endpoint: string, outDir: string, targetId?:
   };
 
   const recorder = {
-    async visibleText(): Promise<string | undefined> {
+    async visibleText(): Promise<TextSnapshot | undefined> {
       // Kane doesn't report which tab it checked, so only read when one page is open.
       let sessionId = openPages.values().next().value;
       for (let i = 0; !sessionId && openPages.size < 2 && i < 20; i++) {
@@ -221,12 +229,18 @@ export async function startRecorder(endpoint: string, outDir: string, targetId?:
       if (!sessionId || openPages.size !== 1) return;
       try {
         const busy = new Promise<never>((_, reject) => setTimeout(reject, 5000).unref());
-        const { result } = await Promise.race([cdp.send<{ result: { value?: unknown } }>("Runtime.evaluate", { expression: VISIBLE_TEXT, returnByValue: true }, sessionId), busy]);
-        if (openPages.size === 1 && openPages.values().next().value === sessionId && typeof result.value === "string") return result.value;
+        const expression = `({ document: performance.timeOrigin, href: location.href, text: ${VISIBLE_TEXT} })`;
+        const read = cdp.send<{ result: { value?: Omit<TextSnapshot, "session"> | { text: null } } }>("Runtime.evaluate", { expression, returnByValue: true }, sessionId);
+        const { result } = await Promise.race([read, busy]);
+        const value = result.value;
+        if (openPages.size === 1 && openPages.values().next().value === sessionId && typeof value?.text === "string") {
+          return { session: sessionId, ...value };
+        }
       } catch { return undefined; }
     },
     get unexpectedPage() { return unexpectedPage; },
     set onUnexpectedPage(callback: (() => void) | undefined) { onUnexpectedPage = callback; },
+    get frameWriteError() { return frameWriteError; },
     frames,
     actions,
     // Called on each of Kane's clicks and the first keystroke in a field, with the frame from just
