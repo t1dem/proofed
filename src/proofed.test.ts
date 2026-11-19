@@ -132,7 +132,10 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
       assert.deepEqual(doc.counts, { passed: 1, failed: 1, not_checked: 2, error: 1, skipped: 0 });
       const by = Object.fromEntries(doc.scenarios.map((s) => [s.id, s]));
       assert.equal(by.pass!.outcome, "passed");
-      assert.ok(by.pass!.clip?.mp4 && existsSync(by.pass!.clip.mp4), `a clip of the real page: ${JSON.stringify(by.pass!.clip)}\n${ran.stderr}`);
+      if (!by.pass!.clip?.mp4 || !existsSync(by.pass!.clip.mp4)) {
+        const runLog = join(r.out, "run.log");
+        assert.fail(`Missing clip for pass\n${existsSync(runLog) ? readFileSync(runLog, "utf8") : "run.log is missing"}\n${ran.stderr}`);
+      }
       assert.equal(by.fail!.outcome, "failed");
       assert.equal(by.fail!.diagnosis, "The free shipping threshold is €40, not €50.");
       assert.equal(by.fail!.failedStep, "assert: shipping is €4.90");

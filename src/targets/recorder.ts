@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { VISIBLE_TEXT } from "../check/textcheck.ts";
 import { connectCdp, type ExceptionDetails, type ScreencastMetadata } from "./cdp.ts";
 import type { LiveCursor } from "../report/livefile.ts";
@@ -262,6 +263,33 @@ export async function startRecorder(endpoint: string, outDir: string, targetId?:
         return { jpeg, at, ...(now && samePage(action.page, now) && { cursor: { x: action.x / now.w, y: action.y / now.h } }) };
       } catch {
         return undefined; // The page is navigating or closed; the next one will do.
+      }
+    },
+    // A static page may still be visible when Chrome has sent no usable screencast frame.
+    async captureFrame(): Promise<Frame | undefined> {
+      const sessions = [...openPages.values()].filter((session) => session !== undefined).reverse();
+      for (const session of sessions) {
+        const { result } = await cdp.send<{ result: { value?: { href: string; visible: boolean; width: number; height: number; scale: number } } }>(
+          "Runtime.evaluate",
+          { expression: "({ href: location.href, visible: document.visibilityState === 'visible', width: innerWidth, height: innerHeight, scale: devicePixelRatio })", returnByValue: true },
+          session,
+        );
+        const page = result.value;
+        if (!page || page.href === "about:blank" || (!page.visible && sessions.length > 1)) continue;
+        const capture = () => cdp.send<{ data: string }>("Page.captureScreenshot", { format: "jpeg", quality: 80 }, session);
+        const { data } = await capture().catch(async (error: unknown) => {
+          if (!(error instanceof Error) || error.message !== "Unable to capture screenshot") throw error;
+          // Give Chrome a chance to present a surface after navigation.
+          await cdp.send("Page.bringToFront", {}, session);
+          await delay(250);
+          return capture();
+        });
+        const time = Date.now() / 1000;
+        const jpeg = Buffer.from(data, "base64");
+        const file = join(outDir, "fallback.jpg");
+        writeFileSync(file, jpeg);
+        const { width, height, scale } = page;
+        return { file, time, scale, width: Math.round(width * scale), height: Math.round(height * scale), bytes: jpeg.length };
       }
     },
     stop() {

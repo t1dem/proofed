@@ -61,6 +61,7 @@ export async function connectCdp(endpoint: string) {
 
   return {
     send<T = unknown>(method: string, params: object = {}, sessionId?: string): Promise<T> {
+      if (ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error("CDP connection closed"));
       const id = ++lastId;
       ws.send(JSON.stringify({ id, method, params, ...(sessionId && { sessionId }) }));
       return new Promise<T>((resolve, reject) =>

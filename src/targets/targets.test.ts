@@ -127,7 +127,7 @@ test("cache changes with target, app content, device, OS and Kane version", () =
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("the recorder checks listener injection in desktop and page identity for web text", async () => {
+test("the recorder checks desktop listener injection and can read or capture a web page without screencast frames", async () => {
   const { createHash } = await import("node:crypto");
   const { startRecorder } = await import("./recorder.ts");
   const dir = temp();
@@ -135,6 +135,9 @@ test("the recorder checks listener injection in desktop and page identity for we
   const upgraded = new Set<Duplex>();
   let mode: "desktop" | "exception" | "web" = "desktop";
   let addPopup = false;
+  let href = "about:blank";
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+  let screenshots = 0;
   const server = createServer((req, res) => {
     const addr = server.address(); assert.ok(addr && typeof addr !== "string");
     if (req.url !== "/json/version") { res.writeHead(404).end(); return; }
@@ -171,8 +174,18 @@ test("the recorder checks listener injection in desktop and page identity for we
           continue;
         }
         if (m.method === "Runtime.evaluate" && mode === "web") {
+          if (String(m.params.expression).includes("devicePixelRatio")) {
+            send({ id: m.id, result: { result: { value: { href, visible: true, width: 1280, height: 720, scale: 1.5 } } } });
+            continue;
+          }
           if (addPopup) popup();
           send({ id: m.id, result: { result: { value: m.sessionId === "workbench" ? "Counter" : "Background tab" } } });
+          continue;
+        }
+        if (m.method === "Page.captureScreenshot") {
+          send(++screenshots === 1
+            ? { id: m.id, error: { message: "Unable to capture screenshot" } }
+            : { id: m.id, result: { data: jpeg.toString("base64") } });
           continue;
         }
         send({ id: m.id, result: {} });
@@ -203,10 +216,21 @@ test("the recorder checks listener injection in desktop and page identity for we
 
     mode = "web";
     const web = await startRecorder(endpoint, dir);
+    assert.equal(web.frames.length, 0);
+    assert.equal(await web.captureFrame(), undefined, "skip the initial about:blank page");
+    assert.ok(!methods.some((m) => m.method === "Page.captureScreenshot"));
+    href = "https://shop.test";
+    const frame = await web.captureFrame();
+    assert.ok(frame);
+    assert.equal(screenshots, 2);
+    assert.ok(methods.some((m) => m.method === "Page.bringToFront"));
+    assert.deepEqual([frame.width, frame.height, frame.scale, frame.bytes], [1920, 1080, 1.5, jpeg.length]);
+    assert.deepEqual(readFileSync(frame.file), jpeg);
     assert.equal(await web.visibleText(), "Counter");
     addPopup = true;
     assert.equal(await web.visibleText(), undefined);
     web.stop();
+    await assert.rejects(web.captureFrame(), /CDP connection closed/);
   } finally {
     for (const socket of upgraded) socket.destroy();
     server.closeAllConnections();

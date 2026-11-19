@@ -226,8 +226,25 @@ async function runOnce(scenario: Scenario, o: RunOptions): Promise<ScenarioResul
     const start = Date.parse(kane.steps[0]?.ts ?? "") / 1000 || 0;
     // The page reads and focus locator use the connection that stop() closes.
     const assertedText = await asserted.text();
-    const focusRect = await focus;
+    let focusRect = await focus;
     const frames = target.kind === "web" ? recorder.frames.filter((f) => f.time >= start) : recorder.frames;
+    if (!frames.length && target.kind === "web" && !stopping()) {
+      log(`No frames selected after Kane's first step (${start}); received ${recorder.frames.length} screencast frames, last at ${recorder.frames.at(-1)?.time ?? "n/a"}`);
+      // The live stills are dashboard-only. Take a screenshot before closing the recorder.
+      const capture = Promise.withResolvers<never>();
+      const timeout = setTimeout(() => capture.reject(new Error("Timed out capturing the page")), 10_000).unref();
+      const frame = await Promise.race([recorder.captureFrame(), capture.promise]).catch((e: unknown) => logRecordingFailure("clip screenshot", e));
+      clearTimeout(timeout);
+      if (frame) {
+        frames.push(frame);
+        // The screencast's focus rectangle may be from a different tab.
+        focusRect = undefined;
+      } else {
+        // A screencast frame can arrive while we're waiting for the screenshot.
+        frames.push(...recorder.frames.filter((f) => f.time >= start));
+      }
+      if (!frames.length) log("clip skipped: no usable frame or visible page screenshot");
+    }
     const verdict = reconciledEnd(kane.end, kane.steps);
     const contradiction = verdict?.status === "passed" ? textContradiction(expected, assertedText) : undefined;
     const outcome = recorder.unexpectedPage ? "error" : contradiction ? "unsure" : outcomeOf(verdict, kane.steps);
