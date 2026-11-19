@@ -99,6 +99,9 @@ async function detectCrash(cdp: Cdp, url: string) {
   // `blank` only turns true on a definite answer; an evaluation lost to a navigation counts as unknown.
   let blank = false;
   let rechecking = false;
+  // The recheck also waits for a timer in the page itself. It fires only after every timer the app set before it,
+  // so on a starved machine an app that renders a few seconds after load still gets to render first.
+  let pageWaited = true;
   for (let until = Date.now() + SETTLE; ; await sleep(POLL)) {
     const painted = await page<{ result: { value?: unknown } }>("Runtime.evaluate", { expression: PAINTED, returnByValue: true }).then(
       ({ result }) => result.value,
@@ -106,10 +109,13 @@ async function detectCrash(cdp: Cdp, url: string) {
     );
     if (painted === true) return undefined;
     blank = painted === false;
-    if (Date.now() < until) continue;
+    if (Date.now() < until || !pageWaited) continue;
     if (rechecking || !blank || errors.length === 0) break;
     rechecking = true;
     until = Date.now() + RECHECK;
+    pageWaited = false;
+    const waited = () => (pageWaited = true);
+    void page("Runtime.evaluate", { expression: `new Promise((r) => setTimeout(r, ${RECHECK}))`, awaitPromise: true }).then(waited, waited);
   }
   const error = blank ? errors[0] : undefined;
   return error ? { error, page } : undefined;
