@@ -120,7 +120,9 @@ const alive = async (pid: number) => {
   return true;
 };
 
-describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, timeout: 240_000 }, () => {
+// The limit covers the whole suite: 23 Chrome-backed checks, three at a time. A GitHub macOS runner needs
+// 30-70 s for one, so 240 s cut the suite off there while every test still passed.
+describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, timeout: 600_000 }, () => {
   test("--json: pass, fail, not checked twice and error, as one JSON document", async () => {
     const r = repo({ pass: { mode: "pass" }, fail: { mode: "fail", credits: 27 }, vague: { mode: "noassert" }, doubted: { mode: "automation" }, broken: { mode: "error" } });
     const port = await freePort();
