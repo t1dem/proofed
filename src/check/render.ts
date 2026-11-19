@@ -1,7 +1,7 @@
 // What `proofed check` shows while it runs and when it's done. In a terminal (LiveView): a header,
 // one line per scenario redrawn in place, then what broke. Anywhere else (PlainView), for coding
 // agents and logs: no escape codes and no redraw, one line per event, a heartbeat at least every 30
-// seconds, then the same details. Colour is drawn by hand; there are no runtime dependencies.
+// seconds, then the same details. This view draws its own terminal colors.
 import { FAILED_CHECK_REASON } from "../report/runfile.ts";
 import { creditsOf } from "../report/runresult.ts";
 import type { RunEvent } from "../types.ts";

@@ -64,8 +64,8 @@ test("the launcher uses source over a stale build, and dist when installed", () 
 });
 
 test("the package file check rejects source, tests, extra files, missing entries and oversized archives", () => {
-  const modules = ["proofed.js", "check/help.js"];
-  const files = ["README.md", "package.json", "bin/proofed.cjs", "bin/node-version.cjs", ...modules.map((file) => `dist/${file}`)].map((path) => ({ path, size: 100, mode: 0o755 }));
+  const modules = ["proofed.js", "check/help.js", "integrations/cli.js", "integrations/mcp.js", "integrations/claude-stop.js"];
+  const files = ["README.md", "docs/cli.md", "package.json", "bin/proofed.cjs", "bin/node-version.cjs", ...modules.map((file) => `dist/${file}`)].map((path) => ({ path, size: 100, mode: 0o755 }));
   const packed: Packed = { filename: "proofed-cli-0.1.0.tgz", size: 200, unpackedSize: 600, files };
   checkContents(packed, modules);
   checkContents({ ...packed, files: [...files, { path: "LICENSE", size: 100, mode: 0o644 }] }, modules);

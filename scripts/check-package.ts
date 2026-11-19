@@ -13,11 +13,13 @@ export type Packed = {
 };
 
 export function checkContents(packed: Packed, modules: string[]) {
-  assert.ok(modules.includes("proofed.js"), "dist/proofed.js is missing");
+  for (const file of ["proofed.js", "integrations/cli.js", "integrations/mcp.js", "integrations/claude-stop.js"]) {
+    assert.ok(modules.includes(file), `dist/${file} is missing`);
+  }
   assert.ok(modules.every((file) => /^(?:[\w-]+\/)*[\w-]+\.js$/.test(file) && !file.startsWith("testing/")), "dist must contain only runtime JavaScript");
   // npm includes a license automatically once the owner chooses one.
   const licenses = packed.files.filter((file) => /^licen[cs]e(?:\.(?:md|txt))?$/i.test(file.path)).map((file) => file.path);
-  const expected = [...licenses, "README.md", "package.json", "bin/proofed.cjs", "bin/node-version.cjs", ...modules.map((file) => `dist/${file}`)].sort();
+  const expected = [...licenses, "README.md", "docs/cli.md", "package.json", "bin/proofed.cjs", "bin/node-version.cjs", ...modules.map((file) => `dist/${file}`)].sort();
   assert.deepEqual(packed.files.map((file) => file.path).sort(), expected, "unexpected or missing package files");
   assert.ok(packed.size > 0 && packed.size < 128 * 1024, `tarball is ${packed.size} bytes; expected under 128 KiB`);
   assert.ok(packed.unpackedSize > 0 && packed.unpackedSize < 1024 * 1024, "unpacked package must be under 1 MiB");
@@ -42,7 +44,7 @@ export function checkPackage() {
     NPM_CONFIG_FUND: "false",
     NPM_CONFIG_UPDATE_NOTIFIER: "false",
   };
-  const run = (bin: string, args: string[], cwd = root) => execFileSync(bin, args, { cwd, env, encoding: "utf8", timeout: 120_000 });
+  const run = (bin: string, args: string[], cwd = root, input?: string) => execFileSync(bin, args, { cwd, env, input, encoding: "utf8", timeout: 120_000 });
   try {
     mkdirSync(env.HOME, { recursive: true });
     const [packed] = JSON.parse(run("npm", ["pack", "--json", "--pack-destination", temp])) as Packed[];
@@ -54,11 +56,15 @@ export function checkPackage() {
     checkContents(packed, modules);
     run("npm", ["install", "--global", "--ignore-scripts", "--prefix", prefix, join(temp, packed.filename)], temp);
     const launcher = join(prefix, "lib/node_modules/proofed-cli/bin/proofed.cjs");
-    const manifest = JSON.parse(readFileSync(join(prefix, "lib/node_modules/proofed-cli/package.json"), "utf8")) as { version: string; scripts: Record<string, string>; dependencies?: object };
-    assert.equal(Object.keys(manifest.dependencies ?? {}).length, 0, "runtime dependencies are not expected");
+    const manifest = JSON.parse(readFileSync(join(prefix, "lib/node_modules/proofed-cli/package.json"), "utf8")) as { version: string; scripts: Record<string, string>; dependencies: Record<string, string> };
+    assert.deepEqual(Object.keys(manifest.dependencies).sort(), ["@modelcontextprotocol/sdk", "zod"]);
+    for (const version of Object.values(manifest.dependencies)) assert.match(version, /^\d+\.\d+\.\d+$/);
     for (const hook of ["preinstall", "install", "postinstall", "prepare"]) assert.equal(manifest.scripts[hook], undefined, `consumer hook: ${hook}`);
     assert.equal(run(process.execPath, [launcher, "--version"], temp), `${manifest.version}\n`);
     assert.match(run(process.execPath, [launcher, "--help"], temp), /npm install -g proofed-cli/);
+    assert.match(run(process.execPath, [launcher, "mcp", "--help"], temp), /stdio/);
+    assert.equal(run(process.execPath, [launcher, "mcp"], temp, ""), "");
+    assert.equal(run(process.execPath, [launcher, "hook", "claude-stop"], temp, JSON.stringify({ cwd: temp, session_id: "packaged", stop_hook_active: false })), "");
     // Use the installed link too, so a broken bin mapping cannot pass the check.
     assert.equal(run(join(prefix, "bin/proofed"), ["--version"], temp), `${manifest.version}\n`);
     console.log(`Package OK: ${packed.filename}, ${packed.files.length} files, ${packed.size} bytes packed, ${packed.unpackedSize} bytes unpacked.`);
