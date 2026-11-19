@@ -21,7 +21,7 @@ const fakeKane = fileURLToPath(new URL("../testing/fake-kane.ts", import.meta.ur
 function fixture(target = "android", extra = "", build = "node build.cjs", finalFails = false, options: {
   extraScenario?: boolean;
   partialFix?: boolean;
-  changeAfterAttempt?: boolean;
+  changeAfterAttempt?: true | "artifact";
   buildOutput?: boolean;
   untrackedBuildOutput?: boolean;
   ignoredBuildOutput?: boolean;
@@ -133,11 +133,12 @@ export function askAgent(prompt){
   ]);
   if (options.changeAfterAttempt) {
     const pipelineUrl = new URL("../check/pipeline.ts", import.meta.url).href;
+    const [file, event] = options.changeAfterAttempt === "artifact" ? ["app.apk", "artifact-change"] : ["new-helper.js", "tree-change"];
     const pipeline = `export * from ${JSON.stringify(pipelineUrl)};
 import {runAll as run} from ${JSON.stringify(pipelineUrl)};
 export async function runAll(scenarios,out,...rest){
   const results=await run(scenarios,out,...rest);
-  if(out.includes('/attempt-')) { globalThis.fixtureFs.writeFileSync('new-helper.js','changed after attempt\\n'); globalThis.fixtureLog('tree-change'); }
+  if(out.includes('/attempt-')) { globalThis.fixtureFs.writeFileSync(${JSON.stringify(file)},'changed after attempt\\n'); globalThis.fixtureLog(${JSON.stringify(event)}); }
   return results;
 }`;
     mocks.set(pipelineUrl, `data:text/javascript,${encodeURIComponent(pipeline)}`);
@@ -224,6 +225,23 @@ test("a rejected push restores the report and fails the original commit's pendin
     assert.match(JSON.stringify(statuses[0]?.value), /"state":"pending"/);
     assert.deepEqual(statuses[1]?.value, { state: "failure", description: "Proofed couldn't push the fix to the branch." });
     assert.doesNotMatch(ran.stdout + ran.stderr + JSON.stringify(events), /fixture-token/);
+  } finally { f.cleanup(); }
+});
+
+test("an unwritable step summary still publishes the pushed fix and its status", () => {
+  const f = fixture();
+  try {
+    const ran = f.run("./fix.ts", { GITHUB_STEP_SUMMARY: f.dir });
+    assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+    assert.match(ran.stdout, /Couldn't write the fix step summary/);
+    const sha = f.git("rev-parse", "HEAD");
+    const events = f.events();
+    assert.ok(events.some((e) => e.type === "push"));
+    const report = events.find((e) => e.type === "report" && String(e.value).includes("**Fixed in "));
+    assert.equal(readReportData(String(report?.value))?.sha, sha);
+    assert.deepEqual(events.find((e) => e.type === "status" && e.sha === sha)?.value, {
+      state: "success", description: "1 scenario(s) pass on an Android device",
+    });
   } finally { f.cleanup(); }
 });
 
@@ -482,6 +500,19 @@ test("the final selection checks every scenario after rebuilding for a missing r
   } finally { f.cleanup(); }
 });
 
+test("an error in a newly affected scenario blocks the push", () => {
+  const f = fixture("android", "", "node build.cjs", false, { extraScenario: true });
+  try {
+    writeFileSync(join(f.dir, "modes/extra"), "error");
+    const ran = f.run();
+    assert.equal(ran.status, 1, ran.stdout + ran.stderr);
+    assert.equal(f.git("rev-parse", "HEAD"), f.original);
+    const events = f.events();
+    assert.equal(events.some((e) => e.type === "push"), false);
+    assert.ok(events.some((e) => e.type === "report" && /Kane couldn't finish checking "Extra"/.test(String(e.value))));
+  } finally { f.cleanup(); }
+});
+
 test("a changed tree after the attempt rebuilds and checks the whole final selection", () => {
   const f = fixture("android", "", "node build.cjs", false, { extraScenario: true, changeAfterAttempt: true });
   try {
@@ -491,6 +522,18 @@ test("a changed tree after the attempt rebuilds and checks the whole final selec
     assert.deepEqual(f.runs().map((c) => /\[fake-from:([^\]]+)\]/.exec(c.args![1]!)?.[1]), ["counter", "counter", "extra"]);
     assert.equal(f.git("show", "HEAD:new-helper.js"), "changed after attempt");
     assert.deepEqual(f.events().filter((e) => ["ask", "build", "tree-change", "push"].includes(e.type)).map((e) => e.type), ["ask", "build", "tree-change", "build", "push"]);
+  } finally { f.cleanup(); }
+});
+
+test("a changed ignored APK invalidates the last attempt even when the Git tree matches", () => {
+  const f = fixture("android", "", "node build.cjs", false, { changeAfterAttempt: "artifact" });
+  try {
+    const ran = f.run();
+    assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+    assert.match(ran.stdout, /Final check: 0 result\(s\) from the last attempt, 1 to run\./);
+    assert.equal(f.runs().length, 2);
+    assert.equal(readFileSync(join(f.dir, "app.apk"), "utf8"), "fixed\n");
+    assert.deepEqual(f.events().filter((e) => ["build", "artifact-change", "push"].includes(e.type)).map((e) => e.type), ["build", "artifact-change", "build", "push"]);
   } finally { f.cleanup(); }
 });
 

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { configuredFixer } from "./agent.ts";
 import { changedFiles } from "../changes.ts";
+import { cacheKey } from "../check/cache.ts";
 import { env } from "../env.ts";
 import { fixLoop, settled, type FixLoopEnd } from "./fixloop.ts";
 import { askFixer, fixPrompt } from "./fixprompt.ts";
@@ -15,7 +16,7 @@ import { putBack } from "./guard.ts";
 import { live } from "../report/live.ts";
 import { COMMENT_LIMIT } from "../report/reportdata.ts";
 import { describeFixer, providerLabel, providerOf, type Fixer } from "./models.ts";
-import { publish, putReport, runAll } from "../check/pipeline.ts";
+import { isBroken, publish, putReport, runAll } from "../check/pipeline.ts";
 import { pushHead } from "./push.ts";
 import { FIX_BOX_LINE, fixRequested, readReportData, readRunKey, sameFixRequest, WORKING, type FileChange, type FixNote, type ReportData } from "../report/report.ts";
 import { avoidFileId, descriptionCheckNote, isDescriptionScenario, replayAskedScenario } from "../action/requests.ts";
@@ -197,12 +198,29 @@ function forgetMissingChanges(agentTouched: Set<string>, changed: { has(file: st
   for (const file of agentTouched) if (!changed.has(file)) agentTouched.delete(file);
 }
 
+function nativeBuildKeys(scenarios: Scenario[]) {
+  const byTarget = new Map<string, string>();
+  const byId = new Map<string, string>();
+  for (const scenario of scenarios) {
+    const target = scenario.resolvedTarget;
+    if (!target || !("app" in target) || !target.app || (target.kind === "desktop" && target.launch)) continue;
+    const { sources, ...resolved } = target;
+    const key = JSON.stringify(resolved);
+    // Use the cache's artifact hash without hashing the scenario file or objective.
+    const fingerprint = byTarget.get(key) ?? cacheKey(scenario, "", [], () => "");
+    byTarget.set(key, fingerprint);
+    byId.set(scenario.id, fingerprint);
+  }
+  return byId;
+}
+
 async function runAttempts(plan: FixPlan, app: ReturnType<typeof prepareBuild>) {
   const { fixer, data, failures, checkedFiles, base, appDir, agentName, rev, outDir } = plan;
   const { build, buildCommand, buildInput, serve } = app;
   const agentTouched = new Set<string>();
   let beforeAnswer = new Map<string, string>();
   let lastAttemptTree: string | undefined;
+  let lastAttemptBuilds: ReturnType<typeof nativeBuildKeys> | undefined;
   const loop = await fixLoop({
     fixer,
     failures,
@@ -240,10 +258,11 @@ async function runAttempts(plan: FixPlan, app: ReturnType<typeof prepareBuild>) 
       const refusal = fixRefusal(scenarios, process.env.PROOFED_BUILD);
       if (refusal) throw new Error(refusal);
       lastAttemptTree = treeBeforeCheck();
+      lastAttemptBuilds = nativeBuildKeys(scenarios);
       return checkFix(scenarios, serve, (selected) => runAll(selected, `${outDir}/attempt-${attempt}`));
     },
   });
-  return { loop, lastAttemptTree, agentTouched };
+  return { loop, lastAttemptTree, lastAttemptBuilds, agentTouched };
 }
 
 function stopAfterAttempts(plan: FixPlan, loop: FixLoopEnd): FixOutcome {
@@ -287,7 +306,7 @@ type VerifiedFix = {
 };
 
 async function verifyTree(
-  plan: FixPlan, { build, serve }: ReturnType<typeof prepareBuild>, { loop, lastAttemptTree, agentTouched }: Awaited<ReturnType<typeof runAttempts>>,
+  plan: FixPlan, { build, serve }: ReturnType<typeof prepareBuild>, { loop, lastAttemptTree, lastAttemptBuilds, agentTouched }: Awaited<ReturnType<typeof runAttempts>>,
 ): Promise<Phase<VerifiedFix>> {
   const { base, rev, failedFiles, asked, outDir, data, failures, agentName } = plan;
   const refuse = (note: string, status: string): Phase<VerifiedFix> => {
@@ -314,8 +333,9 @@ async function verifyTree(
     };
     checkSupported();
     verifiedFiles = treeBeforeCheck();
+    let verifiedBuilds = nativeBuildKeys(final);
     let byId = new Map(loop.results.map((r) => [r.scenario.id, r]));
-    const canReuse = lastAttemptTree === verifiedFiles && final.every((s) => byId.has(s.id));
+    const canReuse = lastAttemptTree === verifiedFiles && final.every(({ id }) => byId.has(id) && lastAttemptBuilds?.get(id) === verifiedBuilds.get(id));
     if (!canReuse) {
       forgetMissingChanges(agentTouched, new Set(fixChanges()));
       const buildError = build();
@@ -323,6 +343,7 @@ async function verifyTree(
       verifiedFiles = treeBeforeCheck();
       ({ final, skipped } = pickFinal());
       checkSupported();
+      verifiedBuilds = nativeBuildKeys(final);
     }
     console.log(`Final check: ${canReuse ? final.length : 0} result(s) from the last attempt, ${canReuse ? 0 : final.length} to run.`);
     if (!canReuse) {
@@ -338,15 +359,23 @@ async function verifyTree(
     if (treeBeforeCheck() !== verifiedFiles) {
       return refuse("The files changed during Kane's final check. Nothing was pushed.", "The changed files weren't checked; nothing was pushed");
     }
+    if (!canReuse && !isDeepStrictEqual(nativeBuildKeys(final), verifiedBuilds)) {
+      return refuse("The build artifact changed during Kane's final check. Nothing was pushed.", "The changed build wasn't checked; nothing was pushed");
+    }
   } catch (e) {
     return refuse(`The final check couldn't run: ${maskSecrets(String(e))}. Nothing was pushed.`, "The final check couldn't run; nothing was pushed");
   }
   const fixedIds = new Set(failures.map((f) => f.id));
   const finalFixed = results.filter((r) => fixedIds.has(r.scenario.id));
+  const broken = results.filter(isBroken);
+  const incomplete = broken.find((r) => r.outcome === "error");
+  if (incomplete) {
+    return refuse(`Kane couldn't finish checking "${incomplete.scenario.name}". Nothing was pushed.`, "The final check was incomplete; nothing was pushed");
+  }
   const previouslyFailed = new Set(data.failures.map((f) => f.id));
-  const regressed = results.filter((r) => r.outcome === "failed" && !descriptionCheckNote(r) && !previouslyFailed.has(r.scenario.id));
+  const regressed = broken.some((r) => !previouslyFailed.has(r.scenario.id));
   const verified = finalFixed.filter((r) => r.outcome === "passed");
-  if (!verified.length || finalFixed.length !== fixedIds.size || !finalFixed.every(settled) || regressed.length) {
+  if (!verified.length || finalFixed.length !== fixedIds.size || !finalFixed.every(settled) || regressed) {
     return refuse("Kane couldn't confirm the fix in the final check. Nothing was pushed.", "The final check didn't pass; nothing was pushed");
   }
   const leak = discardLeak(agentName);

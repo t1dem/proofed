@@ -70,7 +70,7 @@ export async function stopCheckServer(url: string) {
   } else {
     const killed = await runBash("fuser", ["-k", `${port}/tcp`], { stdio: "ignore" }).then(() => true, () => false);
     if (!killed) {
-      const pids = capture("lsof", ["-ti", `tcp:${port}`])?.split(/\s+/) ?? [];
+      const pids = capture("lsof", ["-a", "-ti", `tcp:${port}`, "-sTCP:LISTEN"])?.split(/\s+/) ?? [];
       for (const pid of pids) {
         if (!/^[1-9]\d*$/.test(pid)) continue;
         try { process.kill(Number(pid)); } catch { /* Already stopped. */ }

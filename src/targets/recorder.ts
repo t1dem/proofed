@@ -115,7 +115,7 @@ export const samePage = (a: Page, b: Page) =>
 // which is why the clip later replays them with their real durations.
 export async function startRecorder(endpoint: string, outDir: string, targetId?: string, discoveryTimeoutMs = 30_000) {
   mkdirSync(outDir, { recursive: true });
-  const cdp = await connectCdp(endpoint, targetId ? AbortSignal.timeout(5000) : undefined);
+  const cdp = await connectCdp(endpoint, AbortSignal.timeout(targetId ? 5000 : 30_000));
   const frames: Frame[] = [];
   let frameWriteError: unknown;
   const actions: Action[] = [];

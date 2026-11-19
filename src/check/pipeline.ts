@@ -15,6 +15,7 @@ import { runScenario } from "./run.ts";
 import { creditsOf, scenarioDoubted } from "../report/runresult.ts";
 import { FAILED_CHECK_ACTION, FAILED_CHECK_REASON, RUN_FILE, type RunFile } from "../report/runfile.ts";
 import type { Scenario } from "../scenarios.ts";
+import { maskSecrets } from "../secrets.ts";
 import { SetupError } from "../setuperror.ts";
 import { timedAsync } from "../timing.ts";
 import type { RunEvent, ScenarioResult } from "../types.ts";
@@ -222,7 +223,12 @@ async function publishRun(input: PublishInput) {
   });
   writeFileSync(join(outDir, "report.md"), body);
   writeFileSync(join(outDir, "results.json"), JSON.stringify(results, null, 2));
-  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, body);
+  try {
+    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, body);
+  } catch (e) {
+    if (fix?.status !== "fixed") throw e;
+    console.log(`Couldn't write the fix step summary: ${maskSecrets(String(e))}`);
+  }
 
   const broken = results.filter(isBroken);
   const failed = counted.filter((r) => r.outcome === "failed");

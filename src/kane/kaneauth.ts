@@ -54,16 +54,20 @@ const reasonIn = (output: string) =>
 export function kaneLogin(bin: string, env: NodeJS.ProcessEnv, timeout = 20_000): Promise<Login> {
   const creds = kaneCredentials(env);
   const secrets = kaneSecretValues(env);
+  const timedOut: Login = { state: "unknown", detail: `kane-cli balance didn't answer within ${timeout / 1000} s` };
   return new Promise((resolve) => {
     try {
       const cmd = executableCommand(bin, ["balance", ...creds], env);
-      execFile(cmd.file, cmd.args, { env, timeout, windowsHide: true }, (error, stdout, stderr) => {
+      let deadline: NodeJS.Timeout | undefined;
+      const child = execFile(cmd.file, cmd.args, { env, timeout, windowsHide: true }, (error, stdout, stderr) => {
+        clearTimeout(deadline);
         const output = `${stdout}\n${stderr}`.replace(ANSI, "");
         if (!error) {
           return resolve(creds.length ? { state: "keys", detail: "LT_USERNAME and LT_ACCESS_KEY work; Kane uses them", balance: output } : { state: "signed_in", detail: "signed in", balance: output });
         }
         const e = error as NodeJS.ErrnoException & { killed?: boolean };
-        if (e.killed || typeof e.code !== "number") return resolve({ state: "unknown", detail: `kane-cli balance didn't answer${e.killed ? ` within ${timeout / 1000} s` : `: ${maskSecrets(e.message, secrets)}`}` });
+        if (e.killed) return resolve(timedOut);
+        if (typeof e.code !== "number") return resolve({ state: "unknown", detail: `kane-cli balance didn't answer: ${maskSecrets(e.message, secrets)}` });
         const said = maskSecrets(reasonIn(output), secrets);
         if (REJECTED.test(output) || NOT_SIGNED_IN.test(output)) {
           return resolve(
@@ -74,6 +78,15 @@ export function kaneLogin(bin: string, env: NodeJS.ProcessEnv, timeout = 20_000)
         }
         resolve({ state: "unknown", detail: `kane-cli balance failed${said ? `: ${said}` : ` with exit ${e.code}`}` });
       });
+      if (timeout > 0) deadline = setTimeout(() => {
+        // execFile gives Kane a SIGTERM first. Settle even if the process or its pipes stay open.
+        resolve(timedOut);
+        try { child.kill("SIGKILL"); } catch { /* Best-effort cleanup. */ }
+        child.stdin?.destroy();
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        child.unref();
+      }, timeout + 1000);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       resolve({ state: "unknown", detail: `kane-cli balance didn't answer: ${maskSecrets(message, secrets)}` });
