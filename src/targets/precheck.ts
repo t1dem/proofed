@@ -42,8 +42,8 @@ const message = (d: ExceptionDetails) =>
 // The first uncaught exception, and a screenshot (JPEG file) of the page when it was judged blank.
 export type Crash = { error: string; screenshot?: string };
 
-// The URLs that crashed while loading. Screenshots go into `dir`.
-export async function findCrashes(urls: string[], dir: string) {
+// The URLs that crashed while loading. Screenshots go into `dir`. Tests on a starved runner pass a longer time limit.
+export async function findCrashes(urls: string[], dir: string, checkTimeout = CHECK_TIMEOUT) {
   const crashes = new Map<string, Crash>();
   if (urls.length === 0) return crashes;
   mkdirSync(dir, { recursive: true });
@@ -56,7 +56,7 @@ export async function findCrashes(urls: string[], dir: string) {
     const cdp = await connectCdp(chrome.endpoint);
     await Promise.all(
       urls.map(async (url, i) => {
-        const crash = await crashOf(cdp, url, join(dir, `crash-${i}.jpg`)).catch(() => undefined);
+        const crash = await crashOf(cdp, url, join(dir, `crash-${i}.jpg`), checkTimeout).catch(() => undefined);
         if (crash) crashes.set(url, crash);
       }),
     );
@@ -99,6 +99,9 @@ async function detectCrash(cdp: Cdp, url: string) {
   // `blank` only turns true on a definite answer; an evaluation lost to a navigation counts as unknown.
   let blank = false;
   let rechecking = false;
+  // The recheck also waits for a timer in the page itself. It fires only after every timer the app set before it,
+  // so on a starved machine an app that renders a few seconds after load still gets to render first.
+  let pageWaited = true;
   for (let until = Date.now() + SETTLE; ; await sleep(POLL)) {
     const painted = await page<{ result: { value?: unknown } }>("Runtime.evaluate", { expression: PAINTED, returnByValue: true }).then(
       ({ result }) => result.value,
@@ -106,18 +109,21 @@ async function detectCrash(cdp: Cdp, url: string) {
     );
     if (painted === true) return undefined;
     blank = painted === false;
-    if (Date.now() < until) continue;
+    if (Date.now() < until || !pageWaited) continue;
     if (rechecking || !blank || errors.length === 0) break;
     rechecking = true;
     until = Date.now() + RECHECK;
+    pageWaited = false;
+    const waited = () => (pageWaited = true);
+    void page("Runtime.evaluate", { expression: `new Promise((r) => setTimeout(r, ${RECHECK}))`, awaitPromise: true }).then(waited, waited);
   }
   const error = blank ? errors[0] : undefined;
   return error ? { error, page } : undefined;
 }
 
-async function crashOf(cdp: Cdp, url: string, file: string): Promise<Crash | undefined> {
-  const deadline = Date.now() + CHECK_TIMEOUT;
-  const crash = await Promise.race([detectCrash(cdp, url), limit(CHECK_TIMEOUT)]);
+async function crashOf(cdp: Cdp, url: string, file: string, checkTimeout: number): Promise<Crash | undefined> {
+  const deadline = Date.now() + checkTimeout;
+  const crash = await Promise.race([detectCrash(cdp, url), limit(checkTimeout)]);
   if (!crash) return undefined;
   // Give late verdicts time for a screenshot. A stalled capture only costs the picture.
   const screenshot = await Promise.race([

@@ -52,6 +52,11 @@ async function startChrome(headless: boolean) {
       "--mute-audio",
       // A throwaway profile has nothing to protect; without this, macOS shows a keychain dialog when HOME has no login keychain.
       "--use-mock-keychain",
+      // Several pages are open at once (the start-page check opens one per scenario). Chrome would lower the priority of
+      // the ones in the background, and on a busy macOS runner they then answer CDP calls tens of seconds late.
+      "--disable-renderer-backgrounding",
+      "--disable-background-timer-throttling",
+      "--disable-backgrounding-occluded-windows",
       ...(headless ? ["--headless=new"] : []),
       ...(process.env.CI ? ["--no-sandbox"] : []),
       "about:blank",

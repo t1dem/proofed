@@ -44,8 +44,10 @@ export const FLAGS = {
     "serve-timeout": { type: "string" },
     verbose: { type: "boolean" },
   },
-  list: { ...COMMON, ...TARGET, base: { type: "string" }, url: { type: "string" } },
+  list: { ...COMMON, ...TARGET, base: { type: "string" }, all: { type: "boolean" }, url: { type: "string" } },
   doctor: { ...COMMON, ...APP },
+  mcp: { help: COMMON.help },
+  hook: { help: COMMON.help },
 } as const;
 
 export type Command = keyof typeof FLAGS;
@@ -196,7 +198,13 @@ function parseFlags(command: Command, args: string[]) {
     serveTimeout: count("serve-timeout"),
   };
   const text = positionals.join(" ").trim() || undefined;
-  if (text && command !== "check") throw new UsageError(`proofed ${command} takes no text. To have Kane check it: proofed check "${text}"`);
+  if (command === "hook") {
+    if (!flags.help && (positionals.length !== 1 || text !== "claude-stop")) {
+      throw new UsageError("Expected proofed hook claude-stop.");
+    }
+  } else if (text && command !== "check") {
+    throw new UsageError(`proofed ${command} takes no text. To have Kane check it: proofed check "${text}"`);
+  }
   if (flags.only && flags.all) throw new UsageError("Use either --only or --all, not both.");
   if (text && (flags.only || flags.all)) throw new UsageError(`Text runs on its own; drop ${flags.only ? "--only" : "--all"}: proofed check "${text}"`);
   return { flags, text };

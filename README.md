@@ -151,7 +151,7 @@ Web checks need Node 22.18 or later, Chrome, [Kane CLI](https://www.npmjs.com/pa
 
 Install it with `npm install -g proofed-cli` (or `pnpm add -g`, `bun add -g`), or run it once with `npx proofed-cli`.
 
-The command is `proofed`; `proofed doctor` says what else is missing. On a Node older than 22.18 it stops with an error that says so. The package is built JavaScript with no dependencies and no install scripts. From a clone, `npm link` runs the TypeScript source instead.
+The command is `proofed`. Run `proofed doctor` to see what's missing. The package ships built JavaScript and has no install scripts. From a clone, `npm link` runs the TypeScript source instead.
 
 In the app's repo:
 
@@ -180,6 +180,37 @@ Exit 0: passed or nothing ran. On `failed`, read `reason` and `diagnosis`, fix a
 `not_checked` is not a pass. On `error`, retry `rerun` once. Exit 3: follow `error.fix`.
 Checks spend Kane credits; planning does not. Use `--no-retry` when another attempt is forbidden.
 ```
+
+### MCP and the Claude Code Stop hook
+
+Start your editor or MCP client in the app's repository root. In Claude Code, add this to the project's `.mcp.json`.
+
+```json
+{"mcpServers":{"proofed":{"command":"npx","args":["-y","proofed-cli","mcp"]}}}
+```
+
+For Codex, add this to `config.toml`.
+
+```toml
+[mcp_servers.proofed]
+command = "npx"
+args = ["-y", "proofed-cli", "mcp"]
+tool_timeout_sec = 900
+```
+
+To run affected checks automatically when Claude Code is about to stop, add this to `.claude/settings.json`.
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "npx -y proofed-cli hook claude-stop", "timeout": 900}]}
+    ]
+  }
+}
+```
+
+`proofed_list`, `proofed_doctor` and dry runs are free. Checks spend Kane credits unless the pass is cached. The Stop hook asks Claude to continue after a failure, up to three times per session. See [agent setup and behavior](docs/cli.md#mcp-and-the-claude-code-stop-hook).
 
 ## Setup
 

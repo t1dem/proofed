@@ -1,6 +1,6 @@
 # proofed check
 
-The reference for `proofed check`. Installing it and the three commands are in the [README](../README.md#locally-and-from-an-ai-agent).
+The reference for `proofed check`. Installation is in the [README](../README.md#locally-and-from-an-ai-agent).
 
 ## What it checks
 
@@ -46,6 +46,47 @@ Use `proofed check --only <id> --dry-run --json` to plan one scenario, or
 covers. Text that is a scenario's id or name is refused with exit 3 and the `--only` command. Remove
 `--dry-run` to run it. Allow at least 10 minutes. Read `reason`, `diagnosis` and `rerun`
 when a scenario fails. `not_checked` is not a pass. On exit 3, follow `error.fix`.
+
+## MCP and the Claude Code Stop hook
+
+`proofed mcp` serves tools over stdio. Start the client in the repository root so Proofed finds the project's scenarios and app settings.
+
+For Claude Code, add this to the project's `.mcp.json`.
+
+```json
+{"mcpServers":{"proofed":{"command":"npx","args":["-y","proofed-cli","mcp"]}}}
+```
+
+For Codex, add this to `config.toml`.
+
+```toml
+[mcp_servers.proofed]
+command = "npx"
+args = ["-y", "proofed-cli", "mcp"]
+tool_timeout_sec = 900
+```
+
+| Tool | Inputs and cost |
+|---|---|
+| `proofed_list` | Free. Shows selection, cached passes and estimated credits. Set `base` to compare against another Git ref or `all` to estimate every scenario. |
+| `proofed_doctor` | Free. Shows setup problems and their fixes. |
+| `proofed_check` | Runs affected scenarios by default. Use `only` with an array of ids, `all` for every scenario, or `behavior` for a single plain-English check. Also accepts `base`, `noCache`, `url`, `serve`, `build` and `target`. A run spends Kane credits and takes about 1 to 4 minutes per scenario. `dryRun` and cached passes are free. |
+
+Allow at least 10 minutes for the MCP client to wait on a check. The tool returns scenarios that failed or come back as `not_checked` in the result. Treat `not_checked` as unverified. Only change the scenario if the change in the app was intended.
+
+To run checks at the end of a Claude Code turn, add this to `.claude/settings.json`. Hook timeouts are in seconds.
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "npx -y proofed-cli hook claude-stop", "timeout": 900}]}
+    ]
+  }
+}
+```
+
+The hook lists affected scenarios first and runs a check only when there is something to verify. A failed, unchecked or errored scenario sends Claude the outcome, Kane's observations, a clip path when available and a rerun command. Setup problems allow Claude to stop and leave the fix on stderr. The hook records which scenarios it reported under `.proofed-out/` and allows Claude to stop if the same scenarios are still broken during a continuation or the session has already blocked three times. [Claude Code Stop hook reference](https://code.claude.com/docs/en/hooks#stop)
 
 ## A sample run
 
