@@ -20,7 +20,9 @@ export function scenarioStory(runs: Run[], id: string) {
   const [now, ...earlier] = seen;
   if (!now) return undefined;
   const before = now.scenario.outcome === "passed" ? earlier.find((s) => s.scenario.outcome === "failed") : undefined;
-  return { now, before };
+  // Use report order so runs with the same timestamp still have a clear before and after.
+  const fix = before && runs.slice(runs.indexOf(now.run), runs.indexOf(before.run)).find((run) => run.fix?.status === "fixed")?.fix;
+  return { now, before, fix };
 }
 
 export function defaultScenario(runs: Run[], name?: string) {

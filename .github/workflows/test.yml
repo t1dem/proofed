@@ -27,10 +27,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      # The repository uses pnpm-lock.yaml; don't create a second lockfile.
-      - run: npm install --ignore-scripts --no-package-lock
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       # The suite also covers the site's worker, which has its own dependencies.
-      - run: npm install --ignore-scripts --no-package-lock
+      - run: pnpm install --frozen-lockfile --ignore-scripts
         working-directory: site
       - name: Install ffmpeg for recording tests
         run: |
@@ -56,6 +56,6 @@ jobs:
       - run: npm test
       - name: Compile and smoke-test the installed entry
         run: |
-          npx --no-install tsc -p tsconfig.build.json
+          pnpm exec tsc -p tsconfig.build.json
           node dist/proofed.js --version
           node bin/proofed.cjs --help

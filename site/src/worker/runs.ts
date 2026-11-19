@@ -156,7 +156,7 @@ export async function listPulls(env: Env, repos: string[]): Promise<PullView[]> 
       .all<ReportRow>(),
     env.DB.prepare(
       `SELECT * FROM runs r WHERE repo IN (${marks}) AND created_at > ?${names.length + 1}
-       AND created_at = (SELECT MAX(created_at) FROM runs WHERE repo = r.repo AND pr = r.pr)`,
+       AND key = (SELECT key FROM runs WHERE repo = r.repo AND pr = r.pr ORDER BY created_at DESC, key DESC LIMIT 1)`,
     )
       .bind(...names, since)
       .all<RunRow>(),
@@ -175,7 +175,7 @@ export type PullDetail = { pull: PullView; runs: Run[] };
 export async function getPull(env: Env, repo: string, pr: number, api = "/api"): Promise<PullDetail | undefined> {
   const [report, runs] = await Promise.all([
     env.DB.prepare("SELECT * FROM reports WHERE repo = ?1 AND pr = ?2").bind(repo, pr).first<ReportRow>(),
-    env.DB.prepare("SELECT * FROM runs WHERE repo = ?1 AND pr = ?2 ORDER BY created_at DESC LIMIT 20").bind(repo, pr).all<RunRow>(),
+    env.DB.prepare("SELECT * FROM runs WHERE repo = ?1 AND pr = ?2 ORDER BY created_at DESC, key DESC LIMIT 20").bind(repo, pr).all<RunRow>(),
   ]);
   if (!report) return undefined;
   const all = runs.results.map((r) => toRun(r, api));
@@ -192,7 +192,7 @@ export async function getPulls(env: Env, repo: string, prs: number[], api: strin
       .bind(repo, ...prs).all<ReportRow>(),
     env.DB.prepare(
       `SELECT * FROM (
-         SELECT runs.*, ROW_NUMBER() OVER (PARTITION BY pr ORDER BY created_at DESC) AS position
+         SELECT runs.*, ROW_NUMBER() OVER (PARTITION BY pr ORDER BY created_at DESC, key DESC) AS position
          FROM runs WHERE repo = ? AND pr IN (${marks})
        ) WHERE position <= 20 ORDER BY pr, position`,
     ).bind(repo, ...prs).all<RunRow>(),

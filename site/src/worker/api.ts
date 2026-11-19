@@ -126,6 +126,9 @@ export const repoFixer = (token: string, repoName: string) => memo(`fixer:${repo
   ),
 );
 
+const installedFixer = (env: Env, repo: InstallationRepo & { installationId: number }) =>
+  installationToken(env, repo.installationId).then((token) => repoFixer(token, repo.full_name)).catch(() => null);
+
 // Uses the installation token: it can read workflow files and secret names the user token can't.
 async function describeRepo(env: Env, repo: InstallationRepo & { installationId: number }): Promise<RepoView> {
   const token = await installationToken(env, repo.installationId);
@@ -178,7 +181,7 @@ const isPaused = (env: Env, repo: InstallationRepo & { installationId: number })
     const token = await installationToken(env, repo.installationId);
     const workflow = await gh<{ state: string }>(token, "GET", `/repos/${repo.full_name}/actions/workflows/${WORKFLOW}`).catch(() => undefined);
     return workflow?.state === "disabled_manually";
-  });
+  }).catch(() => false);
 
 async function pausedRepos(env: Env, repos: (InstallationRepo & { installationId: number })[]) {
   const paused = await Promise.all(repos.map(async (r) => ((await isPaused(env, r)) ? [r.full_name] : [])));
@@ -201,8 +204,21 @@ export async function pushSecrets(env: Env, user: Pick<UserRow, "lt_username" | 
   ));
   const failed = results.find((r) => r.status === "rejected");
   if (failed?.status === "rejected") throw failed.reason;
-  if (values.CODEX_API_KEY && !values.CLAUDE_CODE_OAUTH_TOKEN) await selectCodex(token, repoName);
   return names;
+}
+
+export async function syncSecrets(env: Env, user: Pick<UserRow, "lt_username" | "lt_key" | "claude_token" | "codex_key">, repoName: string, installationId: number) {
+  const pushed = await pushSecrets(env, user, repoName, installationId);
+  if (pushed.includes("CODEX_API_KEY") && !pushed.includes("CLAUDE_CODE_OAUTH_TOKEN")) {
+    try {
+      const warning = await selectCodex(await installationToken(env, installationId), repoName);
+      if (warning) return { pushed, warning };
+    } catch (e) {
+      console.error("Codex setup", repoName, e);
+      return { pushed, warning: "Proofed couldn't select Codex automatically. Choose Codex in repository settings." };
+    }
+  }
+  return { pushed };
 }
 
 async function selectCodex(token: string, repoName: string) {
@@ -217,10 +233,17 @@ async function selectCodex(token: string, repoName: string) {
   if (hasClaude) return;
 
   // Keep an explicit fixer choice. A new setup with only a Codex key otherwise defaults to Claude.
-  const variables = await repoVariables(token, repoName);
-  if (variables.some(({ name }) => name === "PROOFED_PROVIDER" || name === "PROOFED_MODEL")) return;
-  await gh(token, "POST", `${actions}/variables`, { name: "PROOFED_PROVIDER", value: "codex" });
-  forget(`fixer:${repoName}`);
+  try {
+    const variables = await repoVariables(token, repoName);
+    if (variables.some(({ name }) => name === "PROOFED_PROVIDER" || name === "PROOFED_MODEL")) return;
+    await gh(token, "POST", `${actions}/variables`, { name: "PROOFED_PROVIDER", value: "codex" });
+    forget(`fixer:${repoName}`);
+  } catch (e) {
+    if (e instanceof GitHubError && e.status === 403) {
+      return "To select Codex, accept the Variables permission on GitHub, then choose Codex in repository settings.";
+    }
+    throw e;
+  }
 }
 
 // The workflow reads vars.PROOFED_MODEL / PROOFED_EFFORT / PROOFED_AUTOFIX; a default is stored as no variable at all.
@@ -316,8 +339,10 @@ export async function handleApi(request: Request, env: Env, path: string) {
 
     // New keys go straight into every repo this user has connected and administers.
     const repos = (await listRepos(env, token)).filter((r) => accessOf(r) === "admin");
-    const synced = await Promise.allSettled(repos.map((r) => pushSecrets(env, fresh, r.full_name, r.installationId)));
-    return json({ ok: true, synced: synced.filter((s) => s.status === "fulfilled").length, of: repos.length });
+    const results = await Promise.allSettled(repos.map((r) => syncSecrets(env, fresh, r.full_name, r.installationId)));
+    const synced = results.flatMap((r) => r.status === "fulfilled" ? [r.value] : []);
+    const warning = [...new Set(synced.flatMap((r) => r.warning ? [r.warning] : []))].join(" ");
+    return json({ ok: true, synced: synced.length, of: repos.length, ...(warning && { warning }) });
   }
 
   if (path === "/api/pulls" && request.method === "GET") {
@@ -326,7 +351,7 @@ export async function handleApi(request: Request, env: Env, path: string) {
     const paused = await pausedRepos(env, repos.filter((r) => pulls.some((p) => p.repo === r.full_name)));
     const readOnly = new Set(repos.filter((r) => accessOf(r) === "read").map((r) => r.full_name));
     const fixers = new Map(await Promise.all(repos.filter((r) => pulls.some((p) => p.repo === r.full_name)).map(async (r) =>
-      [r.full_name, await repoFixer(await installationToken(env, r.installationId), r.full_name)] as const)));
+      [r.full_name, await installedFixer(env, r)] as const)));
     return json(pulls.map((p) => ({ ...p, fixer: fixers.get(p.repo) ?? undefined, paused: paused.has(p.repo), readOnly: readOnly.has(p.repo) })));
   }
 
@@ -355,7 +380,7 @@ export async function handleApi(request: Request, env: Env, path: string) {
     if (!action && request.method === "GET") {
       const [detail, paused] = await Promise.all([getPull(env, repoName, Number(number)), pausedRepos(env, [repo])]);
       if (!detail) return json({ error: "Proofed hasn't reported on that pull request." }, 404);
-      const fixer = await repoFixer(await installationToken(env, repo.installationId), repoName);
+      const fixer = await installedFixer(env, repo);
       return json({ ...detail, pull: { ...detail.pull, fixer: fixer ?? undefined, paused: paused.has(repoName), readOnly: accessOf(repo) === "read" } });
     }
     if (action && request.method === "POST") {
@@ -376,7 +401,7 @@ export async function handleApi(request: Request, env: Env, path: string) {
         await gh(token, "POST", `/repos/${repoName}/issues/${number}/comments`, { body: command });
       } catch (e) {
         if (e instanceof GitHubError && [403, 404, 410, 422].includes(e.status)) {
-          return json({ error: "GitHub didn't let Proofed comment on this pull request for you. Comment /proofed there yourself.", retryable: true }, 403);
+          return json({ error: `GitHub didn't let Proofed comment for you. Open the pull request and post ${command}`, retryable: true }, 403);
         }
         throw e;
       }
@@ -398,12 +423,12 @@ export async function handleApi(request: Request, env: Env, path: string) {
       const body = await readJsonObject(request);
       if (!body) return json({ error: "Send the fixer settings as a JSON object." }, 400);
       const { model, effort, provider, auto } = body;
-      if ((model !== undefined && typeof model !== "string") || (effort !== undefined && typeof effort !== "string")) {
-        return json({ error: "The model and effort must be text." }, 400);
+      if (typeof model !== "string" || !model.trim() || typeof effort !== "string" || !effort.trim()) {
+        return json({ error: "Choose a model and effort." }, 400);
       }
       if (provider !== undefined && (typeof provider !== "string" || !isProvider(provider))) return json({ error: "Pick Claude or Codex." }, 400);
       if (auto !== undefined && typeof auto !== "boolean") return json({ error: "Automatic fixes must be either on or off." }, 400);
-      const choice = resolveFixer({ model: model?.trim().toLowerCase(), effort, provider });
+      const choice = resolveFixer({ model: model.trim().toLowerCase(), effort, provider });
       if ("error" in choice) return json({ error: choice.error }, 400);
       const fixer = { ...choice, auto: auto === true };
       try {
@@ -413,8 +438,10 @@ export async function handleApi(request: Request, env: Env, path: string) {
           return json({ error: "Proofed needs the new Variables permission on this repo. Accept it on GitHub, then try again." }, 403);
         }
         throw e;
+      } finally {
+        // GitHub may have applied some of the writes before a later one failed.
+        forget(`fixer:${repo.full_name}`);
       }
-      forget(`fixer:${repo.full_name}`);
       return json({ fixer });
     }
     // Pause switches the repo's Proofed workflow off on GitHub; nothing in the repo changes.
@@ -428,7 +455,7 @@ export async function handleApi(request: Request, env: Env, path: string) {
       const result = await openSetupPr(await installationToken(env, repo.installationId), repo, env.GITHUB_APP_SLUG);
       return json(result);
     }
-    return json({ pushed: await pushSecrets(env, user, repo.full_name, repo.installationId) });
+    return json(await syncSecrets(env, user, repo.full_name, repo.installationId));
   }
 
   return json({ error: "not_found" }, 404);

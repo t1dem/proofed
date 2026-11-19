@@ -36,7 +36,7 @@ async function inWorkspace(dir: string, workspaces: Pkg["workspaces"]) {
   for (const glob of patterns) {
     if (typeof glob !== "string") continue;
     const bangs = glob.match(/^!+/)?.[0].length ?? 0;
-    const pattern = glob.slice(bangs).replace(/^(?:\.\/)+|\/+$/g, "");
+    const pattern = glob.slice(bangs).replace(/^(?:\.?\/)+|\/+$/g, "");
     if (pattern && picomatch.isMatch(dir, pattern, { nonegate: true })) included = bangs % 2 === 0;
   }
   return included;
@@ -73,7 +73,10 @@ async function guessAndroid(token: string, repo: string, ref: string, files: str
     .filter((file) => /^(?:[\w-]+\/){1,3}build\.gradle(?:\.kts)?$/.test(file))
     .sort((a, b) => Number(!a.startsWith("app/")) - Number(!b.startsWith("app/")) || a.split("/").length - b.split("/").length || a.localeCompare(b))
     .slice(0, 8);
-  const readGradle = async (file: string) => (await readFile(token, repo, file, ref) ?? "").replace(/\/\*[\s\S]*?\*\/|^[ \t]*\/\/.*$/gm, "");
+  const readGradle = async (file: string) => (await readFile(token, repo, file, ref) ?? "").replace(
+    /"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g,
+    (part) => part.startsWith("/") ? " " : part,
+  );
   const catalog = files.includes("gradle/libs.versions.toml") ? await readFile(token, repo, "gradle/libs.versions.toml", ref) : "";
   const aliases = [...(catalog ?? "").matchAll(/^([\w.-]+)\s*=\s*\{[^\r\n]*\bid\s*=\s*["']com\.android\.application["']/gm)]
     .map(([, alias]) => alias!.replace(/[-_]/g, "."));
@@ -269,7 +272,9 @@ This PR adds:
 
 **Proofed will add scenarios to this PR itself.** On this PR's check, the selected provider reads the app and writes a few for its main flows, Kane runs each one ${where}, and only the ones Kane saw pass are committed here; the comment below lists them. It needs \`CLAUDE_CODE_OAUTH_TOKEN\` or \`CODEX_API_KEY\`, and happens only while \`home.md\` is the only scenario. They are plain Markdown: edit or delete them before you merge, like any other file.
 
-**Keys.** The checks need repository secrets: \`LT_USERNAME\`, \`LT_ACCESS_KEY\` (TestMu) and either \`CLAUDE_CODE_OAUTH_TOKEN\` (from \`claude setup-token\`) or \`CODEX_API_KEY\` (an OpenAI API key). If you saved them at https://proofed.neptunescodm.workers.dev/app, Proofed has already added them; otherwise add them under [Settings → Secrets → Actions](https://github.com/${repo}/settings/secrets/actions). If you add the Codex key in GitHub, choose a Codex model in Proofed's repository settings or set the Actions variable \`PROOFED_PROVIDER\` to \`codex\` before running the setup check.
+**Keys.** The checks need \`LT_USERNAME\`, \`LT_ACCESS_KEY\` (TestMu), and either \`CLAUDE_CODE_OAUTH_TOKEN\` (from \`claude setup-token\`) or \`CODEX_API_KEY\` (from OpenAI). Manual setup opens this PR without copying keys. Automatic setup can open it even if copying fails.
+
+To use Codex, choose a Codex model in Proofed's repository settings or set the Actions variable \`PROOFED_PROVIDER\` to \`codex\`. To copy saved keys, click **Add keys to repo** in [Proofed settings](https://proofed.neptunescodm.workers.dev/app/settings). You can also add keys directly in [GitHub → Settings → Secrets → Actions](https://github.com/${repo}/settings/secrets/actions). Check that the required secrets are there, including \`CODEX_API_KEY\` for Codex, before rerunning the setup check.
 
 **Check what was guessed about your build:**
 

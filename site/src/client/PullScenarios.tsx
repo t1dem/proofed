@@ -229,8 +229,7 @@ export function Scenarios({ runs, at, scenario }: ScenariosProps) {
   const told = current && story(view, current.id);
   if (!current || !told) return <p className="text-dim">This run had no scenarios to check.</p>;
 
-  const { now, before } = told;
-  const fix = before && view.find((r) => r.fix?.status === "fixed" && r.at > before.run.at)?.fix;
+  const { now, before, fix } = told;
   // On a phone the tabs scroll sideways; the fade at the right edge says there are more.
   const tabs = scenarios.length > 1 && (
     <div

@@ -43,7 +43,7 @@ export type Load<T> = { status: "loading" } | { status: "signed-out" } | { statu
 const STORE_KEY = "proofed-public-cache:";
 const memory = new Map<string, unknown>();
 const watchers = new Map<string, Set<(data: unknown) => void>>();
-const inFlight = new Map<string, Promise<unknown>>();
+const inFlight = new Map<string, { request: Promise<unknown>; changes: ((data: unknown) => unknown)[] }>();
 const persistent = PUBLIC && !DEMO;
 
 // Older builds cached authenticated responses without scoping them to the signed-in user.
@@ -87,14 +87,14 @@ function forgetAll() {
 // One request per path at a time; everyone showing that path gets the answer.
 export function fetchInto<T>(path: string): Promise<T> {
   const running = inFlight.get(path);
-  if (running) return running as Promise<T>;
-  const request = api<T>(path).then(
-    (data) => {
-      store(path, data);
-      return data;
-    },
-  );
-  inFlight.set(path, request);
+  if (running) return running.request as Promise<T>;
+  const changes: ((data: unknown) => unknown)[] = [];
+  const request = api<T>(path).then((data) => {
+    const updated = changes.reduce<unknown>((value, change) => change(value), data) as T;
+    store(path, updated);
+    return updated;
+  });
+  inFlight.set(path, { request, changes });
   void request.finally(() => inFlight.delete(path)).catch(() => {});
   return request;
 }
@@ -105,7 +105,9 @@ export const prefetch = (path: string) => {
 };
 
 // Changes what's on screen for `path` right away, ahead of the server's answer.
-export function mutate<T>(path: string, change: (data: T) => T) {
+export function mutate<T>(path: string, change: (data: T) => T, { preserveDuringRefresh = false } = {}) {
+  // The response may reflect an earlier snapshot. Keep the changed fields if it arrives later.
+  if (preserveDuringRefresh) inFlight.get(path)?.changes.push((data) => change(data as T));
   const data = cached<T>(path);
   if (data !== undefined) store(path, change(data));
 }

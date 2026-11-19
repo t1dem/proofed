@@ -1,4 +1,4 @@
-import { pushSecrets } from "./api";
+import { syncSecrets } from "./api";
 import type { UserRow } from "./auth";
 import { gh, installationToken, verifySignature } from "./github";
 import type { Env } from "./index";
@@ -64,7 +64,11 @@ export async function handleWebhook(request: Request, env: Env, ctx: ExecutionCo
           : null;
         for (const repo of added) {
           // The setup PR can start its check as soon as it opens.
-          if (user) await pushSecrets(env, user, repo.full_name, installationId).catch((e: unknown) => console.log("secrets", String(e)));
+          if (user) {
+            await syncSecrets(env, user, repo.full_name, installationId)
+              .then(({ warning }) => { if (warning) console.log("secrets", repo.full_name, warning); })
+              .catch((e: unknown) => console.log("secrets", String(e)));
+          }
           const result = await openSetupPr(token, repo, env.GITHUB_APP_SLUG).catch((e: unknown) => ({ error: String(e) }));
           console.log("setup", repo.full_name, JSON.stringify(result));
         }

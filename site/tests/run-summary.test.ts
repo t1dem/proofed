@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { creditSummary, defaultScenario, fixedSummary, latestScenarios } from "../src/run-summary.ts";
+import { creditSummary, defaultScenario, fixedSummary, latestScenarios, scenarioStory } from "../src/run-summary.ts";
 import type { Run } from "../src/worker/runs.ts";
 
 const before: Run = {
@@ -35,6 +35,15 @@ test("latest verdicts survive an older failure and a partial recheck", () => {
   ]);
   assert.equal(defaultScenario([partial, before])?.id, "promo-code");
   assert.equal(fixedSummary([partial, before], "Claude"), "Promo code total fixed; Place an order unconfirmed");
+});
+
+test("a scenario only shows fixes between its failed and passing results", () => {
+  const passing = { ...after, fix: undefined };
+  const intervening = { ...after, key: "pr-14/intervening", scenarios: [] };
+  const newer = { ...intervening, key: "pr-14/newer", fix: { ...after.fix!, summary: "Unrelated fix." } };
+  assert.equal(scenarioStory([newer, passing, before], "promo-code")?.fix, undefined);
+  assert.equal(scenarioStory([newer, passing, intervening, before], "promo-code")?.fix, intervening.fix);
+  assert.equal(scenarioStory([newer, after, before], "promo-code")?.fix, after.fix);
 });
 
 test("fully confirmed fixes keep the confirmed wording; failures and errors stay explicit", () => {

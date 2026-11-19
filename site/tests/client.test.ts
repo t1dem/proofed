@@ -34,6 +34,18 @@ test("the dashboard ignores legacy data from a different sign-in", async (t) => 
     assert.equal(stored[legacy], undefined);
     assert.deepEqual(await fetchInto("/api/pulls"), [{ title: "My pull request" }]);
     assert.deepEqual(stored, {});
+
+    await t.test("an in-flight refresh keeps a confirmed fixer choice", async (t) => {
+      const path = "/api/repos";
+      t.mock.method(globalThis, "fetch", async () => Response.json({ model: "claude", paused: false }));
+      await fetchInto(path);
+      const { promise, resolve } = Promise.withResolvers<Response>();
+      t.mock.method(globalThis, "fetch", () => promise);
+      const refresh = fetchInto<{ model: string; paused: boolean }>(path);
+      mutate<{ model: string }>(path, (repo) => ({ ...repo, model: "codex" }), { preserveDuringRefresh: true });
+      resolve(Response.json({ model: "claude", paused: true }));
+      assert.deepEqual(await refresh, { model: "codex", paused: true });
+    });
   } finally {
     hook.deregister();
     Reflect.deleteProperty(globalThis, "location");

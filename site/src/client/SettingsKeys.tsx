@@ -100,10 +100,11 @@ export function Keys({ me, onSaved }: { me: MeView; onSaved: (message: string) =
     setBusy(true);
     setError(undefined);
     try {
-      const r = await api<{ synced: number; of: number }>("/api/keys", { method: "POST", body: JSON.stringify(payload) });
+      const r = await api<{ synced: number; of: number; warning?: string }>("/api/keys", { method: "POST", body: JSON.stringify(payload) });
       formEl.reset();
       done();
-      onSaved(r.of > 0 ? `Saved, and added to ${r.synced} of ${r.of} repositories.` : "Saved.");
+      const saved = r.of > 0 ? `Saved, and added to ${r.synced} of ${r.of} repositories.` : "Saved.";
+      onSaved(r.warning ? `${saved} ${r.warning}` : saved);
     } catch (err) {
       setError(message(err));
     } finally {

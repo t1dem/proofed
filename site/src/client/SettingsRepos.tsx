@@ -42,7 +42,7 @@ function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange:
     setBusy(action);
     setNote(undefined);
     try {
-      const r = await api<{ pr?: string; skipped?: string; pushed?: string[] }>(`/api/repos/${repo.name}/${action}`, { method: "POST" });
+      const r = await api<{ pr?: string; skipped?: string; pushed?: string[]; warning?: string }>(`/api/repos/${repo.name}/${action}`, { method: "POST" });
       if (r.pr)
         setNote(
           <>
@@ -54,7 +54,10 @@ function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange:
           </>,
         );
       else if (r.skipped) setNote(`Nothing to do: ${r.skipped}.`);
-      else if (r.pushed) setNote(`Added ${r.pushed.length} secrets.`);
+      else if (r.pushed) {
+        const added = `Added ${r.pushed.length} secrets.`;
+        setNote(r.warning ? `${added} ${r.warning}` : added);
+      }
       onChange();
     } catch (e) {
       setNote(<span className="text-bad">{message(e)}</span>);

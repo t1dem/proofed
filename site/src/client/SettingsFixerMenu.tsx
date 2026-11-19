@@ -14,15 +14,16 @@ const menuRow = `flex h-8 w-full items-center gap-2 rounded-md px-2 text-left te
 // saved as Actions variables. One button in the repo's row; models on the left of the menu, effort on
 // the right, the switch for fixing automatically under both.
 export function FixerMenu({ repo }: { repo: RepoView }) {
-  const fixer = repo.fixer;
+  const [draft, setDraft] = useState<FixerView>();
+  const fixer = draft ?? repo.fixer;
   const [provider, setProvider] = useState<Provider>(() => providerOf(fixer?.model ?? ""));
   const saves = useRef(Promise.resolve());
   const latestSave = useRef(0);
   const confirmed = useRef(fixer);
   const pending = useRef(false);
   useLayoutEffect(() => {
-    if (!pending.current) confirmed.current = fixer;
-  }, [fixer]);
+    if (!pending.current) confirmed.current = repo.fixer;
+  }, [repo.fixer]);
   const [saving, setSaving] = useState<"model" | "effort" | "auto">();
   const [error, setError] = useState<string>();
   const [open, setOpen] = useState(false);
@@ -49,8 +50,8 @@ export function FixerMenu({ repo }: { repo: RepoView }) {
 
   const providerName = providerLabel(providerOf(fixer.model));
   const custom = !MODELS.some((m) => m.id === fixer.model);
-  const setFixer = (next: FixerView) => {
-    mutate<RepoView[]>("/api/repos", (all) => all.map((r) => (r.name === repo.name ? { ...r, fixer: next } : r)));
+  const setFixer = (next: FixerView, preserveDuringRefresh = false) => {
+    mutate<RepoView[]>("/api/repos", (all) => all.map((r) => (r.name === repo.name ? { ...r, fixer: next } : r)), { preserveDuringRefresh });
     mutate<PullView[]>("/api/pulls", (all) => all.map((p) => {
       if (p.repo !== repo.name) return p;
       mutate<PullDetail>(`/api/pulls/${p.repo}/${p.pr}`, (detail) => ({ ...detail, pull: { ...detail.pull, fixer: next } }));
@@ -60,14 +61,16 @@ export function FixerMenu({ repo }: { repo: RepoView }) {
   const save = (next: FixerView, what: "model" | "effort" | "auto") => {
     const id = ++latestSave.current;
     pending.current = true;
+    setDraft(next);
     setFixer(next);
     setSaving(what);
     setError(undefined);
     // Keep rapid selections in order so the last visible choice is also the last saved.
     saves.current = saves.current.then(async () => {
       try {
-        await api(`/api/repos/${repo.name}/fixer`, { method: "POST", body: JSON.stringify(next) });
-        confirmed.current = next;
+        const { fixer: saved } = await api<{ fixer: FixerView }>(`/api/repos/${repo.name}/fixer`, { method: "POST", body: JSON.stringify(next) });
+        confirmed.current = saved;
+        if (id === latestSave.current) setFixer(saved, true);
       } catch (e) {
         if (id === latestSave.current) {
           const previous = confirmed.current ?? fixer;
@@ -77,6 +80,7 @@ export function FixerMenu({ repo }: { repo: RepoView }) {
       } finally {
         if (id === latestSave.current) {
           pending.current = false;
+          setDraft(undefined);
           setSaving(undefined);
         }
       }

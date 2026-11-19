@@ -48,7 +48,7 @@ test("an Android application gets the Ubuntu cloud workflow and Android starter 
     "package.json": '{"scripts":{"lint":"eslint ."}}',
     "settings.gradle.kts": 'include(":app")',
     "gradlew": "",
-    "app/build.gradle.kts": 'plugins { id("com.android.application") }',
+    "app/build.gradle.kts": 'plugins { id("com.android.application") } // do not use apply false here',
   });
   assert.match(workflow, /^    runs-on: ubuntu-latest$/m);
   assert.match(workflow, /      - uses: actions\/setup-java@v4\n        with:\n          distribution: temurin\n          java-version: '17'\n      - uses: android-actions\/setup-android@v3/);
@@ -58,6 +58,8 @@ test("an Android application gets the Ubuntu cloud workflow and Android starter 
   assert.match(body, /Android application module `:app` with Temurin Java 17/);
   assert.match(body, /conventional debug output path `app\/build\/outputs\/apk\/debug\/app-debug\.apk`/);
   assert.match(body, /requires a TestMu plan with real devices\. End-to-end setup is not yet verified on a real device plan/);
+  assert.match(body, /Add keys to repo/);
+  assert.match(body, /including \x60CODEX_API_KEY\x60 for Codex, before rerunning the setup check/);
 });
 
 test("Android detection skips libraries and unapplied plugins and reads the Gradle Java toolchain", async (t) => {
@@ -89,9 +91,9 @@ test("a servable web package takes precedence over an Android application", asyn
   assert.match(body, /checks every pull request in Chrome/);
 });
 
-test("an npm workspace uses the root lockfile", async (t) => {
+test("an npm workspace with a leading slash uses the root lockfile", async (t) => {
   const { workflow } = await setup(t, {
-    "package.json": '{"workspaces":["./apps/*/"]}',
+    "package.json": '{"workspaces":["/apps/*/"]}',
     "apps/web/package.json": '{"scripts":{"start":"node server.js"}}',
     "package-lock.json": "{}",
   });
@@ -101,7 +103,7 @@ test("an npm workspace uses the root lockfile", async (t) => {
 
 test("a nested app excluded by the workspace uses its own install", async (t) => {
   const { workflow } = await setup(t, {
-    "package.json": '{"workspaces":{"packages":["apps/*","!apps/web"]}}',
+    "package.json": '{"workspaces":{"packages":["./apps/*","!/apps/web"]}}',
     "apps/web/package.json": '{"scripts":{"start":"node server.js"}}',
     "package-lock.json": "{}",
   });
