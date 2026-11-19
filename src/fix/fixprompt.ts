@@ -9,7 +9,7 @@ import { FAILED_CHECK_ACTION, FAILED_CHECK_REASON } from "../report/runfile.ts";
 // Keep Kane's interpretation separate from the check the fixer must preserve.
 export function describeFailure(f: FailureData, scenario?: Scenario) {
   return `### Scenario "${f.name}" (${f.file || "asked for on the PR"})
-Objective checked ${scenario ? checkedAt(scenario) : f.checkedAt ?? "in Chrome"}:
+Objective checked ${f.checkedAt ?? (scenario ? checkedAt(scenario) : "in Chrome")}:
 ${f.objective || scenario?.objective || ""}
 
 What went wrong: ${f.reason}
@@ -52,6 +52,6 @@ export function askFixer(text: string, fixer: Fixer, buildCommand: string) {
     allowedTools: ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", `Bash(${buildCommand})`],
   });
   if (!answer.ok) return answer;
-  const summary = /^SUMMARY:\s*(.+)$/m.exec(answer.text)?.[1] ?? answer.text.split("\n").at(-1) ?? "";
-  return { ok: true as const, summary: summary.trim() };
+  const summary = /^SUMMARY:[ \t]*(\S.*)$/m.exec(answer.text)?.[1]?.trim() ?? "The fixer gave no change summary.";
+  return { ok: true as const, summary };
 }

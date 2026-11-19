@@ -38,6 +38,9 @@ test("existing action env still configures Claude, generic model env configures 
     process.env.PROOFED_CLAUDE_MODEL = "claude-opus-5-1";
     process.env.PROOFED_CLAUDE_EFFORT = "max";
     assert.deepEqual(configuredFixer(), {provider:"claude",model:"claude-opus-5-1",effort:"max"});
+    process.env.PROOFED_PROVIDER = " Codex ";
+    assert.equal(configuredFixer().model, "gpt-6.2-sol");
+    delete process.env.PROOFED_PROVIDER;
     process.env.PROOFED_MODEL = "gpt-6.2-sol";
     process.env.PROOFED_EFFORT = "ultra";
     assert.deepEqual(configuredFixer(), {provider:"codex",model:"gpt-6.2-sol",effort:"ultra"});

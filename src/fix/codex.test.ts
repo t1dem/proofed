@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { test } from "node:test";
 import { askCodex } from "./codex.ts";
 import { askAgent } from "./agent.ts";
+import { askFixer } from "./fixprompt.ts";
 
 test("Codex runs once on PATH with a bounded sandbox, stdin prompt and final message", () => {
   const dir = mkdtempSync(join(tmpdir(), "proofed-fake-codex-"));
@@ -22,6 +23,7 @@ test("Codex runs once on PATH with a bounded sandbox, stdin prompt and final mes
       const mode = JSON.parse(input).input;
       if (mode === 'timeout') setTimeout(() => {}, 10000);
       else if (mode === 'empty') process.exit(0);
+      else if (mode === 'empty summary') fs.writeFileSync(args[args.indexOf('--output-last-message')+1], 'SUMMARY: \\nThe build passed.');
       else if (mode !== 'fix this') {console.log(JSON.stringify({type:'turn.failed',error:{message:mode}}));process.exit(1);}
       else {fs.writeFileSync(args[args.indexOf('--output-last-message')+1], ' SUMMARY: fixed it.\\n');console.log(JSON.stringify({type:'turn.completed'}));}
     `, {mode:0o755});
@@ -38,6 +40,7 @@ test("Codex runs once on PATH with a bounded sandbox, stdin prompt and final mes
     assert.equal(called.args.at(-1), '-');
     assert.ok(!called.args.includes('--dangerously-bypass-approvals-and-sandbox'));
     assert.deepEqual(askAgent("fix this", {...options,allowedTools:[]}), {ok:true,text:"SUMMARY: fixed it."});
+    assert.deepEqual(askFixer("empty summary", options, "bash proofed-build.sh"), { ok: true, summary: "The fixer gave no change summary." });
     for (const [error, expected] of [['Usage limit reached', /usage limit reached/i],['model gpt-6.1-sol is not supported', /isn't available/],['401 Unauthorized', /isn't logged in/],['some failure',/some failure/],['empty',/without a final answer/],['timeout',/didn't finish within/]] as const) {
       const answer = askCodex(error, {...options,timeoutMs:error === 'timeout' ? 100 : 2000});
       assert.equal(answer.ok,false);

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,6 +28,25 @@ function app(t: TestContext, url: string, script: string) {
   }
   return prepareBuild(dir);
 }
+
+test("the build launcher preserves literal backslashes in POSIX paths", { skip: process.platform === "win32" }, (t) => {
+  const root = mkdtempSync(join(tmpdir(), "proofed-build-test-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const dir = join(root, "app\\directory");
+  mkdirSync(dir);
+  const originalTemp = process.env.RUNNER_TEMP;
+  const originalBuild = process.env.PROOFED_BUILD;
+  process.env.RUNNER_TEMP = dir;
+  process.env.PROOFED_BUILD = "pwd -L";
+  t.after(() => {
+    if (originalTemp === undefined) delete process.env.RUNNER_TEMP;
+    else process.env.RUNNER_TEMP = originalTemp;
+    if (originalBuild === undefined) delete process.env.PROOFED_BUILD;
+    else process.env.PROOFED_BUILD = originalBuild;
+  });
+  const { buildCommand } = prepareBuild(dir);
+  assert.equal(execFileSync("bash", ["-c", buildCommand], { encoding: "utf8" }).trimEnd(), dir);
+});
 
 test("startup accepts the new server on localhost", async (t) => {
   const { server, url } = await listen(t);

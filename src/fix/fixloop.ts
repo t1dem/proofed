@@ -55,9 +55,11 @@ export type FixLoopEnd = {
   attempt: number;
   summary: string;
   tries: FixAttempt[];
-  // The last check: `fixing` for the scenarios the report had broken, `results` for all it ran.
+  // The last attempt's check, if it ran: `fixing` for the original failures, `results` for all it ran.
   fixing: ScenarioResult[];
   results: ScenarioResult[];
+  // Keep the attempt history if an earlier attempt completed a check.
+  hadResults: boolean;
   // Scenarios the last attempt broke, and the last note for Claude (or why the fixer couldn't run).
   broke: ScenarioResult[];
   feedback: string;
@@ -76,11 +78,15 @@ export async function fixLoop(o: FixLoopInput): Promise<FixLoopEnd> {
   let fixing: ScenarioResult[] = [];
   let results: ScenarioResult[] = [];
   let broke: ScenarioResult[] = [];
+  let hadResults = false;
   let failureStage: FixLoopEnd["failureStage"] = "change";
   const tries: FixAttempt[] = [];
-  const end = (status: FixLoopEnd["status"], attempt: number): FixLoopEnd => ({ status, attempt, summary, tries, fixing, results, broke, feedback, failureStage });
+  const end = (status: FixLoopEnd["status"], attempt: number): FixLoopEnd => ({ status, attempt, summary, tries, fixing, results, broke, hadResults, feedback, failureStage });
 
   for (let attempt = 1; attempt <= max; attempt++) {
+    fixing = [];
+    results = [];
+    broke = [];
     console.log(`\n=== Attempt ${attempt}: asking ${o.fixer.model} (${o.fixer.effort}) about ${failures.map((f) => f.name).join(", ")}`);
     live.fix({ attempt, of: max, doing: "writing", ...o.fixer, tries: [...tries] });
     const answer = timed("fixer", () => o.ask(failures, feedback));
@@ -119,19 +125,18 @@ export async function fixLoop(o: FixLoopInput): Promise<FixLoopEnd> {
     try {
       results = (await o.check(requested, attempt)).filter(Boolean);
     } catch (e) {
-      results = [];
-      fixing = [];
-      broke = [];
       feedback = `The rebuild couldn't be checked: ${maskSecrets(String(e))}`;
       tries.push({ summary, result: feedback });
       continue;
     }
+    hadResults ||= results.length > 0;
     const returned = new Set(results.map((r) => r.scenario.id));
     const missing = [...o.failures, ...neighbours].filter((s) => !returned.has(s.id));
     const missingLines = missing.map((s) => `Kane returned no result for "${s.name}" (${s.id}).`);
     fixing = results.filter((r) => ids.includes(r.scenario.id));
     broke = results.filter((r) => !ids.includes(r.scenario.id) && r.outcome === "failed" && !previouslyFailed.has(r.scenario.id));
-    const fixed = missing.length === 0 && fixing.length === ids.length && fixing.some((r) => r.outcome === "passed") && fixing.every(settled) && broke.length === 0;
+    const passing = fixing.filter((r) => r.outcome === "passed");
+    const fixed = missing.length === 0 && fixing.length === ids.length && passing.length > 0 && fixing.every(settled) && broke.length === 0;
     tries.push({
       summary,
       result: fixed ? "Kane saw it pass." : [...notPassing(fixing), ...missingLines, ...broke.map((r) =>
@@ -150,11 +155,15 @@ export async function fixLoop(o: FixLoopInput): Promise<FixLoopEnd> {
     const still = o.failures.filter((f) => fixing.some((r) => r.scenario.id === f.id && !settled(r)));
     const unresolved = o.failures.filter((f) => !returned.has(f.id) || still.includes(f));
     failures = unresolved.length > 0 ? unresolved : o.failures;
+    const wherePassed = checkedWhere(passing.map((r) => r.scenario));
+    const passedNote = passing.length === fixing.length
+      ? `The scenarios you were fixing pass now ${wherePassed}. Keep that.`
+      : `Kane saw ${passing.map((r) => `"${r.scenario.name}"`).join(", ")} pass ${wherePassed}. Keep that.`;
     feedback = [
       `Your change was: ${summary}`,
       ...(still.length > 0
         ? [`The scenarios were checked again ${checkedWhere(fixing.map((r) => r.scenario))}:\n${list(notPassing(fixing))}`]
-        : unresolved.length === 0 ? [`The scenarios you were fixing pass now ${checkedWhere(fixing.map((r) => r.scenario))}. Keep that.`] : []),
+        : unresolved.length === 0 && passing.length > 0 ? [passedNote] : []),
       ...(missing.length > 0 ? [list(missingLines)] : []),
       ...(broke.length > 0 ? [`But your change broke ${broke.length === 1 ? "a scenario" : "scenarios"} that didn't fail before it:\n${list(brokeLines)}\nFind what in your change did that, and fix it without breaking the others again.`] : []),
     ].join("\n");

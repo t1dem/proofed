@@ -128,7 +128,9 @@ export function withGaveUpAttempt(body: string, fix: FixNote, attemptNote: strin
     const edited = place(note);
     if (edited.length <= COMMENT_LIMIT) return edited;
   }
-  return body.replace(OMISSION_NOTE, shortNote).replace(/^- \[x\] (\*\*Fix with (?:Claude|Codex)\*\*)/m, "- [ ] $1");
+  const shortened = body.replace(OMISSION_NOTE, shortNote).replace(/^- \[x\] (\*\*Fix with (?:Claude|Codex)\*\*)/m, "- [ ] $1");
+  if (FIX_BOX_LINE.test(body) || shortened !== body) return shortened;
+  return body.replace(/(<sub>Run by Kane CLI on [^\n]+)<br>Comment <code>\/proofed<\/code> to check again[^\n]*<\/sub>(?=\n)/, `$1</sub>\n\n${shortNote}`);
 }
 
 function whatChanged(fix: FixNote) {

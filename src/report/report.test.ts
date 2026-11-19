@@ -5,7 +5,8 @@ import { runFile } from "../check/pipeline.ts";
 import { refuted } from "../testing/results.ts";
 import { FAILED_CHECK_ACTION, FAILED_CHECK_REASON, NOTHING_CHECKED } from "./runfile.ts";
 import { blockedReport } from "../action/blocked.ts";
-import { addRun, alreadyReported, buildReport, fixRequested, outdated, postsNew, readReportData, WORKING, type ReportData } from "./report.ts";
+import { addRun, alreadyReported, buildReport, fixRequested, outdated, postsNew, readReportData, readRunKey, withGaveUpAttempt, WORKING, type ReportData } from "./report.ts";
+import { COMMENT_LIMIT } from "./reportdata.ts";
 import { crashResult } from "../targets/precheck.ts";
 import { askedScenario, replayAskedScenario } from "../action/requests.ts";
 import type { ScenarioResult } from "../types.ts";
@@ -27,6 +28,28 @@ test("failure data survives the round trip through the comment", () => {
   assert.equal(fixRequested(body), false);
   assert.equal(fixRequested(body.replace("- [ ] **Fix", "- [x] **Fix")), true);
   assert.match(body, /<code>\/proofed fix<\/code>/);
+});
+
+test("the fixer sees where the original check ran when the replay target differs", () => {
+  const body = buildReport({ sha: "abc1234def", results: [failed], skipped: [], clips: new Map(), fixEnabled: true });
+  const failure = { ...readReportData(body)!.failures[0]!, checkedAt: "on an Android device" };
+  assert.match(describeFailure(failure, failed.scenario), /Objective checked on an Android device:/);
+});
+
+test("a full comment-only report keeps the failed fix result and its metadata", () => {
+  const input = {
+    sha: "abc1234def", results: [failed], skipped: ["x"], clips: new Map(), fixEnabled: true, runKey: "pr-1/abc",
+    fixSetup: { note: "Comment `/proofed fix` to try a fix.", comment: true },
+  };
+  const length = buildReport(input).length;
+  const body = buildReport({ ...input, skipped: ["x".repeat(COMMENT_LIMIT - length + 1)] });
+  assert.equal(body.length, COMMENT_LIMIT);
+  assert.doesNotMatch(body, /Fix with Claude|Some report details were omitted/);
+  const report = withGaveUpAttempt(body, { ...fix, status: "gave-up", attempts: 3 }, "");
+  assert.match(report, /\*\*The fix failed\.\*\* Nothing was pushed\./);
+  assert.ok(report.length <= COMMENT_LIMIT);
+  assert.deepEqual(readReportData(report), readReportData(body));
+  assert.equal(readRunKey(report), input.runKey);
 });
 
 test("oversized reports keep valid metadata and omit stored objectives and steps", () => {

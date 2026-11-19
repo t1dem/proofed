@@ -36,6 +36,7 @@ test("the dashboard validates efforts and encrypts/syncs the Codex credential", 
       if(path === '/user/installations') return Response.json({installations:[{id:7}]});
       if(path.endsWith('/repositories')) return Response.json({repositories:[{id:1,full_name:'owner/repo',permissions:{admin:true}}]});
       if(path.endsWith('/public-key')) return Response.json({key:Buffer.from(repoKey.publicKey).toString('base64'),key_id:'1'});
+      if(path.endsWith('/actions/variables') && options.method==='GET') return Response.json({variables:[],total_count:0});
       if(path.includes('/actions/variables') || path.includes('/actions/secrets/')) return new Response(null,{status:204});
       throw new Error('Unexpected request: '+path);
     };

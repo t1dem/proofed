@@ -4,9 +4,11 @@ import { DEFAULT_FIXER, providerOf, resolveFixer } from "./models.ts";
 import { maskSecrets } from "../secrets.ts";
 
 export function configuredFixer() {
+  const provider = process.env.PROOFED_PROVIDER;
+  const useLegacyModel = provider?.trim().toLowerCase() !== "codex";
   const fixer = resolveFixer({
-    provider: process.env.PROOFED_PROVIDER,
-    model: process.env.PROOFED_MODEL || process.env.PROOFED_CLAUDE_MODEL,
+    provider,
+    model: process.env.PROOFED_MODEL || (useLegacyModel ? process.env.PROOFED_CLAUDE_MODEL : undefined),
     effort: process.env.PROOFED_EFFORT || process.env.PROOFED_CLAUDE_EFFORT,
   }, DEFAULT_FIXER);
   if ("error" in fixer) throw new Error(fixer.error);

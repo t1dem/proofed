@@ -61,3 +61,33 @@ test("build diagnostics are masked before trimming and check failures keep their
   assert.equal(checked.failureStage, "check");
   assert.match(checked.feedback, /rebuild couldn't be checked.*Server stuck/);
 });
+
+test("a final build failure keeps the earlier check in history without reusing its results", async () => {
+  let builds = 0;
+  const end = await fixLoop({
+    ...options,
+    maxAttempts: 2,
+    ask: (_, feedback) => ({ ok: true, summary: feedback ? "Fix checkout too" : "Fix the cart" }),
+    build: () => ++builds === 2 ? "Build failed" : undefined,
+    check: async () => [{ scenario: scenarios[0]!, outcome: "passed", steps: [], end: undefined, clip: undefined }],
+  });
+  assert.equal(end.status, "gave-up");
+  assert.equal(end.hadResults, true);
+  assert.equal(end.failureStage, "check");
+  assert.equal(end.summary, "Fix checkout too");
+  assert.equal(end.tries[1]?.result, "It didn't build.");
+  assert.deepEqual(end.fixing, []);
+  assert.deepEqual(end.results, []);
+});
+
+test("an unconfirmed description alone is never reported as passing", async () => {
+  const scenario = { ...scenarios[0]!, id: "asked-in-description", file: "" };
+  const end = await fixLoop({
+    ...options,
+    failures: [{ ...options.failures[0]!, ...scenario }],
+    scenariosFor: () => [scenario],
+    check: async () => [{ scenario, outcome: "unsure", steps: [], end: undefined, clip: undefined }],
+  });
+  assert.equal(end.status, "gave-up");
+  assert.doesNotMatch(end.feedback, /pass now|Keep that/);
+});

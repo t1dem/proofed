@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { offLimits } from "./guard.ts";
 import { env } from "../env.ts";
+import { gitPath } from "../paths.ts";
 import { findGitBash, killTree } from "../process.ts";
 import { fileWithSecret } from "../secrets.ts";
 import { timed } from "../timing.ts";
@@ -20,8 +21,8 @@ const sh = (word: string) => (/^[\w./-]+$/.test(word) ? word : `'${word.replaceA
 export function prepareBuild(appDir: string) {
   const buildInput = env("PROOFED_BUILD");
   const buildScript = join(process.env.RUNNER_TEMP || tmpdir(), "proofed-build.sh");
-  const buildCommand = `bash ${sh(buildScript.replaceAll("\\", "/"))}`;
-  writeFileSync(buildScript, `set -e -o pipefail\ncd ${sh(resolve(appDir).replaceAll("\\", "/"))}\n${buildInput}\n`);
+  const buildCommand = `bash ${sh(gitPath(buildScript))}`;
+  writeFileSync(buildScript, `set -e -o pipefail\ncd ${sh(gitPath(resolve(appDir)))}\n${buildInput}\n`);
   return {
     buildInput, buildCommand, build: () => timed("rebuild", () => build(buildScript)), serve: () => serve(appDir),
     cleanup: () => rmSync(buildScript, { force: true }),
@@ -127,9 +128,8 @@ export const ignoredTrackedPaths = () => new Set(git("ls-files", "-z", "--cached
 export function discardLeak(agentName: string) {
   const leaked = fileWithSecret(fixChanges());
   if (!leaked) return undefined;
-  const untracked = untrackedPaths();
-  git("checkout", "--", ".");
-  for (const file of untracked) rmSync(file, { force: true });
+  git("restore", "--source=HEAD", "--staged", "--worktree", "--", ".");
+  for (const file of untrackedPaths()) rmSync(file, { force: true });
   return `${agentName}'s change put a credential of this job into ${leaked}. Proofed discarded the change`;
 }
 
@@ -139,7 +139,7 @@ function build(buildScript: string) {
     const ignored = ignoredTrackedPaths();
     const changedOutputs = diffPaths("HEAD").filter((file) => ignored.has(file));
     if (changedOutputs.length) git("--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--worktree", "--", ...changedOutputs);
-    execFileSync(findGitBash(), [buildScript.replaceAll("\\", "/")], { stdio: "pipe", windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+    execFileSync(findGitBash(), [gitPath(buildScript)], { stdio: "pipe", windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
     const scenariosDir = env("PROOFED_SCENARIOS", ".proofed/scenarios");
     const protectedFiles = fixChanges().filter((file) => offLimits(file, scenariosDir));
     if (protectedFiles.length) return `The build changed protected files: ${protectedFiles.join(", ")}.`;
@@ -171,8 +171,7 @@ export function stagedFilesMatch() {
       if (!execFileSync("git", ["cat-file", "blob", oid!], { stdio: "pipe" }).equals(link)) return false;
     } else {
       if (!stat.isFile() || (process.platform !== "win32" && !!(stat.mode & 0o100) !== (mode === "100755"))) return false;
-      if (git("hash-object", "--no-filters", "--", file) === oid) continue;
-      // Clean filters can change staged bytes. Accept only the bytes a checkout would recreate.
+      // Checkout filters can change the bytes even when the staged blob matches the checked file.
       const content = readFileSync(file);
       const checkedOut = execFileSync("git", ["cat-file", "--filters", `--path=${file}`, oid!], {
         maxBuffer: Math.max(1024 * 1024, content.length + 1), stdio: "pipe",

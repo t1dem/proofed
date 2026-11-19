@@ -60,7 +60,7 @@ export function fixSetup(provider: Provider, env: NodeJS.ProcessEnv = process.en
   }
   const conditions = workflowConditions(text);
   const claude = conditions.filter((condition) => checksFor("Claude").test(condition));
-  if (!claude.length || conditions.some((condition) => checksFor("Codex").test(condition))) return undefined;
+  if (claude.every((condition) => checksFor("Codex").test(condition))) return undefined;
   // A command needs a branch that accepts a new comment without a ticked box.
   const comment = claude.every((condition) => condition.split("||").some((branch) => {
     const command = commandCondition.exec(branch);

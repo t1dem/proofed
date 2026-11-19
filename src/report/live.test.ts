@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 test("frames go out one at a time, in order, and only the newest waits behind a slow upload", async () => {
-  Object.assign(process.env, { PROOFED_SERVER: "http://proofed.test", ACTIONS_ID_TOKEN_REQUEST_URL: "http://proofed.test/oidc", ACTIONS_ID_TOKEN_REQUEST_TOKEN: "t" });
+  Object.assign(process.env, { PROOFED_SERVER: "http://proofed.test", ACTIONS_ID_TOKEN_REQUEST_URL: "https://proofed.test/oidc", ACTIONS_ID_TOKEN_REQUEST_TOKEN: "t" });
   const sent: string[] = [];
   let open = 0;
   globalThis.fetch = async (input) => {
@@ -20,7 +20,11 @@ test("frames go out one at a time, in order, and only the newest waits behind a 
   const jpeg = new Uint8Array([0xff, 0xd8]);
   const t = Date.now();
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  live.start({ kind: "check", pr: 1, sha: "abc", runUrl: undefined });
+  const run = { kind: "check", pr: 1, sha: "abc", runUrl: undefined } as const;
+  live.start(run);
+  assert.equal(live.on(), false);
+  process.env.PROOFED_SERVER = "https://proofed.test";
+  live.start(run);
   live.frame("b", { jpeg, at: t });
   // Waits behind b's upload, and a newer action frame of the same scenario takes its place.
   live.frame("a", { jpeg, at: t });

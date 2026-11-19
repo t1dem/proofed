@@ -56,6 +56,14 @@ test("an old workflow gets a note instead of a fix box that would do nothing", (
       contains(github.event.comment.body, '- [x] **Fix with Codex**')
 `);
     assert.equal(fixSetup("codex", { ...env, PROOFED_CODEX: "true" }), undefined);
+    workflow(`jobs:
+  proofed:
+    if: contains(github.event.comment.body, '- [x] **Fix with Claude**')
+    steps:
+      - if: contains(github.event.comment.body, '- [x] **Fix with Claude**') || contains(github.event.comment.body, '- [x] **Fix with Codex**')
+        uses: t1dem/proofed@v1
+`);
+    assert.equal(fixSetup("codex", { ...env, PROOFED_CODEX: "true" })?.comment, false);
     // Outside Actions, or a fix step that doesn't say: nothing is known, the box stays.
     assert.equal(fixSetup("codex", {}), undefined);
   } finally {

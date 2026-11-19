@@ -10,7 +10,7 @@ import { askFixer, fixPrompt } from "./fixprompt.ts";
 import { gaveUpReport } from "./fixreport.ts";
 import { checkFix, checkedWhere, fixRefusal, needsWeb, targetScenarios } from "./fixtarget.ts";
 import { changesLfsFiles, diffPaths, discardLeak, fileStates, fixChanges, git, ignoredTrackedPaths, LFS_REFUSAL, prepareBuild, stageCheckedFiles, stagedFilesMatch, treeBeforeCheck, untrackedPaths } from "./fixworkspace.ts";
-import { ctx, editComment, findReport, readEvent, setStatus, type Comment } from "../github.ts";
+import { ctx, editComment, findReport, readEvent, setStatus, type Comment, type Repo } from "../github.ts";
 import { putBack } from "./guard.ts";
 import { live } from "../report/live.ts";
 import { COMMENT_LIMIT } from "../report/reportdata.ts";
@@ -160,6 +160,25 @@ function scenariosFor({ failedFiles, asked }: FixPlan, ids: string[]) {
   return targetScenarios([...failedFiles, ...asked].filter((s) => ids.includes(s.id)));
 }
 
+const fixingStatus = (provider: FixReport["provider"]) => `${provider} is fixing, Kane will re-check`;
+
+async function canRestoreStatus(repo: Repo, { brokenSha, runUrl, provider }: FixReport, ownsReport: boolean) {
+  if (!runUrl) return ownsReport;
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/commits/${brokenSha}/status`, {
+      headers: { authorization: `Bearer ${repo.token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return ownsReport;
+    const { statuses } = (await res.json()) as { statuses: { context: string; state: string; target_url?: string; description?: string }[] };
+    const status = statuses.find((s) => s.context === "Proofed");
+    if (status?.state === "pending") return status.target_url === runUrl && status.description === fixingStatus(provider);
+    return ownsReport && (!status || status.state === "failure");
+  } catch {
+    return ownsReport;
+  }
+}
+
 async function markFixing(plan: FixPlan) {
   const { repo, report, body, fixer, provider, runUrl, brokenSha, pr, failures } = plan;
   if (repo && report) {
@@ -167,7 +186,7 @@ async function markFixing(plan: FixPlan) {
     if (current?.id !== report.id || !sameFixRequest(current.body, body)) return false;
     const working = withLine(body, `${WORKING.replace("Claude", provider)} with ${describeFixer(fixer)}. [Follow along](${runUrl})`);
     if (working.length <= COMMENT_LIMIT) await editComment(repo, report.id, working);
-    await setStatus(repo, brokenSha, "pending", `${provider} is fixing, Kane will re-check`, runUrl);
+    await setStatus(repo, brokenSha, "pending", fixingStatus(provider), runUrl);
   }
   live.start({ kind: "fix", pr, sha: brokenSha, runUrl });
   live.track(scenariosFor(plan, failures.map((f) => f.id)));
@@ -236,15 +255,16 @@ function stopAfterAttempts(plan: FixPlan, loop: FixLoopEnd): FixOutcome {
     const log = `${agentName} couldn't run: ${feedback}`;
     return { ...restore, log, note: `${log}. Tick the box, or comment \`/proofed fix\` with a model, to try again.` };
   }
-  if (loop.results.length === 0) {
+  if (!loop.hadResults) {
     const reason = loop.failureStage === "check" ? "without a completed check of the rebuild" : "without a change that builds";
     return { ...restore, repost: true, note: `${provider} tried ${attempt} times ${reason}. Last note: ${feedback.split("\n")[0]}` };
   }
-  if (loop.fixing.length === plan.failures.length && loop.fixing.every(settled) && loop.broke.length > 0) {
+  const passing = loop.fixing.filter((r) => r.outcome === "passed");
+  if (passing.length > 0 && loop.fixing.length === plan.failures.length && loop.fixing.every(settled) && loop.broke.length > 0) {
     const names = (results: ScenarioResult[]) => results.map((r) => `"${r.scenario.name}"`).join(", ");
     return {
       ...restore, repost: true,
-      note: `${provider} tried ${attempt} times. The last fix Kane checked made ${names(loop.fixing)} pass but broke ${names(loop.broke)}, so nothing was pushed.`,
+      note: `${provider} tried ${attempt} times. The last fix Kane checked made ${names(passing)} pass but broke ${names(loop.broke)}, so nothing was pushed.`,
       status: `${provider}'s fix broke another scenario; nothing was pushed`,
     };
   }
@@ -252,7 +272,7 @@ function stopAfterAttempts(plan: FixPlan, loop: FixLoopEnd): FixOutcome {
     ...restore, repost: true, status: "The original failures stand. Nothing was pushed.",
     attempt: {
       fix: { status: "gave-up", attempts: attempt, summary, ...fixer, tries },
-      passing: loop.fixing.filter((r) => r.outcome === "passed").map((r) => r.scenario.name),
+      passing: passing.map((r) => r.scenario.name),
     },
   };
 }
@@ -475,16 +495,21 @@ async function finalize(outcome: FixOutcome): Promise<number> {
         if (restored.length > COMMENT_LIMIT) restored = original;
       }
       if (repo && report) {
+        let ownsReport = false;
         try {
           const current = await findReport(repo, pr);
           // The working line may have changed, while a newer run changes the report data or archive.
           if (current?.id === report.id && current.body && readRunKey(current.body) === readRunKey(body) &&
               isDeepStrictEqual(readReportData(current.body), readReportData(body))) {
+            ownsReport = true;
             await (outcome.repost ? putReport(repo, pr, restored, true) : editComment(repo, report.id, restored));
           }
         } finally {
           const status = outcome.status === undefined ? "Fix didn't run; the original failure stands" : outcome.status;
-          if (status !== null) await setStatus(repo, brokenSha, "failure", status, runUrl);
+          // Comment and status updates can finish at different times.
+          if (status !== null && await canRestoreStatus(repo, outcome.request, ownsReport)) {
+            await setStatus(repo, brokenSha, "failure", status, runUrl);
+          }
         }
       }
       return outcome.code ?? 1;

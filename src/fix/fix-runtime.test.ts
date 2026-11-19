@@ -96,7 +96,10 @@ fs.writeFileSync('modes/counter', bundle === 'bundle: fixed\\n' && fs.readFileSy
   // All API functions fix.ts/pipeline.ts can call are local spies, and push never invokes git push.
   const github = `export * from ${JSON.stringify(new URL("../github.ts", import.meta.url).href)};
 const record = (type, value) => { globalThis.fixtureLog(type,value); };
-export const findReport=async()=>({id:1,body:process.env.FIXTURE_REPORT??${JSON.stringify(body)}});
+let reports = 0;
+export const findReport=async()=>++reports > 2 && process.env.FIXTURE_NEWER_STATUS
+  ? {id:2,body:${JSON.stringify(dataComment({ sha: original, failures: [] }))}}
+  : {id:1,body:process.env.FIXTURE_REPORT??${JSON.stringify(body)}};
 export const listReports=async()=>({current:await findReport(),older:[]});
 export const editComment=async(_repo,_id,body)=>{record('report',body);return {html_url:'https://example.test/report'};};
 export const postComment=async(_repo,_pr,body)=>{record('report',body);return {html_url:'https://example.test/report'};};
@@ -146,7 +149,14 @@ const mocks=new Map(${JSON.stringify([...mocks])});
 registerHooks({resolve(specifier,context,next){const url=specifier.startsWith('.')&&context.parentURL?.startsWith('file:')?new URL(specifier,context.parentURL).href:specifier;
 // A mock's re-export loads the original implementation, without remapping it again.
 if(mocks.has(url)&&!context.parentURL?.startsWith('data:'))return {url:mocks.get(url),shortCircuit:true};return next(specifier,context);}});
-globalThis.fetch=async()=>{throw new Error('Network forbidden in fixer fixture');};`;
+globalThis.fetch=async(url)=>{
+  const state=process.env.FIXTURE_NEWER_STATUS;
+  if(state && String(url).endsWith('/commits/${original}/status')) return Response.json({statuses:[{
+    context:'Proofed',state,description:'Claude is fixing, Kane will re-check',
+    target_url:'https://github.com/fixture/repo/actions/runs/123',
+  }]});
+  throw new Error('Network forbidden in fixer fixture');
+};`;
   const env = { ...process.env, TMPDIR: dir, TEMP: dir, TMP: dir, GITHUB_TOKEN: "fixture-token", GITHUB_REPOSITORY: "fixture/repo", PROOFED_AUTO: "true", PROOFED_NUMBER: "1", PROOFED_BUILD: build, PROOFED_BASE_SHA: base, PROOFED_HEAD_REF: "main", PROOFED_OUT: join(dir, "out"), PROOFED_FIX: "true", PROOFED_DIR: ".", KANE_CLI: fakeKane, FAKE_KANE_LOG: join(dir, "kane.log"), FAKE_KANE_MODES: join(dir, "modes"), RUNNER_TEMP: dir };
   for (const key of ["PROOFED_TARGET", "PROOFED_EXECUTION", "PROOFED_APP", "PROOFED_URL", "PROOFED_SERVE", "PROOFED_BASE_REF", "GITHUB_EVENT_PATH", "GITHUB_RUN_ID", "PROOFED_CLAUDE_MODEL", "PROOFED_CLAUDE_EFFORT", "PROOFED_SCENARIOS", "ACTIONS_ID_TOKEN_REQUEST_URL", "ACTIONS_ID_TOKEN_REQUEST_TOKEN"]) delete env[key as keyof typeof env];
   Object.assign(env, { PROOFED_PROVIDER: "claude", PROOFED_MODEL: DEFAULT_FIXER.model, PROOFED_EFFORT: DEFAULT_FIXER.effort });
@@ -232,6 +242,19 @@ test("an exception after marking the fix pending restores the report and fails t
     assert.doesNotMatch(ran.stdout + ran.stderr, /fixture-token/);
     assert.equal(existsSync(join(f.dir, "proofed-build.sh")), false);
   } finally { f.cleanup(); }
+});
+
+test("a replaced report leaves the new success alone and still clears an owned pending status", () => {
+  for (const state of ["success", "pending"]) {
+    const f = fixture("android", "", "node build.cjs", false, { throwFromAgent: true });
+    try {
+      const ran = f.run("./fix.ts", { GITHUB_RUN_ID: "123", GITHUB_SERVER_URL: "https://github.com", FIXTURE_NEWER_STATUS: state });
+      assert.equal(ran.status, 1, ran.stdout + ran.stderr);
+      const events = f.events();
+      assert.deepEqual(events.map((e) => e.type), state === "pending" ? ["report", "status", "ask", "status"] : ["report", "status", "ask"]);
+      if (state === "pending") assert.equal((events[3]!.value as { state: string }).state, "failure");
+    } finally { f.cleanup(); }
+  }
 });
 
 test("a rejected commit restores the report and logs a masked Git diagnostic", () => {
