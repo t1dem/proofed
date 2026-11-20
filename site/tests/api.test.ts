@@ -109,10 +109,11 @@ test("pulls remain readable when the installation token cannot be refreshed", as
   const env = {
     SECRETS_KEY: secret,
     DB: {
+      // Reports for queries of the reports table; the runs query only mentions it in a subquery.
       prepare: (sql: string) => ({
         bind: () => ({
-          all: async () => ({ results: sql.includes("FROM reports") ? [report] : [] }),
-          first: async () => sql.includes("FROM reports") ? report : user,
+          all: async () => ({ results: sql.startsWith("SELECT * FROM reports") ? [report] : [] }),
+          first: async () => sql.startsWith("SELECT * FROM reports") ? report : user,
         }),
       }),
     },

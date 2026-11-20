@@ -159,8 +159,10 @@ export async function listPulls(env: Env, repos: string[]): Promise<PullView[]> 
     env.DB.prepare(`SELECT * FROM reports WHERE repo IN (${marks}) AND closed = 0 AND updated_at > ?${names.length + 1} ORDER BY updated_at DESC LIMIT 200`)
       .bind(...names, since)
       .all<ReportRow>(),
+    // The latest run of each listed pull, however old: it says when the pull was last checked.
     env.DB.prepare(
-      `SELECT * FROM runs r WHERE repo IN (${marks}) AND created_at > ?${names.length + 1}
+      `SELECT * FROM runs r WHERE repo IN (${marks})
+       AND EXISTS (SELECT 1 FROM reports p WHERE p.repo = r.repo AND p.pr = r.pr AND p.closed = 0 AND p.updated_at > ?${names.length + 1})
        AND key = (SELECT key FROM runs WHERE repo = r.repo AND pr = r.pr ORDER BY created_at DESC, key DESC LIMIT 1)`,
     )
       .bind(...names, since)
