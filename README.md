@@ -11,6 +11,8 @@
 
 [![Test CLI](https://github.com/t1dem/proofed/actions/workflows/test.yml/badge.svg)](https://github.com/t1dem/proofed/actions/workflows/test.yml) [![npm](https://img.shields.io/npm/v/proofed-cli)](https://www.npmjs.com/package/proofed-cli)
 
+<img src="https://raw.githubusercontent.com/t1dem/proofed/main/docs/devices.png" width="880" alt="The Proofed dashboard in a browser and on a phone, on sample data: pull requests grouped into Needs you, Kane is checking, Fixing and Passed">
+
 </div>
 
 | Web · [Excalidraw #11974](https://github.com/excalidraw/excalidraw/pull/11974) | Android · [AnkiDroid #20889](https://github.com/ankidroid/Anki-Android/pull/20889) | Electron · [MarkText #5276](https://github.com/marktext/marktext/pull/5276) |

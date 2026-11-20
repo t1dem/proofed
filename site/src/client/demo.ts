@@ -2,30 +2,35 @@
 // dashboard against it (.proofed/scenarios/dashboard-*.md), so the texts here are what those
 // scenarios expect.
 //
-// The pull requests of t1dem/proofed-demo-store and t1dem/proofed are real. What the demo shows for
+// The pull requests of the demo store and of Proofed's own site are real. What the demo shows for
 // them is copied from GitHub: the report comment (and its edit history), the commits, the run file
 // next to the clips on the repo's proofed-clips branch, and the Actions run. Where none of those
 // says something (which model fixed demo store PR #1, what one scenario of a demo store run cost),
-// it isn't stated. Everything in sample/… is made up, to show the states no real pull request is
-// in right now, and has no GitHub links. The sample clips (public/clips) are the demo store's own
+// it isn't stated. The storefront's pull requests are made up, to show the states no real pull
+// request is in right now. The demo is public, so it shows them all under a made-up account and
+// organisation (northbean) and links to none of them on GitHub; only the clips still load from where they are. The sample clips (public/clips) are the demo store's own
 // recordings of PR #2, standing in for a sample run.
 import { summarize, type Live, type LiveFix, type LiveStatus } from "../../../src/report/livefile";
 import { BLANK_PAGE } from "../../../src/report/runfile";
 import type { FixerView, MeView, RepoView } from "../worker/api";
 import type { LiveView } from "../worker/live";
-import type { PullDetail, PullView, Run } from "../worker/runs";
+import type { ActivityRun, PullDetail, PullView, Run } from "../worker/runs";
+import * as tryDemo from "./demo-try";
 
 const min = 60_000;
 const hour = 60 * min;
 const now = Date.now();
-const store = "t1dem/proofed-demo-store";
-const proofed = "t1dem/proofed";
-const sample = "sample/sample-coffee-store";
+// Where the real pull requests' clips are kept.
+const storeClips = "t1dem/proofed-demo-store";
+const proofedClips = "t1dem/proofed";
+const store = "northbean/shop";
+const proofed = "northbean/website";
+const sample = "northbean/storefront";
 
-const me: MeView = { login: "t1dem", avatar: null, testmu: "t1dem", claude: true, codex: true, installUrl: "#" };
+// A made-up account; the avatar is DiceBear's Lorelei (CC0).
+const me: MeView = { login: "iris-lind", avatar: "/demo-avatar.svg", testmu: "iris-lind", claude: true, codex: true, installUrl: "#" };
 
 const at = (iso: string) => Date.parse(iso);
-const actions = (repo: string, id: number) => `https://github.com/${repo}/actions/runs/${id}`;
 // A clip on the repo's proofed-clips branch. The demo store's older runs have no still, only the GIF.
 const clip = (repo: string, run: string, id: string, still = true) => {
   const base = `https://github.com/${repo}/raw/proofed-clips/${run}/${id}`;
@@ -42,12 +47,11 @@ const storePromo: Run[] = [
     key: "pr-1/6434ed5-43357060269",
     at: at("2026-11-13T11:01:49Z"),
     sha: "6434ed5a977ec0e349faf5f9ab5497ebf6713f50",
-    runUrl: actions(store, 43357060269),
     skipped: [],
     scenarios: [
-      { id: "checkout", name: "Place an order", outcome: "passed", clip: clip(store, "pr-1/6434ed5-43357060269", "checkout", false), credits: 62 },
-      { id: "free-shipping", name: "Free shipping from €50", outcome: "passed", clip: clip(store, "pr-1/6434ed5-43357060269", "free-shipping", false) },
-      { id: "promo-code", name: "Promo code total", outcome: "passed", clip: clip(store, "pr-1/6434ed5-43357060269", "promo-code", false) },
+      { id: "checkout", name: "Place an order", outcome: "passed", clip: clip(storeClips, "pr-1/6434ed5-43357060269", "checkout", false), credits: 62 },
+      { id: "free-shipping", name: "Free shipping from €50", outcome: "passed", clip: clip(storeClips, "pr-1/6434ed5-43357060269", "free-shipping", false) },
+      { id: "promo-code", name: "Promo code total", outcome: "passed", clip: clip(storeClips, "pr-1/6434ed5-43357060269", "promo-code", false) },
     ],
   },
   {
@@ -63,11 +67,11 @@ const storePromo: Run[] = [
         outcome: "failed",
         reason: "Final verification failed: \"the discount is −€9.10, shipping is Free and the total is €81.90.\"",
         diagnosis: "The promotion field displayed the entered code as uppercase, and applying it left the required €9.10 discount and €81.90 total missing.",
-        clip: clip(store, "pr-1/1787177-local", "promo-code", false),
+        clip: clip(storeClips, "pr-1/1787177-local", "promo-code", false),
         credits: 70,
       },
-      { id: "checkout", name: "Place an order", outcome: "passed", clip: clip(store, "pr-1/1787177-local", "checkout", false) },
-      { id: "free-shipping", name: "Free shipping from €50", outcome: "passed", clip: clip(store, "pr-1/1787177-local", "free-shipping", false) },
+      { id: "checkout", name: "Place an order", outcome: "passed", clip: clip(storeClips, "pr-1/1787177-local", "checkout", false) },
+      { id: "free-shipping", name: "Free shipping from €50", outcome: "passed", clip: clip(storeClips, "pr-1/1787177-local", "free-shipping", false) },
     ],
   },
 ];
@@ -77,12 +81,11 @@ const storeShipping: Run[] = [
     key: "pr-2/84514db-43393225329",
     at: at("2026-11-13T08:30:59Z"),
     sha: "84514dbd32279572679948eb3baa665756740ba7",
-    runUrl: actions(store, 43393225329),
     skipped: [],
     scenarios: [
-      { id: "checkout", name: "Place an order", outcome: "passed", clip: clip(store, "pr-2/84514db-43393225329", "checkout", false), credits: 58 },
-      { id: "free-shipping", name: "Free shipping from €50", outcome: "passed", clip: clip(store, "pr-2/84514db-43393225329", "free-shipping", false) },
-      { id: "promo-code", name: "Promo code total", outcome: "passed", clip: clip(store, "pr-2/84514db-43393225329", "promo-code", false) },
+      { id: "checkout", name: "Place an order", outcome: "passed", clip: clip(storeClips, "pr-2/84514db-43393225329", "checkout", false), credits: 58 },
+      { id: "free-shipping", name: "Free shipping from €50", outcome: "passed", clip: clip(storeClips, "pr-2/84514db-43393225329", "free-shipping", false) },
+      { id: "promo-code", name: "Promo code total", outcome: "passed", clip: clip(storeClips, "pr-2/84514db-43393225329", "promo-code", false) },
     ],
     // The model and effort are in the fix job's log (PROOFED_CLAUDE_MODEL, PROOFED_CLAUDE_EFFORT).
     fix: {
@@ -100,7 +103,6 @@ const storeShipping: Run[] = [
     key: "pr-2/886a15c-43392845103",
     at: at("2026-11-13T08:26:04Z"),
     sha: "886a15c1c2f1f611c589f45fae4d8a22414842e7",
-    runUrl: actions(store, 43392845103),
     skipped: [],
     scenarios: [
       {
@@ -123,7 +125,7 @@ const storeShipping: Run[] = [
           "· analyze: €17.90 was charged",
           "✗ assert: the confirmation page says the order is in and that €17.90 was charged",
         ]),
-        clip: clip(store, "pr-2/886a15c-43392845103", "checkout", false),
+        clip: clip(storeClips, "pr-2/886a15c-43392845103", "checkout", false),
         credits: 62,
       },
       {
@@ -141,9 +143,9 @@ const storeShipping: Run[] = [
           "· analyze: the total is €49.40",
           "✗ assert: shipping is €4.90 and the total is €49.40",
         ]),
-        clip: clip(store, "pr-2/886a15c-43392845103", "free-shipping", false),
+        clip: clip(storeClips, "pr-2/886a15c-43392845103", "free-shipping", false),
       },
-      { id: "promo-code", name: "Promo code total", outcome: "passed", clip: clip(store, "pr-2/886a15c-43392845103", "promo-code", false) },
+      { id: "promo-code", name: "Promo code total", outcome: "passed", clip: clip(storeClips, "pr-2/886a15c-43392845103", "promo-code", false) },
     ],
   },
 ];
@@ -153,9 +155,8 @@ const storeKettle: Run[] = [
     key: "pr-3/9076e2a-43417287773",
     at: at("2026-11-13T11:31:08Z"),
     sha: "9076e2a780af32deaace78433b2de2e6ca496d30",
-    runUrl: actions(store, 43417287773),
     skipped: [],
-    scenarios: [{ id: "asked-in-comment", name: "What the /proofed comment asks", outcome: "passed", clip: clip(store, "pr-3/9076e2a-43417287773", "asked-in-comment", false), credits: 15 }],
+    scenarios: [{ id: "asked-in-comment", name: "What the /proofed comment asks", outcome: "passed", clip: clip(storeClips, "pr-3/9076e2a-43417287773", "asked-in-comment", false), credits: 15 }],
   },
 ];
 
@@ -172,7 +173,6 @@ const crashed = (key: string, when: string, sha: string, error: string, seconds:
   key,
   at: at(when),
   sha,
-  runUrl: actions(proofed, Number(key.split("-").at(-1))),
   skipped: [],
   scenarios: ["home", "asked-in-description"].map((id) => ({
     id,
@@ -190,7 +190,6 @@ const proofedCaption: Run[] = [
     key: "pr-3/b3ef393-43508760134",
     at: at("2026-11-13T21:18:30Z"),
     sha: "b3ef3932e150ac33128ac0f92d2ab64660084c63",
-    runUrl: actions(proofed, 43508760134),
     skipped: [],
     scenarios: [
       {
@@ -199,7 +198,7 @@ const proofedCaption: Run[] = [
         outcome: "passed",
         reason: "Opened the home page as requested.\nThe page loaded successfully with its main heading visible and no error message displayed.",
         steps: homeSteps,
-        clip: clip(proofed, "pr-3/b3ef393-43508760134", "home"),
+        clip: clip(proofedClips, "pr-3/b3ef393-43508760134", "home"),
         credits: 6.853639999999999,
         seconds: 74,
       },
@@ -209,7 +208,7 @@ const proofedCaption: Run[] = [
         outcome: "passed",
         reason: "The browser automation run was completed.\nNo specific requested task details or extracted page information were available.\nThe run ended on the localhost page.",
         steps: [{ remark: "navigate: Navigate to http://localhost:4173/" }, { remark: "wait: Waiting verify the example scenario caption starts with its scenario name" }],
-        clip: clip(proofed, "pr-3/b3ef393-43508760134", "asked-in-description"),
+        clip: clip(proofedClips, "pr-3/b3ef393-43508760134", "asked-in-description"),
         credits: 2.85026,
         seconds: 50,
       },
@@ -235,7 +234,6 @@ const proofedCaption: Run[] = [
     key: "pr-3/ffad8f2-43507520823",
     at: at("2026-11-13T21:11:25Z"),
     sha: "ffad8f22080c0691b662bbc11fdb8e1acc0a5ecc",
-    runUrl: actions(proofed, 43507520823),
     skipped: [],
     scenarios: [
       {
@@ -254,7 +252,7 @@ const proofedCaption: Run[] = [
           { remark: "wait: PRIMARY: wait for the home page main heading to finish loading" },
           { remark: "wait: Waiting after opening the home page", failed: true },
         ],
-        clip: clip(proofed, "pr-3/ffad8f2-43507520823", "home"),
+        clip: clip(proofedClips, "pr-3/ffad8f2-43507520823", "home"),
         credits: 20.3605,
         seconds: 240,
       },
@@ -271,7 +269,7 @@ const proofedCaption: Run[] = [
           { remark: "wait: PRIMARY: wait 3000 ms for the landing page content to appear" },
           { remark: "wait: Waiting after checking the landing page", failed: true },
         ],
-        clip: clip(proofed, "pr-3/ffad8f2-43507520823", "asked-in-description"),
+        clip: clip(proofedClips, "pr-3/ffad8f2-43507520823", "asked-in-description"),
         credits: 16.2708125,
         seconds: 167,
       },
@@ -284,7 +282,6 @@ const proofedSteps: Run[] = [
     key: "pr-10/860dc21-43520630836",
     at: at("2026-11-13T22:38:54Z"),
     sha: "860dc21478bf96f65094ca6d7461be303a9e6569",
-    runUrl: actions(proofed, 43520630836),
     skipped: [],
     scenarios: [
       {
@@ -293,7 +290,7 @@ const proofedSteps: Run[] = [
         outcome: "passed",
         reason: "Opened the home page as requested.\nThe main heading was visible and no error message was shown.\nThe home page loaded successfully.",
         steps: homeSteps,
-        clip: clip(proofed, "pr-10/860dc21-43520630836", "home"),
+        clip: clip(proofedClips, "pr-10/860dc21-43520630836", "home"),
         credits: 7.0226999999999995,
         seconds: 75,
       },
@@ -308,7 +305,7 @@ const proofedSteps: Run[] = [
           { remark: "analyze: ANALYZE(textual_visual, 'the caption above the example scenario on the landing p" },
           { remark: "assert: the caption above the example scenario on the landing page shows \"4 steps\" after" },
         ],
-        clip: clip(proofed, "pr-10/860dc21-43520630836", "asked-in-description"),
+        clip: clip(proofedClips, "pr-10/860dc21-43520630836", "asked-in-description"),
         credits: 16.265925,
         seconds: 72,
       },
@@ -331,7 +328,6 @@ const proofedFileName: Run[] = [
     key: "pr-13/576cf94-43525333535",
     at: at("2026-11-13T23:16:56Z"),
     sha: "576cf948f6c86d588660b099b85a9d60a7a2e97b",
-    runUrl: actions(proofed, 43525333535),
     skipped: [],
     scenarios: [
       {
@@ -340,7 +336,7 @@ const proofedFileName: Run[] = [
         outcome: "passed",
         reason: "Opened the home page as requested.\nThe main heading was visible and no error message appeared.\nThe home page loaded successfully.",
         steps: homeSteps,
-        clip: clip(proofed, "pr-13/576cf94-43525333535", "home"),
+        clip: clip(proofedClips, "pr-13/576cf94-43525333535", "home"),
         credits: 6.628499999999999,
         seconds: 73,
       },
@@ -356,7 +352,7 @@ const proofedFileName: Run[] = [
           { remark: "analyze: ANALYZE(textual_visual, 'The caption above the example scenario on the landing p" },
           { remark: "assert: Check that the caption above the example scenario on the landing page still read" },
         ],
-        clip: clip(proofed, "pr-13/576cf94-43525333535", "asked-in-description"),
+        clip: clip(proofedClips, "pr-13/576cf94-43525333535", "asked-in-description"),
         credits: 19.016347500000002,
         seconds: 112,
       },
@@ -385,6 +381,15 @@ const shippingSteps = [
 
 const SAMPLE_FIX = "7d2a9f4c1e8b03d65a7f2c9e4b1d8a6053c7e9f1";
 
+// The sample store's passing scenarios play real recordings of the same store (the demo store's #14).
+const recorded = (id: string) => {
+  const s = tryDemo.detail.runs[0]!.scenarios.find((x) => x.id === id)!;
+  // These pass here, so the recording's last step, which Kane doubted in #14, isn't shown as broken.
+  return { steps: s.steps?.filter((step) => !step.failed), clip: s.clip };
+};
+const samplePromo = { id: "promo-code", name: "Promo code total", outcome: "passed" as const, reason: "Discount −€9.10, shipping Free, total €81.90.", ...recorded("promo-code") };
+const sampleOrder = { id: "checkout", name: "Place an order", outcome: "passed" as const, reason: "The order went through, and the confirmation page thanks Ada Lovelace for it.", ...recorded("checkout") };
+
 const sampleShipping: Run[] = [
   {
     key: "sample-26-2",
@@ -393,8 +398,8 @@ const sampleShipping: Run[] = [
     skipped: [],
     scenarios: [
       { id: "free-shipping", name: "Free shipping from €50", outcome: "passed", reason: "Shipping is €4.90 at €49.40 and Free at €51.00.", clip: { mp4: "/clips/fixed.mp4", jpg: "/clips/fixed.jpg" }, credits: 27, seconds: 41 },
-      { id: "promo-code", name: "Promo code total", outcome: "passed", reason: "Discount −€9.10, shipping Free, total €81.90.", credits: 24, seconds: 36 },
-      { id: "sign-in", name: "Sign in", outcome: "passed", reason: "The account page greets the customer by name.", credits: 12, seconds: 22 },
+      { ...samplePromo, credits: 24, seconds: 36 },
+      { ...sampleOrder, credits: 31, seconds: 52 },
     ],
     fix: {
       status: "fixed",
@@ -426,8 +431,8 @@ const sampleShipping: Run[] = [
         credits: 26,
         seconds: 38,
       },
-      { id: "promo-code", name: "Promo code total", outcome: "passed", reason: "Discount −€9.10, shipping Free, total €81.90.", credits: 24, seconds: 36 },
-      { id: "sign-in", name: "Sign in", outcome: "passed", reason: "The account page greets the customer by name.", credits: 12, seconds: 21 },
+      { ...samplePromo, credits: 24, seconds: 36 },
+      { ...sampleOrder, credits: 31, seconds: 51 },
     ],
   },
 ];
@@ -541,7 +546,7 @@ const pulls: PullView[] = [
     scenarios: [
       { name: "Free shipping from €50", outcome: "failed", reason: "Shipping is Free at €44.50, and the store says “Free shipping from €0.50”. Expected €4.90 below €50." },
       { name: "Promo code total", outcome: "passed" },
-      { name: "Sign in", outcome: "passed" },
+      { name: "Place an order", outcome: "passed" },
     ],
   },
   {
@@ -583,31 +588,31 @@ const pulls: PullView[] = [
   },
   {
     repo: proofed, pr: 13, title: "Landing: take the example scenario's file name from its text", state: "passing",
-    headline: "All 2 affected scenarios pass in a real browser.", url: "https://github.com/t1dem/proofed/pull/13", updatedAt: at("2026-11-13T23:16:56Z"),
+    headline: "All 2 affected scenarios pass in a real browser.", url: "#", updatedAt: at("2026-11-13T23:16:56Z"),
     scenarios: [{ name: "Home page loads", outcome: "passed" }, { name: "What the PR description asks", outcome: "passed" }],
     fix: { status: "fixed", model: "claude-haiku-5-5", effort: "xhigh", commit: "576cf948f6c86d588660b099b85a9d60a7a2e97b", attempts: 1 },
   },
   {
     repo: proofed, pr: 10, title: "Landing: show how many steps the example scenario has", state: "passing",
-    headline: "All 2 affected scenarios pass in a real browser.", url: "https://github.com/t1dem/proofed/pull/10", updatedAt: at("2026-11-13T22:38:54Z"),
+    headline: "All 2 affected scenarios pass in a real browser.", url: "#", updatedAt: at("2026-11-13T22:38:54Z"),
     scenarios: [{ name: "Home page loads", outcome: "passed" }, { name: "What the PR description asks", outcome: "passed" }],
     fix: { status: "fixed", model: "claude-haiku-5-5", effort: "xhigh", commit: "860dc21478bf96f65094ca6d7461be303a9e6569", attempts: 1 },
   },
   {
     repo: proofed, pr: 3, title: "Landing: show the scenario's name above the example", state: "passing",
-    headline: "All 2 affected scenarios pass in a real browser.", url: "https://github.com/t1dem/proofed/pull/3", updatedAt: at("2026-11-13T21:18:30Z"),
+    headline: "All 2 affected scenarios pass in a real browser.", url: "#", updatedAt: at("2026-11-13T21:18:30Z"),
     scenarios: [{ name: "Home page loads", outcome: "passed" }, { name: "What the PR description asks", outcome: "passed" }],
     fix: { status: "fixed", model: "claude-haiku-5-5", effort: "xhigh", commit: "b3ef3932e150ac33128ac0f92d2ab64660084c63", attempts: 1 },
   },
   {
     repo: store, pr: 3, title: "Kettle notes mention Chemex", state: "passing",
-    headline: "The affected scenario passes in a real browser.", url: "https://github.com/t1dem/proofed-demo-store/pull/3", updatedAt: at("2026-11-13T11:31:08Z"),
+    headline: "The affected scenario passes in a real browser.", url: "#", updatedAt: at("2026-11-13T11:31:08Z"),
     scenarios: [{ name: "What the /proofed comment asks", outcome: "passed" }],
   },
   {
     // Neither the report nor Claude's commit names the model, and the inbox doesn't show one.
     repo: store, pr: 1, title: "Simplify promo code lookup", state: "passing",
-    headline: "All 3 affected scenarios pass in a real browser.", url: "https://github.com/t1dem/proofed-demo-store/pull/1", updatedAt: at("2026-11-13T11:01:49Z"),
+    headline: "All 3 affected scenarios pass in a real browser.", url: "#", updatedAt: at("2026-11-13T11:01:49Z"),
     scenarios: [
       { name: "Place an order", outcome: "passed" },
       { name: "Free shipping from €50", outcome: "passed" },
@@ -617,7 +622,7 @@ const pulls: PullView[] = [
   },
   {
     repo: store, pr: 2, title: "Make the free shipping threshold easier to read", state: "passing",
-    headline: "All 3 affected scenarios pass in a real browser.", url: "https://github.com/t1dem/proofed-demo-store/pull/2", updatedAt: at("2026-11-13T08:30:59Z"),
+    headline: "All 3 affected scenarios pass in a real browser.", url: "#", updatedAt: at("2026-11-13T08:30:59Z"),
     scenarios: [
       { name: "Place an order", outcome: "passed" },
       { name: "Free shipping from €50", outcome: "passed" },
@@ -629,11 +634,11 @@ const pulls: PullView[] = [
 
 const secrets = ["LT_USERNAME", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "CODEX_API_KEY"];
 const repos: RepoView[] = [
-  { name: store, url: `https://github.com/${store}`, private: false, installationId: 1, access: "admin", setup: "active", paused: false, secrets: [...secrets], fixer: { model: "claude-opus-5-5", effort: "high", auto: false } },
-  { name: proofed, url: `https://github.com/${proofed}`, private: false, installationId: 1, access: "admin", setup: "active", paused: false, secrets: [...secrets], fixer: { provider: "codex", model: "gpt-6.1-sol", effort: "high", auto: false } },
+  { name: store, url: "#", private: false, installationId: 1, access: "admin", setup: "active", paused: false, secrets: [...secrets], fixer: { model: "claude-opus-5-5", effort: "high", auto: false } },
+  { name: proofed, url: "#", private: false, installationId: 1, access: "admin", setup: "active", paused: false, secrets: [...secrets], fixer: { provider: "codex", model: "gpt-6.1-sol", effort: "high", auto: false } },
   { name: sample, url: "#", private: true, installationId: 1, access: "admin", setup: "active", paused: false, secrets: [...secrets], fixer: { model: "claude-opus-5-5", effort: "high", auto: false } },
-  { name: "sample/landing-page", url: "#", private: true, installationId: 1, access: "admin", setup: "pr-open", setupPr: "#", paused: false, secrets: ["LT_USERNAME"], fixer: { model: "claude-haiku-5-5", effort: "xhigh", auto: false } },
-  { name: "sample/docs-site", url: "#", private: true, installationId: 1, access: "admin", setup: "none", paused: false, secrets: [], fixer: null },
+  { name: "northbean/landing-page", url: "#", private: true, installationId: 1, access: "admin", setup: "pr-open", setupPr: "#", paused: false, secrets: ["LT_USERNAME"], fixer: { model: "claude-haiku-5-5", effort: "xhigh", auto: false } },
+  { name: "northbean/docs-site", url: "#", private: true, installationId: 1, access: "admin", setup: "none", paused: false, secrets: [], fixer: null },
 ];
 
 // The sample pull request that broke, which "Fix with Claude" fixes. /app?demo=fixed shows it after
@@ -777,13 +782,66 @@ const asked = new Map<string, Ask>([
 ]);
 const looping = new Set(asked.keys());
 
+// Half a year of made-up runs for the Dashboard: busier on weekdays, now and then a break that the
+// repo's fixer is asked to mend. Seeded, so the demo shows the same numbers on every visit.
+const activity: ActivityRun[] = (() => {
+  let seed = 7;
+  const rand = () => {
+    seed = (seed * 16807) % 2147483647;
+    return seed / 2147483647;
+  };
+  const day = 24 * hour;
+  const plan = [
+    { repo: store, scenarios: ["Place an order", "Promo code total", "Free shipping from €50", "Sign in"], model: "claude-opus-5-5", busy: 2.4 },
+    { repo: proofed, scenarios: ["Home page loads", "What the PR description asks"], model: "gpt-6.1-sol", busy: 1.5 },
+    { repo: sample, scenarios: ["Place an order", "Promo code total", "Product notes", "Free shipping from €50"], model: "claude-haiku-5-5", busy: 1.1 },
+  ];
+  const runs: ActivityRun[] = [];
+  for (let back = 179; back >= 0; back--) {
+    const date = new Date(now - back * day);
+    const weekend = date.getDay() === 0 || date.getDay() === 6;
+    for (const p of plan) {
+      const count = Math.floor(rand() * p.busy * (weekend ? 0.8 : 2.4));
+      for (let i = 0; i < count; i++) {
+        const at = date.getTime() - Math.floor(rand() * 10 * hour);
+        if (at > now) continue;
+        const picked = p.scenarios.filter(() => rand() < 0.7);
+        const scenarios = (picked.length ? picked : p.scenarios.slice(0, 1)).map((name) => {
+          const r = rand();
+          const outcome = r < 0.1 ? ("failed" as const) : r < 0.15 ? ("unsure" as const) : r < 0.17 ? ("error" as const) : ("passed" as const);
+          return { name, outcome, credits: 8 + Math.floor(rand() * 18), seconds: 40 + Math.floor(rand() * 120) };
+        });
+        const pr = 10 + Math.floor(rand() * 40);
+        runs.push({ repo: p.repo, pr, at, scenarios });
+        // Half the breaks get a fix: its run checks the scenarios again.
+        if (scenarios.some((s) => s.outcome === "failed") && rand() < 0.5 && at + 20 * min < now) {
+          const fixed = rand() < 0.8;
+          runs.push({
+            repo: p.repo,
+            pr,
+            at: at + 20 * min,
+            scenarios: scenarios.map((s) => ({ ...s, outcome: fixed || s.outcome !== "failed" ? ("passed" as const) : ("failed" as const) })),
+            fix: { status: fixed ? "fixed" : "gave-up", model: p.model, attempts: 1 + Math.floor(rand() * 3) },
+          });
+        }
+      }
+    }
+  }
+  runs.sort((a, b) => b.at - a.at);
+  let balance = 3184;
+  for (const run of runs) {
+    run.balance = balance;
+    balance += run.scenarios.reduce((n, s) => n + (s.credits ?? 0), 0);
+  }
+  return runs;
+})();
+
 // Answers what the API would, from the data above. Changes (the model, a pause, an ask) live in
 // this page's memory only.
 export async function demo(path: string, init?: RequestInit): Promise<unknown> {
   await new Promise((done) => setTimeout(done, 150));
   if (path === "/api/try" || path === `/api/pulls/${store}/14`) {
-    const sample = await import("./demo-try");
-    return path === "/api/try" ? sample.view : sample.detail;
+    return path === "/api/try" ? tryDemo.view : tryDemo.detail;
   }
   const ask = /^\/api\/pulls\/(.+\/\d+)\/(fix|rerun|check)$/.exec(path);
   if (ask && init?.method === "POST") {
@@ -808,6 +866,8 @@ export async function demo(path: string, init?: RequestInit): Promise<unknown> {
   }
   if (init?.method === "POST") return { ok: true };
   if (path === "/api/me") return me;
+  const days = /^\/api\/activity\?days=(\d+)$/.exec(path);
+  if (days) return activity.filter((r) => r.at > now - 2 * Number(days[1]) * 24 * hour);
   if (path === "/api/repos") return repos.map((r) => ({ ...r }));
 
   // Each ask's run as it stands now; one that has played out is over, and a fix of the broken sample leaves it fixed.

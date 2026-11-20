@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { NOTHING_CHECKED } from "../../../src/report/runfile";
 import type { PullView } from "../worker/runs";
 import { ago, canAskAgain, fixLabel, fixerName, movingName, plural, prefetch, titleName, type Ask, type Route, type useAsk } from "./lib";
-import { kindOf, Link, Mark, NEEDS_WRITE, outline, Pips, plain, sha7, soft, solid } from "./ui";
+import { kindOf, Link, Mark, NEEDS_WRITE, outline, Pips, plain, RepoChip, sha7, soft, solid } from "./ui";
 
 export type AskedOf = ReturnType<typeof useAsk>[0];
 
@@ -222,7 +222,7 @@ export function Row({ pull, selected, go, asked, ask, showRepo }: RowProps) {
           e.stopPropagation();
           close();
         }}
-        className={`group relative grid grid-cols-[16px_minmax(0,1fr)_auto] gap-x-3 rounded-lg px-3 py-2.5 ${soft} max-md:touch-pan-y max-md:grid-cols-[16px_minmax(0,1fr)] max-md:rounded-none max-md:bg-bg max-md:px-4 max-md:py-3 max-md:active:bg-hover lg:grid-cols-[16px_minmax(0,1fr)_auto_136px_44px] lg:items-center ${selected ? "lg:bg-hover" : "md:hover:bg-hover/50"}`}
+        className={`group relative grid grid-cols-[16px_minmax(0,1fr)_auto] gap-x-3 rounded-lg px-3 py-2.5 ${soft} max-md:touch-pan-y max-md:grid-cols-[16px_minmax(0,1fr)] max-md:rounded-none max-md:bg-bg max-md:px-4 max-md:py-3 max-md:active:bg-hover lg:grid-cols-[16px_minmax(0,1fr)_auto_136px_44px] lg:items-center ${selected ? "lg:bg-hover" : "md:hover:bg-hover/60"}`}
       >
         <span className="flex h-5 items-center lg:h-auto">
           <Mark kind={kindOf(pull)} />
@@ -241,7 +241,14 @@ export function Row({ pull, selected, go, asked, ask, showRepo }: RowProps) {
             {ago(pull.updatedAt)}
           </span>
           <span className="mt-0.5 line-clamp-2 text-[13px] text-dim max-md:text-[14px] lg:line-clamp-1">
-            {showRepo && <span className="text-faint max-md:hidden">{pull.repo.split("/")[1]} · </span>}
+            {showRepo && (
+              <span className="text-faint max-md:hidden">
+                <span className="mr-1.5 inline-flex h-[1em] translate-y-[-1px] items-center align-middle">
+                  <RepoChip repo={pull.repo} size={14} />
+                </span>
+                {pull.repo.split("/")[1]} ·{" "}
+              </span>
+            )}
             <Why pull={pull} />
           </span>
           {typeof state === "object" && <span role="status" className="mt-0.5 block text-[13px] text-bad">{state.error}</span>}

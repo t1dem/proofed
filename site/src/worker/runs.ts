@@ -209,3 +209,41 @@ export async function getPulls(env: Env, repo: string, prs: number[], api: strin
   }
   return details;
 }
+
+// One run as the dashboard's activity page counts it: when, where, what each scenario came to and
+// what it cost, and the fixer's try if the run was a fix.
+export type ActivityRun = {
+  repo: string;
+  pr: number;
+  at: number;
+  scenarios: { name: string; outcome: Outcome; credits?: number; seconds?: number }[];
+  // TestMu's balance after the run, when Kane reported it.
+  balance?: number;
+  fix?: { status: RunFix["status"]; model: string; attempts: number };
+};
+
+export const ACTIVITY_DAYS = [7, 30, 90] as const;
+
+// Every run of the last `days`, and of the `days` before them so the page can say what changed.
+export async function listActivity(env: Env, repos: string[], days: number): Promise<ActivityRun[]> {
+  if (repos.length === 0) return [];
+  const names = repos.slice(0, 90); // D1 takes at most 100 bound values
+  const marks = names.map((_, i) => `?${i + 1}`).join(", ");
+  const rows = await env.DB.prepare(
+    `SELECT repo, pr, data, created_at FROM runs WHERE repo IN (${marks}) AND created_at > ?${names.length + 1} ORDER BY created_at DESC LIMIT 3000`,
+  )
+    .bind(...names, Date.now() - 2 * days * 86_400_000)
+    .all<RunRow>();
+  return rows.results.map((row) => {
+    const file = JSON.parse(row.data) as RunFile;
+    const balance = file.scenarios.findLast((s) => s.accountBalance)?.accountBalance?.after;
+    return {
+      repo: row.repo,
+      pr: row.pr,
+      at: row.created_at,
+      scenarios: file.scenarios.map(({ name, outcome, credits, seconds }) => ({ name, outcome, credits, seconds })),
+      ...(balance !== undefined && { balance }),
+      ...(file.fix && { fix: { status: file.fix.status, model: file.fix.model, attempts: file.fix.attempts?.length ?? 1 } }),
+    };
+  });
+}

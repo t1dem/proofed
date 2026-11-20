@@ -11,6 +11,8 @@ const app = path.startsWith("/app") || tryIt;
 if (app) {
   document.documentElement.dataset.app = "";
   document.documentElement.dataset.theme = storedTheme();
+  // The dashboard's sidebar and inset panel; "Break it yourself" is one plain page.
+  if (!tryIt) document.documentElement.dataset.shell = "";
 }
 
 const root = createRoot(document.getElementById("root")!);

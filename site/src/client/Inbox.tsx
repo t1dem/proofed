@@ -1,7 +1,7 @@
 import { LoaderCircle, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { PullView } from "../worker/runs";
-import { FilterMenu, NO_FILTER, type InboxFilter, type Status } from "./InboxFilterMenu";
+import { FilterMenu, NO_FILTER, type InboxFilter, type Since, type Status } from "./InboxFilterMenu";
 import { Glide } from "./InboxGlide";
 import { Row, type AskedOf } from "./InboxRow";
 import { canAskAgain, DEMO, installed, type Ask, type Load, type Route } from "./lib";
@@ -27,6 +27,9 @@ const statuses = {
   working: (pull: PullView) => isRunning(pull) || isFixing(pull),
   passed: isPassed,
 } satisfies Record<Status, (pull: PullView) => boolean>;
+
+const HOUR = 3_600_000;
+const sinceMs: Record<Since, number> = { any: Infinity, day: 24 * HOUR, week: 7 * 24 * HOUR };
 
 // The text matches the title, the number ("12" or "#12"), the repository or a scenario's name.
 function matches(pull: PullView, text: string) {
@@ -124,7 +127,14 @@ type InboxProps = {
 export function Inbox({ pulls, onRefresh, repo, onRepo, filter, onFilter, go, asked, ask }: InboxProps) {
   const inRepo = pulls.status === "ok" ? pulls.data.filter((p) => !repo || p.repo === repo) : [];
   const repos = pulls.status === "ok" ? [...new Set(pulls.data.map((p) => p.repo))].sort() : [];
-  const all = inRepo.filter((p) => (filter.statuses.length === 0 || filter.statuses.some((s) => statuses[s](p))) && matches(p, filter.text));
+  const now = Date.now();
+  const all = inRepo.filter(
+    (p) =>
+      (filter.statuses.length === 0 || filter.statuses.some((s) => statuses[s](p))) &&
+      (filter.fixes.length === 0 || (!!p.fix && filter.fixes.includes(p.fix.status))) &&
+      now - p.updatedAt <= sinceMs[filter.since] &&
+      matches(p, filter.text),
+  );
   const groups = sections.map((s) => ({ title: s.title, pulls: all.filter(s.has) })).filter((g) => g.pulls.length > 0);
   const ordered = groups.flatMap((g) => g.pulls);
   const [at, setAt] = useState(0);

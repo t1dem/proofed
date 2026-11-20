@@ -1,11 +1,11 @@
-import { Pause, Play } from "lucide-react";
+import { LoaderCircle, Pause, Play } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { MeView, RepoView } from "../worker/api";
 import { providerOf } from "../worker/models";
 import type { PullView } from "../worker/runs";
 import { api, message, mutate, useLoad } from "./lib";
 import { FixerMenu } from "./SettingsFixerMenu";
-import { link, NEEDS_WRITE, outline, solid } from "./ui";
+import { iconButton, link, NEEDS_WRITE, outline, RepoChip, solid, subtle } from "./ui";
 
 const SECRETS = ["LT_USERNAME", "LT_ACCESS_KEY"];
 
@@ -84,7 +84,7 @@ function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange:
   let action: ReactNode = null;
   if (repo.setup === "none") {
     action = (
-      <button type="button" className={outline} disabled={!!busy || readOnly} title={readOnly ? NEEDS_WRITE : undefined} onClick={() => act("setup")}>
+      <button type="button" className={subtle} disabled={!!busy || readOnly} title={readOnly ? NEEDS_WRITE : undefined} onClick={() => act("setup")}>
         {busy === "setup" ? "Opening a PR…" : "Set up"}
       </button>
     );
@@ -92,7 +92,7 @@ function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange:
     action = (
       <button
         type="button"
-        className={outline}
+        className={subtle}
         disabled={!!busy || repo.access !== "admin"}
         onClick={() => act("secrets")}
         title={repo.access === "admin" ? "Puts your saved keys into this repository's Actions secrets" : "Needs admin access to this repository"}
@@ -102,46 +102,50 @@ function RepoRow({ repo, me, onChange }: { repo: RepoView; me: MeView; onChange:
     );
   } else if (repo.setup === "pr-open") {
     action = (
-      <a href={repo.setupPr} className={outline}>
+      <a href={repo.setupPr} className={subtle}>
         Merge setup PR
       </a>
     );
   }
 
+  const [owner, name] = repo.name.split("/");
   return (
-    <li className="space-y-2 p-4">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="mr-auto min-w-0">
-          <a href={repo.url} className="font-medium hover:underline">
-            {repo.name}
+    <li className="px-4 py-3.5">
+      <div className="flex flex-wrap items-center gap-x-3.5 gap-y-3">
+        <RepoChip repo={repo.name} size={36} round="rounded-[9px]" />
+        <div className="mr-auto min-w-0 flex-1 basis-48">
+          <a href={repo.url} className="block truncate text-[14px] font-medium leading-5 hover:underline">
+            <span className="font-normal text-faint">{owner}/</span>
+            {name}
           </a>
-          <p className="mt-0.5 flex items-center gap-2 text-[13px] text-dim">
-            <span className={`size-2 shrink-0 rounded-full ${dot}`} />
-            <span>
+          <p className="mt-0.5 flex items-start gap-2 text-[13px] leading-5 text-dim md:items-center">
+            <span className={`mt-1.5 size-2 shrink-0 rounded-full md:mt-0 ${dot}`} />
+            <span className="md:truncate">
               {setupSays}
               {keysSays && `, ${keysSays}`}
             </span>
           </p>
         </div>
-        {/* On a phone, two equal columns across the row; a third button takes a row of its own. */}
-        <div className="flex flex-wrap items-center gap-2 max-md:grid max-md:w-full max-md:grid-cols-2 max-md:*:w-full max-md:[&>*:nth-child(3)]:col-span-2">
+        {/* On a phone the controls take a line of their own under the name; the model and the next step
+            share it and wrap when they don't fit, the pause button keeps its size. */}
+        <div className="flex items-center gap-1.5 max-md:w-full max-md:flex-wrap max-md:pl-[50px] max-md:[&>*:not([aria-label])]:min-w-[8.5rem] max-md:[&>*:not([aria-label])]:flex-1">
           <FixerMenu repo={repo} />
           {action}
           {repo.setup === "active" && (
             <button
               type="button"
-              className={outline}
+              className={iconButton}
               disabled={!!busy || readOnly}
               onClick={togglePause}
-              title={readOnly ? NEEDS_WRITE : paused ? "Switches Proofed's workflow back on in this repository" : "Switches Proofed's workflow off on GitHub; nothing in the repository changes"}
+              aria-label={paused ? "Resume" : "Pause"}
+              title={readOnly ? NEEDS_WRITE : paused ? "Resume: switches Proofed's workflow back on in this repository" : "Pause: switches Proofed's workflow off on GitHub; nothing in the repository changes"}
             >
-              {paused ? <Play size={14} /> : <Pause size={14} />}
-              {busy === "pause" ? "Pausing…" : busy === "resume" ? "Resuming…" : paused ? "Resume" : "Pause"}
+              {busy === "pause" || busy === "resume" ? <LoaderCircle size={16} className="animate-spin" /> : paused ? <Play size={16} /> : <Pause size={16} />}
             </button>
           )}
         </div>
       </div>
-      {note && <p className="text-[13px]">{note}</p>}
+      {note && <p className="mt-2 pl-[50px] text-[13px] max-md:pl-0">{note}</p>}
     </li>
   );
 }
@@ -160,14 +164,14 @@ export function Repos({ me }: { me: MeView }) {
       {repos.status === "error" && <p className="mt-4 text-bad">{repos.message}</p>}
       {repos.status === "ok" &&
         (repos.data.length === 0 ? (
-          <div className="mt-4 rounded-lg border border-edge bg-panel p-4">
+          <div className="mt-3 rounded-xl border border-edge bg-panel p-4">
             <p>Proofed isn't on any of your repositories yet.</p>
             <a href={me.installUrl} className={`${solid} mt-3`}>
               Install on GitHub
             </a>
           </div>
         ) : (
-          <ul className="mt-3 divide-y divide-edge rounded-lg border border-edge bg-panel">
+          <ul className="mt-3 divide-y divide-edge rounded-xl border border-edge bg-panel">
             {repos.data.map((r) => (
               <RepoRow key={r.name} repo={r} me={me} onChange={reload} />
             ))}
