@@ -36,6 +36,11 @@ test("Codex runs once on PATH with a bounded sandbox, stdin prompt and final mes
     for (const flag of ['approval_policy="never"','model_reasoning_effort="low"','sandbox_workspace_write.network_access=false','--ignore-user-config','--ignore-rules','--ephemeral','--json']) assert.ok(called.args.includes(flag), flag);
     assert.equal(called.env.GITHUB_TOKEN, undefined);
     assert.ok(called.args.includes('shell_environment_policy.inherit="none"'));
+    // The agent gets a writable temp dir of its own, so tool caches don't land in the repo.
+    const tmpArg = "shell_environment_policy.set.TMPDIR=";
+    const tmp = called.args.find((arg) => arg.startsWith(tmpArg))?.slice(tmpArg.length);
+    assert.ok(tmp && !tmp.includes(dir));
+    assert.ok(called.args.includes(`sandbox_workspace_write.writable_roots=[${tmp}]`));
     assert.equal(called.input, "fix this");
     assert.equal(called.args.at(-1), '-');
     assert.ok(!called.args.includes('--dangerously-bypass-approvals-and-sandbox'));
