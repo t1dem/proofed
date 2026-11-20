@@ -38,7 +38,7 @@ Nine merged pull requests from open-source projects. Each one shipped a bug that
 
 | PR | Where | What broke | Fix by the agent and the maintainers |
 |---|---|---|---|
-| [omni-tools #32](https://github.com/iib0011/omni-tools/pull/32) | Web | [1, 2 and 4 on separate lines add up to 0 instead of 7](https://github.com/t1dem/omni-tools/pull/1) | Agent: +1 −1. The maintainers rewrote the function ([#428](https://github.com/iib0011/omni-tools/pull/428), 567 days later) |
+| [omni-tools #32](https://github.com/iib0011/omni-tools/pull/32) | Web | [1, 2 and 4 on separate lines add up to 0 instead of 7](https://github.com/t1dem/omni-tools/pull/1) | Agent: +1 −1. The maintainers rewrote the function and added a test ([#428](https://github.com/iib0011/omni-tools/pull/428), 567 days later) |
 | [frontend-mini-challenges #264](https://github.com/sadanandpai/frontend-mini-challenges/pull/264) | Web | [A deleted task stays in the list](https://github.com/t1dem/frontend-mini-challenges/pull/1) | Agent: +3 −3. The maintainers also reworked the component ([#338](https://github.com/sadanandpai/frontend-mini-challenges/pull/338), 28 days later) |
 | [Excalidraw #11974](https://github.com/excalidraw/excalidraw/pull/11974) | Web | [The main menu stays open after a click on the canvas](https://github.com/t1dem/excalidraw/pull/1) | The maintainers added a test ([#12053](https://github.com/excalidraw/excalidraw/pull/12053), 12 days later) |
 | [OpenCalc #520](https://github.com/Darkempire78/OpenCalc/pull/520) | Android | [The decimal point in the first number of 2×0.5 is ignored](https://github.com/t1dem/OpenCalc/pull/1) | [#538](https://github.com/Darkempire78/OpenCalc/pull/538), 81 days later |
