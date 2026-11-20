@@ -2,7 +2,7 @@ import { executableCommand } from "../process.ts";
 import { pathValue } from "../which.ts";
 // One headless Codex run, shared by the fixer and scenario writer.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Fixer } from "./models.ts";
@@ -14,6 +14,10 @@ export function askCodex(prompt: string, o: Options): CodexAnswer {
   const dir = mkdtempSync(join(tmpdir(), "proofed-codex-"));
   try {
     const output = join(dir, "answer.txt");
+    // The sandbox can't write the system temp dir. Without a temp dir of its own the agent
+    // pointed TMPDIR at the repo, and tsx and Node caches ended up in the fix commit.
+    const tmp = join(dir, "tmp");
+    mkdirSync(tmp);
     // Keep job tokens and unrelated provider keys out of the agent process.
     const env = Object.fromEntries(
       ["PATH", "PATHEXT", "HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "USER", "TMPDIR", "TMP", "TEMP", "SystemRoot", "CODEX_HOME", "CODEX_API_KEY"]
@@ -29,6 +33,8 @@ export function askCodex(prompt: string, o: Options): CodexAnswer {
       "-c", "sandbox_workspace_write.network_access=false",
       "-c", 'shell_environment_policy.inherit="none"',
       "-c", `shell_environment_policy.set.PATH=${JSON.stringify(env.PATH ?? "/usr/bin:/bin")}`,
+      ...["TMPDIR", "TMP", "TEMP"].flatMap((name) => ["-c", `shell_environment_policy.set.${name}=${JSON.stringify(tmp)}`]),
+      "-c", `sandbox_workspace_write.writable_roots=[${JSON.stringify(tmp)}]`,
       "-c", "sandbox_workspace_write.exclude_slash_tmp=true",
       "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
       "-c", `model_reasoning_effort=${JSON.stringify(o.effort)}`,
