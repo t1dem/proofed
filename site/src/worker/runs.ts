@@ -227,14 +227,21 @@ export const ACTIVITY_DAYS = [7, 30, 90] as const;
 // Every run of the last `days`, and of the `days` before them so the page can say what changed.
 export async function listActivity(env: Env, repos: string[], days: number): Promise<ActivityRun[]> {
   if (repos.length === 0) return [];
-  const names = repos.slice(0, 90); // D1 takes at most 100 bound values
-  const marks = names.map((_, i) => `?${i + 1}`).join(", ");
-  const rows = await env.DB.prepare(
-    `SELECT repo, pr, data, created_at FROM runs WHERE repo IN (${marks}) AND created_at > ?${names.length + 1} ORDER BY created_at DESC LIMIT 3000`,
-  )
-    .bind(...names, Date.now() - 2 * days * 86_400_000)
-    .all<RunRow>();
-  return rows.results.map((row) => {
+  // D1 takes at most 100 bound values, so the repositories go 90 at a time.
+  const since = Date.now() - 2 * days * 86_400_000;
+  const chunks: string[][] = [];
+  for (let i = 0; i < repos.length; i += 90) chunks.push(repos.slice(i, i + 90));
+  const answers = await Promise.all(
+    chunks.map((names) =>
+      env.DB.prepare(
+        `SELECT repo, pr, data, created_at FROM runs WHERE repo IN (${names.map((_, i) => `?${i + 1}`).join(", ")}) AND created_at > ?${names.length + 1} ORDER BY created_at DESC LIMIT 3000`,
+      )
+        .bind(...names, since)
+        .all<RunRow>(),
+    ),
+  );
+  const rows = answers.flatMap((a) => a.results).sort((a, b) => b.created_at - a.created_at);
+  return rows.map((row) => {
     const file = JSON.parse(row.data) as RunFile;
     const balance = file.scenarios.findLast((s) => s.accountBalance)?.accountBalance?.after;
     return {

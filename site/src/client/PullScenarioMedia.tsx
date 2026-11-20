@@ -110,7 +110,7 @@ export function Recording({ clip, steps, seek, onTime, lit, onLit }: RecordingPr
             setLength(Number.isFinite(v.duration) && v.duration > 0 ? v.duration : undefined);
             // A broken run opens where it broke: the frame of the failed step, the track at its mark.
             const broke = steps?.find((s) => s.failed)?.at;
-            if (broke !== undefined && v.currentTime === 0) {
+            if (broke !== undefined && seek === undefined && v.currentTime === 0) {
               v.currentTime = broke;
               setTime(broke);
               paint();

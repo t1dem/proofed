@@ -66,7 +66,7 @@ type Mode = "before" | "compare" | "after";
 // One scenario as a run left it: what broke and why on top, in words; under it the recording, large,
 // and what the fixer changed; Kane's steps beside the recording, so a step and its moment in the clip
 // are seen together.
-function ScenarioView({ now, before, fix, tabs, list }: { now: Seen; before: Seen | undefined; fix: Run["fix"]; tabs: ReactNode; list: ReactNode }) {
+function ScenarioView({ now, before, fix, runs, tabs, list }: { now: Seen; before: Seen | undefined; fix: Run["fix"]; runs: Run[]; tabs: ReactNode; list: ReactNode }) {
   const comparable = !!(before?.scenario.clip?.jpg && now.scenario.clip?.jpg);
   const [mode, setMode] = useState<Mode>(comparable ? "compare" : "after");
   const [seek, setSeek] = useState<Seek>();
@@ -97,7 +97,7 @@ function ScenarioView({ now, before, fix, tabs, list }: { now: Seen; before: See
 
   // Text under the heading lines up with its name, past the mark; on a phone with tabs there is no heading.
   const pad = tabs ? "lg:pl-[30px]" : "pl-[30px]";
-  const facts = <RunFacts runs={before ? [now.run, before.run] : [now.run]} />;
+  const facts = <RunFacts runs={runs} />;
   const stepsBlock = steps.length > 0 && (
     <div>
       <Label>{before ? "Kane's steps, before the fix" : "Kane's steps"}</Label>
@@ -319,11 +319,16 @@ export function Scenarios({ runs, at, scenario }: ScenariosProps) {
     </div>
   );
 
-  // A scenario's credits in the run on the page: the parts of the rail's total above the list.
-  // After a fix, its run and the broken one together, as the rail's total counts them.
+  // The runs the page stands for, newest first: each scenario's latest, and the broken one before a
+  // fix. The rail's total and each scenario's credits both count these, whichever scenario is open,
+  // so the list adds up to the total.
+  const shown = new Set(scenarios.flatMap((s) => {
+    const t = story(view, s.id);
+    return t ? [t.now.run, ...(t.before ? [t.before.run] : [])] : [];
+  }));
+  const scope = view.filter((r) => shown.has(r));
   const credits = (id: string) => {
-    const told = story(view, id);
-    const c = (told?.now.scenario.credits ?? 0) + (told?.before?.scenario.credits ?? 0);
+    const c = scope.reduce((n, r) => n + (r.scenarios.find((s) => s.id === id)?.credits ?? 0), 0);
     return c ? Math.round(c) : undefined;
   };
   // The rail's list on a wide screen: the scenarios down the side, like the sidebar's places.
@@ -356,5 +361,5 @@ export function Scenarios({ runs, at, scenario }: ScenariosProps) {
     </div>
   );
 
-  return <ScenarioView key={`${current.id}@${view[0]?.key}`} now={now} before={before} fix={fix} tabs={tabs} list={list} />;
+  return <ScenarioView key={`${current.id}@${view[0]?.key}`} now={now} before={before} fix={fix} runs={scope} tabs={tabs} list={list} />;
 }

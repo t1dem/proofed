@@ -175,8 +175,8 @@ export type Route = { page: "inbox" } | { page: "dashboard" } | { page: "setting
 
 function parseRoute({ pathname, hash }: Location): Route {
   const [, , first, second, third] = pathname.split("/");
-  if (first === "settings") return { page: "settings" };
-  if (first === "dashboard") return { page: "dashboard" };
+  if (first === "settings" && !second) return { page: "settings" };
+  if (first === "dashboard" && !second) return { page: "dashboard" };
   if (first && second && third && /^\d+$/.test(third)) {
     const scenario = hash.length > 1 ? decodeURIComponent(hash.slice(1)) : undefined;
     return { page: "pull", repo: `${first}/${second}`, pr: Number(third), ...(scenario && { scenario }) };

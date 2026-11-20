@@ -172,7 +172,7 @@ export function Segmented<T extends string>({ label, value, options, onChange }:
     if (!el) return;
     // Measured, so each choice keeps its own width; again when the fonts land or the row reflows.
     const place = () => {
-      const button = el.children[at + 1] as HTMLElement | undefined;
+      const button = at < 0 ? undefined : (el.children[at + 1] as HTMLElement | undefined);
       setThumb((before) => (button ? { x: button.offsetLeft, w: button.offsetWidth, moved: !!before } : undefined));
     };
     place();

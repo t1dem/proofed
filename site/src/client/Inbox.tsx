@@ -149,7 +149,7 @@ export function Inbox({ pulls, onRefresh, repo, onRepo, filter, onFilter, go, as
   // Read through a ref so the listener is bound once and still sees the current list.
   const keys = useRef<(e: KeyboardEvent) => void>(() => {});
   keys.current = (e) => {
-    if (e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
+    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
     if (e.key === "Enter" && e.target instanceof HTMLElement && e.target.closest("button")) return;
     const move = (by: number) => selected && setAt(Math.max(0, Math.min(ordered.length - 1, ordered.indexOf(selected) + by)));
     if (e.key === "/") setFilterOpen(true);

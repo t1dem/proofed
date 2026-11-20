@@ -535,6 +535,7 @@ export function App() {
           <Dashboard
             onRepo={(name) => {
               setRepo(name);
+              setFilter(NO_FILTER);
               go({ page: "inbox" });
             }}
             onScenario={(name, scenario) => {

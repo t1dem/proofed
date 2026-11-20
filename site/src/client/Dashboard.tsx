@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { modelLabel, providerOf } from "../worker/models";
 import type { ActivityRun } from "../worker/runs";
 import { tally, type Day, type Tally } from "./activity";
@@ -300,7 +300,13 @@ export function Dashboard({ onRepo, onScenario }: DashboardProps) {
   const [load] = useLoad<ActivityRun[]>(`/api/activity?days=${days}`);
   // Switching the range keeps the last numbers on screen, dimmed, until the new ones are in.
   const last = useRef<{ days: Days; runs: ActivityRun[] }>(undefined);
-  if (load.status === "ok") last.current = { days, runs: load.data };
+  // The period the answer on hand was asked for: on the render right after a switch, `load` still
+  // holds the old period's answer (useLoad resets in an effect), so it mustn't be filed under the new one.
+  const asked = useRef(days);
+  useEffect(() => {
+    asked.current = days;
+  }, [days]);
+  if (load.status === "ok") last.current = { days: asked.current, runs: load.data };
   const shown = last.current;
   const t = shown && tally(shown.runs, shown.days);
   const stale = load.status !== "ok";

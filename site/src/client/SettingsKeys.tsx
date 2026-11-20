@@ -52,7 +52,7 @@ function KeyBlock({ title, sub, tile, connected, hint, busy, busyLabel, onSave, 
           </p>
         </div>
         {editing ? (
-          <button type="button" onClick={cancel} aria-label="Cancel" title="Cancel" className={iconButton}>
+          <button type="button" onClick={cancel} disabled={busy} aria-label="Cancel" title="Cancel" className={`${iconButton} disabled:opacity-40`}>
             <X size={16} />
           </button>
         ) : (
