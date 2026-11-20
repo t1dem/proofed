@@ -37,7 +37,8 @@ test("Codex runs once on PATH with a bounded sandbox, stdin prompt and final mes
     assert.equal(called.env.GITHUB_TOKEN, undefined);
     assert.ok(called.args.includes('shell_environment_policy.inherit="none"'));
     // The agent gets a writable temp dir of its own, so tool caches don't land in the repo.
-    const tmp = called.args.find((arg) => arg.startsWith("shell_environment_policy.set.TMPDIR="))?.split("=")[1];
+    const tmpArg = "shell_environment_policy.set.TMPDIR=";
+    const tmp = called.args.find((arg) => arg.startsWith(tmpArg))?.slice(tmpArg.length);
     assert.ok(tmp && !tmp.includes(dir));
     assert.ok(called.args.includes(`sandbox_workspace_write.writable_roots=[${tmp}]`));
     assert.equal(called.input, "fix this");
