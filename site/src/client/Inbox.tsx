@@ -132,7 +132,7 @@ export function Inbox({ pulls, onRefresh, repo, onRepo, filter, onFilter, go, as
     (p) =>
       (filter.statuses.length === 0 || filter.statuses.some((s) => statuses[s](p))) &&
       (filter.fixes.length === 0 || (!!p.fix && filter.fixes.includes(p.fix.status))) &&
-      now - p.updatedAt <= sinceMs[filter.since] &&
+      now - (p.checkedAt ?? p.updatedAt) <= sinceMs[filter.since] &&
       matches(p, filter.text),
   );
   const groups = sections.map((s) => ({ title: s.title, pulls: all.filter(s.has) })).filter((g) => g.pulls.length > 0);

@@ -21,7 +21,11 @@ export type PullView = {
   state: PullState;
   headline: string;
   url: string;
+  // When the report comment last changed, an edit to its fix box included.
   updatedAt: number;
+  // When the latest run was saved: what the inbox's Checked filter goes by. Missing for reports posted
+  // before run files existed; a pull being checked again after a push keeps its last run's time.
+  checkedAt?: number;
   // From the latest run; empty for reports posted before run files existed.
   scenarios: Pick<RunScenario, "name" | "outcome" | "reason">[];
   fixer?: Fixer;
@@ -131,6 +135,7 @@ function toPull(report: ReportRow, latest: Run | undefined, live?: Live): PullVi
     headline: report.headline,
     url: report.url,
     updatedAt: report.updated_at,
+    ...(latest && { checkedAt: latest.at }),
     scenarios: latest?.scenarios.map(({ name, outcome, reason }) => ({ name, outcome, reason: outcome === "passed" ? undefined : reason })) ?? [],
     fix: latest?.fix && {
       status: latest.fix.status,
