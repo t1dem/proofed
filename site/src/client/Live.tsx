@@ -3,7 +3,7 @@ import type { Live, LiveScenario } from "../../../src/report/livefile";
 import type { LiveView } from "../worker/live";
 import { modelLabel, providerLabel, providerOf } from "../worker/models";
 import { useLoad } from "./lib";
-import { focus, link, Mark, panel, plain, soft, type Kind } from "./ui";
+import { focus, link, Mark, plain, soft, type Kind } from "./ui";
 
 type Frame = LiveView["frames"][string];
 
@@ -133,8 +133,9 @@ function LiveSteps({ scenario }: { scenario: LiveScenario }) {
     // A step Kane left behind without a word has nothing to show.
     return said || running || step.status === "failed" ? [{ step, said, running }] : [];
   });
+  if (shown.length === 0) return <p className="text-dim">Kane is starting the check.</p>;
   return (
-    <ol className="-mx-3">
+    <ol className="md:-mx-3">
       {/* Numbered by position: Kane's own numbers start at 2 (its first step opens the page unannounced). */}
       {shown.map(({ step, said, running }, i) => {
         const failed = step.status === "failed";
@@ -170,8 +171,8 @@ export function LiveRun({ repo, pr }: { repo: string; pr: number }) {
 
   if (!live) {
     return (
-      <section className={`${panel} px-4 py-4 sm:px-6`}>
-        <p className="font-medium">Waiting for GitHub Actions to start the run</p>
+      <section>
+        <p className="text-[18px] font-semibold leading-7 tracking-[-0.015em]">Waiting for GitHub Actions to start the run</p>
         <p className="mt-1 text-[13px] text-dim">Kane's steps and available live frames appear here as it works.</p>
       </section>
     );
@@ -187,66 +188,99 @@ export function LiveRun({ repo, pr }: { repo: string; pr: number }) {
     live.scenarios.find((s) => s.status === "failed") ??
     live.scenarios[0];
 
+  const pickers = (vertical: boolean) =>
+    live.scenarios.length > 1 && (
+      <div
+        role="tablist"
+        aria-label="Scenarios in this run"
+        aria-orientation={vertical ? "vertical" : "horizontal"}
+        className={
+          vertical
+            ? "-mx-3 flex flex-col gap-0.5"
+            : "flex overflow-x-auto overflow-y-hidden border-b border-edge [scrollbar-width:none] max-md:-mx-4 max-md:px-1"
+        }
+      >
+        {live.scenarios.map((s) => {
+          const on = s.id === current?.id;
+          return (
+            <button
+              key={s.id}
+              type="button"
+              role="tab"
+              aria-selected={on}
+              onClick={() => setPicked(s.id)}
+              className={
+                vertical
+                  ? `flex h-8 items-center gap-3 rounded-md px-3 text-left ${soft} ${focus} ${on ? "bg-hover font-medium text-fg" : "text-dim hover:bg-hover/60 hover:text-fg"}`
+                  : `-mb-px flex h-11 shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 ${soft} ${focus} focus-visible:ring-inset ${on ? "border-fg font-medium text-fg" : "border-transparent text-dim hover:text-fg"}`
+              }
+            >
+              <Mark kind={kindOf(s)} /> <span className={vertical ? "min-w-0 flex-1 truncate" : ""}>{s.name}</span>
+            </button>
+          );
+        })}
+      </div>
+    );
+
+  // Laid out as the report under it is: what's happening and Chrome as Kane sees it in the main column,
+  // the scenarios and Kane's steps in the rail beside it (on a phone, tabs on top and the steps under).
   return (
-    <section className={panel}>
-      <header className="flex flex-wrap items-start gap-x-4 gap-y-1 px-4 py-4 sm:px-6">
-        <div className="min-w-0 flex-1 basis-64">
-          <p className="font-medium">{title}</p>
-          <p className="mt-1 text-[13px] text-dim">{sub}</p>
-        </div>
-        <p className="flex items-center gap-1.5 text-[13px] text-faint">
-          <span className="tabular-nums">{clock(now - live.startedAt)}</span>
-          {live.runUrl && (
-            <>
-              <span aria-hidden>·</span>
-              <a href={live.runUrl} target="_blank" rel="noreferrer" className={`${link} hover:text-fg`}>
-                Logs
-              </a>
-            </>
-          )}
-        </p>
-      </header>
+    <section className="lg:grid lg:grid-cols-[minmax(0,1fr)_18.5rem] lg:gap-10 xl:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="min-w-0">
+        <header className="flex flex-wrap items-start gap-x-4 gap-y-1 lg:pt-1">
+          <div className="min-w-0 flex-1 basis-64">
+            <p className="text-[18px] font-semibold leading-7 tracking-[-0.015em]">{title}</p>
+            <p className="mt-0.5 text-dim">{sub}</p>
+          </div>
+          <p className="flex items-center gap-1.5 pt-1 text-[13px] text-faint">
+            <span className="tabular-nums">{clock(now - live.startedAt)}</span>
+            {live.runUrl && (
+              <>
+                <span aria-hidden>·</span>
+                <a href={live.runUrl} target="_blank" rel="noreferrer" className={`${link} hover:text-fg`}>
+                  Logs
+                </a>
+              </>
+            )}
+          </p>
+        </header>
 
-      {live.fix && live.fix.tries.length > 0 && (
-        <ol className="space-y-1 px-4 pb-4 text-[13px] text-dim sm:px-6">
-          {live.fix.tries.map((t, i) => (
-            <li key={i}>
-              <span className="text-faint">Attempt {i + 1}:</span> {t.summary} <span className="text-fg">{t.result}</span>
-            </li>
-          ))}
-        </ol>
-      )}
+        {live.fix && live.fix.tries.length > 0 && (
+          <ol className="mt-3 space-y-1 text-[13px] text-dim">
+            {live.fix.tries.map((t, i) => (
+              <li key={i}>
+                <span className="text-faint">Attempt {i + 1}:</span> {t.summary} <span className="text-fg">{t.result}</span>
+              </li>
+            ))}
+          </ol>
+        )}
 
-      {browser && current && (
-        <>
-          {live.scenarios.length > 1 && (
-            <div role="tablist" aria-label="Scenarios in this run" className="flex overflow-x-auto overflow-y-hidden border-y border-edge px-2 [scrollbar-width:none] sm:px-3">
-              {live.scenarios.map((s) => {
-                const on = s.id === current.id;
-                return (
-                  <button
-                    key={s.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={on}
-                    onClick={() => setPicked(s.id)}
-                    className={`-mb-px flex h-11 shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 ${soft} ${focus} focus-visible:ring-inset ${on ? "border-fg font-medium text-fg" : "border-transparent text-dim hover:text-fg"}`}
-                  >
-                    <Mark kind={kindOf(s)} /> {s.name}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          <div className={`grid gap-6 p-5 sm:p-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-8 ${live.scenarios.length > 1 ? "" : "border-t border-edge"}`}>
-            <div className="min-w-0 lg:col-start-2 lg:row-start-1">
+        {browser && current && (
+          <>
+            <div className="mt-4 lg:hidden">{pickers(false)}</div>
+            <div className="mt-6 overflow-hidden rounded-xl shadow-[0_12px_32px_-16px_rgb(0_0_0/0.5)]">
               <LiveFrame key={current.id} frame={view.frames[current.id]} on={current.status === "running"} now={now} startedAt={current.startedAt} />
             </div>
-            <div className="min-w-0 lg:col-start-1 lg:row-start-1">
+            <div className="mt-8 lg:hidden">
               <LiveSteps scenario={current} />
             </div>
+          </>
+        )}
+      </div>
+
+      {browser && current && (
+        <aside className="space-y-8 self-start max-lg:hidden lg:sticky lg:top-6">
+          {live.scenarios.length > 1 && (
+            <div>
+              <h3 className="mb-2.5 text-[13px] font-medium text-fg">Scenarios</h3>
+              {pickers(true)}
+            </div>
+          )}
+          <div>
+            <h3 className="mb-2.5 text-[13px] font-medium text-fg">Kane's steps</h3>
+            <LiveSteps scenario={current} />
           </div>
-        </>
+        </aside>
       )}
     </section>
   );

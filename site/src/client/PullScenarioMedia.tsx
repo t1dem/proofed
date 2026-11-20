@@ -12,7 +12,17 @@ const clock = (seconds = 0) => `${Math.floor(seconds / 60)}:${String(Math.floor(
 // The recording with its own controls. Its track marks where each of Kane's steps starts (the
 // broken one in red), so a step leads to its moment in the clip and the clip lights up its step.
 // Until it plays, the poster is the still: what the run ended on.
-export function Recording({ clip, steps, seek, onTime }: { clip: NonNullable<RunScenario["clip"]>; steps?: Step[]; seek?: Seek; onTime?: (t: number) => void }) {
+type RecordingProps = {
+  clip: NonNullable<RunScenario["clip"]>;
+  steps?: Step[];
+  seek?: Seek;
+  onTime?: (t: number) => void;
+  // The step pointed at, here on the track or in the list of steps beside the clip.
+  lit?: number;
+  onLit?: (i: number | undefined) => void;
+};
+
+export function Recording({ clip, steps, seek, onTime, lit, onLit }: RecordingProps) {
   const video = useRef<HTMLVideoElement>(null);
   const fill = useRef<HTMLSpanElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -96,8 +106,15 @@ export function Recording({ clip, steps, seek, onTime }: { clip: NonNullable<Run
           muted
           playsInline
           onLoadedMetadata={(e) => {
-            const duration = e.currentTarget.duration;
-            setLength(Number.isFinite(duration) && duration > 0 ? duration : undefined);
+            const v = e.currentTarget;
+            setLength(Number.isFinite(v.duration) && v.duration > 0 ? v.duration : undefined);
+            // A broken run opens where it broke: the frame of the failed step, the track at its mark.
+            const broke = steps?.find((s) => s.failed)?.at;
+            if (broke !== undefined && seek === undefined && v.currentTime === 0) {
+              v.currentTime = broke;
+              setTime(broke);
+              paint();
+            }
           }}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
@@ -158,9 +175,11 @@ export function Recording({ clip, steps, seek, onTime }: { clip: NonNullable<Run
                   title={plain(step.remark)}
                   aria-label={`Play from step ${i + 1}: ${plain(step.remark)}`}
                   onPointerDown={(e) => e.stopPropagation()}
+                  onPointerEnter={() => onLit?.(i)}
+                  onPointerLeave={() => onLit?.(undefined)}
                   onClick={() => playFrom(step.at)}
                   style={{ left: `${(step.at / length) * 100}%` }}
-                  className={`absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-panel transition-transform hover:scale-150 ${step.failed ? "bg-bad" : "bg-faint"} ${focus}`}
+                  className={`absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-bg transition-transform hover:scale-150 ${lit === i ? "scale-150" : ""} ${step.failed ? "bg-bad" : lit === i ? "bg-fg" : "bg-faint"} ${focus}`}
                 />
               ),
             )}

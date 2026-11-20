@@ -5,7 +5,7 @@ import { canAskAgain, fixLabel, movingName, titleName, useLoad, type Ask, type R
 import { LiveRun } from "./Live";
 import { RunMeta } from "./PullRunMeta";
 import { Scenarios } from "./PullScenarios";
-import { bone, iconButton, kindOf, Link, link, Mark, MobileBar, NEEDS_WRITE, outline, PageTitle, solid } from "./ui";
+import { bone, iconButton, kindOf, link, Link, MobileBar, NEEDS_WRITE, outline, PageTitle, RepoChip, solid } from "./ui";
 
 export { RunMeta, Scenarios };
 
@@ -83,7 +83,10 @@ export function Pull({ repo, pr, scenario, listed, go, asked, ask }: PullProps) 
           Inbox
         </Link>
         <ChevronRight size={14} />
-        <span>{repo.split("/")[1]}</span>
+        <span className="flex items-center gap-1.5">
+          <RepoChip repo={repo} size={14} />
+          {repo.split("/")[1]}
+        </span>
       </nav>
       <div className="max-md:h-4" />
       <PageTitle
@@ -111,15 +114,9 @@ export function Pull({ repo, pr, scenario, listed, go, asked, ask }: PullProps) 
           )
         }
       >
-        <span className="flex items-start gap-2.5">
-          {kind && (
-            <span className="flex h-[30px] shrink-0 items-center md:h-[34px]">
-              <Mark kind={kind} size={18} />
-            </span>
-          )}
-          <span className="pr-title min-w-0" data-title={titleName({ repo, pr })} style={{ viewTransitionName: movingName({ repo, pr }) }}>
-            {pull?.title ?? "Pull request"} <span className="font-normal text-faint">#{pr}</span>
-          </span>
+        {/* No status icon here: the line under the title says how the run went, and each scenario has its own. */}
+        <span className="pr-title min-w-0" data-title={titleName({ repo, pr })} style={{ viewTransitionName: movingName({ repo, pr }) }}>
+          {pull?.title ?? "Pull request"} <span className="font-normal text-faint">#{pr}</span>
         </span>
       </PageTitle>
 
@@ -135,7 +132,7 @@ export function Pull({ repo, pr, scenario, listed, go, asked, ask }: PullProps) 
             {(kind === "running" || kind === "fixing") && <LiveRun repo={repo} pr={pr} />}
             {detail.data.runs.length > 0 ? (
               <>
-                {(kind === "running" || kind === "fixing") && <h2 className="mb-3 mt-9 text-[13px] font-medium text-faint">The last report</h2>}
+                {(kind === "running" || kind === "fixing") && <h2 className="mb-6 mt-12 border-t border-edge pt-6 text-[13px] font-medium text-fg">The last report</h2>}
                 <Scenarios runs={runs} at={at} scenario={scenario} />
               </>
             ) : kind === "running" || kind === "fixing" ? null : (

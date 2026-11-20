@@ -171,11 +171,12 @@ export function useLoad<T>(path: string, refreshMs?: number) {
 export const installed = () => matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone === true;
 
 // `scenario` (a pull request's tab, by name) rides in the hash, so the inbox's squares can open one.
-export type Route = { page: "inbox" } | { page: "settings" } | { page: "pull"; repo: string; pr: number; scenario?: string };
+export type Route = { page: "inbox" } | { page: "dashboard" } | { page: "settings" } | { page: "pull"; repo: string; pr: number; scenario?: string };
 
 function parseRoute({ pathname, hash }: Location): Route {
   const [, , first, second, third] = pathname.split("/");
-  if (first === "settings") return { page: "settings" };
+  if (first === "settings" && !second) return { page: "settings" };
+  if (first === "dashboard" && !second) return { page: "dashboard" };
   if (first && second && third && /^\d+$/.test(third)) {
     const scenario = hash.length > 1 ? decodeURIComponent(hash.slice(1)) : undefined;
     return { page: "pull", repo: `${first}/${second}`, pr: Number(third), ...(scenario && { scenario }) };
@@ -184,7 +185,7 @@ function parseRoute({ pathname, hash }: Location): Route {
 }
 
 export const pathOf = (route: Route) =>
-  (route.page === "inbox" ? "/app" : route.page === "settings" ? "/app/settings" : `/app/${route.repo}/${route.pr}`) +
+  (route.page === "inbox" ? "/app" : route.page === "settings" ? "/app/settings" : route.page === "dashboard" ? "/app/dashboard" : `/app/${route.repo}/${route.pr}`) +
   location.search +
   (route.page === "pull" && route.scenario ? `#${encodeURIComponent(route.scenario)}` : "");
 

@@ -21,7 +21,11 @@ export type PullView = {
   state: PullState;
   headline: string;
   url: string;
+  // When the report comment last changed, an edit to its fix box included.
   updatedAt: number;
+  // When the latest run was saved: what the inbox's Checked filter goes by. Missing for reports posted
+  // before run files existed; a pull being checked again after a push keeps its last run's time.
+  checkedAt?: number;
   // From the latest run; empty for reports posted before run files existed.
   scenarios: Pick<RunScenario, "name" | "outcome" | "reason">[];
   fixer?: Fixer;
@@ -131,6 +135,7 @@ function toPull(report: ReportRow, latest: Run | undefined, live?: Live): PullVi
     headline: report.headline,
     url: report.url,
     updatedAt: report.updated_at,
+    ...(latest && { checkedAt: latest.at }),
     scenarios: latest?.scenarios.map(({ name, outcome, reason }) => ({ name, outcome, reason: outcome === "passed" ? undefined : reason })) ?? [],
     fix: latest?.fix && {
       status: latest.fix.status,
@@ -154,8 +159,10 @@ export async function listPulls(env: Env, repos: string[]): Promise<PullView[]> 
     env.DB.prepare(`SELECT * FROM reports WHERE repo IN (${marks}) AND closed = 0 AND updated_at > ?${names.length + 1} ORDER BY updated_at DESC LIMIT 200`)
       .bind(...names, since)
       .all<ReportRow>(),
+    // The latest run of each listed pull, however old: it says when the pull was last checked.
     env.DB.prepare(
-      `SELECT * FROM runs r WHERE repo IN (${marks}) AND created_at > ?${names.length + 1}
+      `SELECT * FROM runs r WHERE repo IN (${marks})
+       AND EXISTS (SELECT 1 FROM reports p WHERE p.repo = r.repo AND p.pr = r.pr AND p.closed = 0 AND p.updated_at > ?${names.length + 1})
        AND key = (SELECT key FROM runs WHERE repo = r.repo AND pr = r.pr ORDER BY created_at DESC, key DESC LIMIT 1)`,
     )
       .bind(...names, since)
@@ -208,4 +215,49 @@ export async function getPulls(env: Env, repo: string, prs: number[], api: strin
     details.set(report.pr, { pull: toPull(report, all[0]), runs: all });
   }
   return details;
+}
+
+// One run as the dashboard's activity page counts it: when, where, what each scenario came to and
+// what it cost, and the fixer's try if the run was a fix.
+export type ActivityRun = {
+  repo: string;
+  pr: number;
+  at: number;
+  scenarios: { name: string; outcome: Outcome; credits?: number; seconds?: number }[];
+  // TestMu's balance after the run, when Kane reported it.
+  balance?: number;
+  fix?: { status: RunFix["status"]; model: string; attempts: number };
+};
+
+export const ACTIVITY_DAYS = [7, 30, 90] as const;
+
+// Every run of the last `days`, and of the `days` before them so the page can say what changed.
+export async function listActivity(env: Env, repos: string[], days: number): Promise<ActivityRun[]> {
+  if (repos.length === 0) return [];
+  // D1 takes at most 100 bound values, so the repositories go 90 at a time.
+  const since = Date.now() - 2 * days * 86_400_000;
+  const chunks: string[][] = [];
+  for (let i = 0; i < repos.length; i += 90) chunks.push(repos.slice(i, i + 90));
+  const answers = await Promise.all(
+    chunks.map((names) =>
+      env.DB.prepare(
+        `SELECT repo, pr, data, created_at FROM runs WHERE repo IN (${names.map((_, i) => `?${i + 1}`).join(", ")}) AND created_at > ?${names.length + 1} ORDER BY created_at DESC LIMIT 3000`,
+      )
+        .bind(...names, since)
+        .all<RunRow>(),
+    ),
+  );
+  const rows = answers.flatMap((a) => a.results).sort((a, b) => b.created_at - a.created_at);
+  return rows.map((row) => {
+    const file = JSON.parse(row.data) as RunFile;
+    const balance = file.scenarios.findLast((s) => s.accountBalance)?.accountBalance?.after;
+    return {
+      repo: row.repo,
+      pr: row.pr,
+      at: row.created_at,
+      scenarios: file.scenarios.map(({ name, outcome, credits, seconds }) => ({ name, outcome, credits, seconds })),
+      ...(balance !== undefined && { balance }),
+      ...(file.fix && { fix: { status: file.fix.status, model: file.fix.model, attempts: file.fix.attempts?.length ?? 1 } }),
+    };
+  });
 }

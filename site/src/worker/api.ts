@@ -6,7 +6,7 @@ import type { Env } from "./index";
 import { forget, memo } from "./memo";
 import { DEFAULT_FIXER, effortsFor, isProvider, resolveFixer, type Fixer } from "./models";
 import { getLive, liveFrame } from "./live";
-import { getPull, listPulls, markAsked } from "./runs";
+import { ACTIVITY_DAYS, getPull, listActivity, listPulls, markAsked } from "./runs";
 import { openSetupPr } from "./setup";
 
 export const SECRET_NAMES = ["LT_USERNAME", "LT_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "CODEX_API_KEY"] as const;
@@ -362,6 +362,13 @@ export async function handleApi(request: Request, env: Env, path: string) {
     const fixers = new Map(await Promise.all(repos.filter((r) => pulls.some((p) => p.repo === r.full_name)).map(async (r) =>
       [r.full_name, await installedFixer(env, r)] as const)));
     return json(pulls.map((p) => ({ ...p, fixer: fixers.get(p.repo) ?? undefined, paused: paused.has(p.repo), readOnly: readOnly.has(p.repo) })));
+  }
+
+  if (path === "/api/activity" && request.method === "GET") {
+    const asked = Number(new URL(request.url).searchParams.get("days"));
+    const days = ACTIVITY_DAYS.find((d) => d === asked) ?? 30;
+    const repos = await listRepos(env, token);
+    return json(await listActivity(env, repos.map((r) => r.full_name), days));
   }
 
   const clip = CLIP_PATH.exec(path.slice("/api".length));

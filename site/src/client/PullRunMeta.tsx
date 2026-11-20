@@ -1,6 +1,6 @@
 import { Check, ChevronDown } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
-import { creditSummary, fixedSummary } from "../run-summary";
+import { fixedSummary } from "../run-summary";
 import { providerLabel, providerOf } from "../worker/models";
 import type { Run, RunScenario } from "../worker/runs";
 import { ago } from "./lib";
@@ -19,10 +19,13 @@ function runLabel(run: Run, runs: Run[]) {
 const runDot = (run: Run) =>
   run.scenarios.some((s) => s.outcome === "failed") ? "bg-bad" : run.scenarios.some((s) => s.outcome !== "passed") ? "bg-busy" : "bg-ok";
 
-const duration = (seconds: number) => (seconds >= 60 ? `${Math.floor(seconds / 60)} min ${seconds % 60} s` : `${seconds} s`);
+const runText = (run: Run) =>
+  run.scenarios.some((s) => s.outcome === "failed") ? "text-bad" : run.scenarios.some((s) => s.outcome !== "passed") ? "text-busy" : "text-ok";
 
-// The line under the title: how the shown run went and where it came from. With more than one run
-// the commit opens the list of them, and picking one shows the pull request as that run left it.
+
+// The line under the title: how the shown run went (in its colour), when, and on which commit. With
+// more than one run the commit opens the list of them, and picking one shows the pull request as that
+// run left it. What a run took (time, credits) is beside the scenarios, in the page's rail.
 // The commit Kane or Claude is at work on heads the list in their color until its run reports.
 type Checking = { sha: string; at: number; kind: "running" | "fixing" };
 export function RunMeta({ runs, at, onAt, checking }: { runs: Run[]; at: number; onAt: (key: string | undefined) => void; checking?: Checking }) {
@@ -34,13 +37,14 @@ export function RunMeta({ runs, at, onAt, checking }: { runs: Run[]; at: number;
   const hasHistory = runs.length > 1 || !!checking;
   const sheet = useSheetDrag<HTMLSpanElement>(open && !!run && hasHistory, close);
   if (!run) return null;
-  const seconds = Math.round(run.scenarios.reduce((sum, s) => sum + (s.seconds ?? 0), 0));
-  const cost = [seconds > 0 ? duration(seconds) : undefined, creditSummary(runs.slice(at), at === 0)].filter((part): part is string => !!part);
   const when = ago(run.at) === "now" ? "just now" : `${ago(run.at)} ago`;
   const dot = <span aria-hidden>·</span>;
   return (
-    <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 pl-7 text-[13px] text-faint">
-      <span className="text-dim">{runLabel(run, runs.slice(at))}</span>
+    <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] text-faint">
+      <span className={`flex items-center gap-1.5 font-medium ${runText(run)}`}>
+        <span className={`size-1.5 rounded-full ${runDot(run)}`} />
+        {runLabel(run, runs.slice(at))}
+      </span>
       {dot}
       <span>{when} on</span>
       {hasHistory ? (
@@ -84,18 +88,13 @@ export function RunMeta({ runs, at, onAt, checking }: { runs: Run[]; at: number;
                   <span className="w-3.5 shrink-0 text-fg">{i === at && <Check size={14} />}</span>
                 </button>
               ))}
+
             </span>
           )}
         </span>
       ) : (
         <span className="font-mono text-[12px]">{sha7(run.sha)}</span>
       )}
-      {cost.map((part) => (
-        <span key={part} className="contents">
-          {dot}
-          <span>{part}</span>
-        </span>
-      ))}
       {run.runUrl && (
         <>
           {dot}

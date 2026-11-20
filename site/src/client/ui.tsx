@@ -1,18 +1,24 @@
 import { CircleCheck, CircleDashed, CircleExclamationPoint, CircleMinus, CircleQuestionMark, CircleX, LoaderCircle, type LucideIcon } from "lucide-react";
-import { useEffect, useRef, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
 import type { MeView } from "../worker/api";
 import type { Outcome, PullView } from "../worker/runs";
 import { pathOf, type Route } from "./lib";
 
 export const focus = "outline-none focus-visible:ring-2 focus-visible:ring-fg/50";
 // 44px tall on a phone: a finger, not a pointer.
-const button = `inline-flex h-8 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 text-[13px] font-medium transition-colors disabled:opacity-50 max-md:h-11 max-md:rounded-lg max-md:px-4 max-md:text-[15px] ${focus}`;
-export const solid = `${button} bg-fg text-bg hover:bg-fg/85 disabled:hover:bg-fg`;
+const shape = "inline-flex h-8 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 text-[13px] font-medium transition-colors disabled:opacity-50 max-md:h-11 max-md:rounded-lg max-md:px-4 max-md:text-[15px]";
+const button = `${shape} ${focus}`;
+// The one call to action on a screen: raised, in the accent (.raised in index.css). Its focus ring is an
+// outline, as a box-shadow ring would replace the shadows that raise it.
+export const solid = `${shape} raised`;
 export const outline = `${button} border border-edge hover:bg-hover disabled:hover:bg-transparent`;
+// A quiet filled button: a control that belongs to a row (the model, the next step) rather than a call to action.
+export const subtle = `${button} bg-fg/[0.06] text-fg hover:bg-fg/[0.1] active:bg-fg/[0.12] disabled:hover:bg-fg/[0.06]`;
 // The title of a button that's there but greyed out: the signed-in user can't push to the repo.
 export const NEEDS_WRITE = "Needs write access to this repository";
 export const iconButton = `inline-grid size-8 shrink-0 place-items-center rounded-md text-dim transition-colors hover:bg-hover hover:text-fg active:bg-hover max-md:size-11 ${focus}`;
-export const field = `h-9 w-full rounded-md border border-edge bg-panel px-3 font-mono text-[13px] max-md:h-11 max-md:rounded-lg ${focus}`;
+// A field is a well in the surface it sits on (.inset in index.css).
+export const field = `inset h-9 w-full rounded-lg px-3 font-mono text-[13px] max-md:h-11`;
 export const link = "underline decoration-edge underline-offset-4 hover:decoration-fg";
 // A hover fill that comes in quickly and fades out slowly, so moving down a list leaves a soft trail
 // instead of each item switching on and off. (The base duration is the fade out, hover's the fade in.)
@@ -33,6 +39,54 @@ export function Link({ to, go, className, title, children }: { to: Route; go: Go
     <a href={pathOf(to)} onClick={onClick} title={title} className={`${focus} ${className ?? ""}`}>
       {children}
     </a>
+  );
+}
+
+// The product's name with its mark, wherever the app shows who it is.
+export function Logo({ size = 20, className = "" }: { size?: number; className?: string }) {
+  return (
+    <span className={`flex items-center gap-2 font-semibold tracking-[-0.01em] ${className}`}>
+      <img src="/favicon.svg" alt="" className="rounded-[5px]" style={{ width: size, height: size }} />
+      Proofed
+    </span>
+  );
+}
+
+// A key as printed on the keyboard: in hints next to menu items, the palette's footer and the shortcuts sheet.
+export function Kbd({ children }: { children: ReactNode }) {
+  return (
+    <kbd className="inline-grid h-5 min-w-5 place-items-center rounded-[5px] border border-edge bg-bg px-1 font-sans text-[11px] font-medium leading-none text-dim">
+      {children}
+    </kbd>
+  );
+}
+
+// A repository's two letters on a tinted square, the same tint wherever it shows, so a row says
+// which repository it is from at a glance without reading the name.
+const chipTints = [
+  "bg-[#8fa6ff]/15 text-[#8fa6ff]",
+  "bg-[#4cc373]/15 text-[#4cc373]",
+  "bg-[#e0ad4a]/15 text-[#d29a32]",
+  "bg-[#c08cff]/15 text-[#b07af5]",
+  "bg-[#f2625a]/15 text-[#ef5a52]",
+  "bg-[#4cc3c3]/15 text-[#3fb5b5]",
+];
+const initials = (repo: string) => {
+  const name = repo.split("/").pop() ?? repo;
+  const words = name.split(/[-_.\s]+/).filter(Boolean);
+  return ((words[0]?.[0] ?? "") + (words[1]?.[0] ?? words[0]?.[1] ?? "")).toUpperCase();
+};
+export function RepoChip({ repo, size = 16, round = "rounded-[4px]" }: { repo: string; size?: number; round?: string }) {
+  let hash = 0;
+  for (const c of repo) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
+  return (
+    <span
+      aria-hidden
+      className={`inline-grid shrink-0 place-items-center font-semibold leading-none tracking-[-0.02em] ${round} ${chipTints[hash % chipTints.length]}`}
+      style={{ width: size, height: size, fontSize: Math.round(size * (size > 24 ? 0.36 : 0.5)) }}
+    >
+      {initials(repo)}
+    </span>
   );
 }
 
@@ -89,7 +143,7 @@ export function Pips({ scenarios, onPick }: { scenarios: PullView["scenarios"]; 
             {square}
             <span
               aria-hidden
-              className="pointer-events-none absolute bottom-full right-0 z-30 mb-2 whitespace-nowrap rounded-md border border-edge bg-panel px-2 py-1 text-[12px] text-fg opacity-0 shadow-lg shadow-black/20 transition-opacity duration-100 group-hover/pip:opacity-100 group-focus-visible/pip:opacity-100"
+              className="pointer-events-none absolute bottom-full right-0 z-30 mb-2 whitespace-nowrap rounded-lg border border-edge bg-panel px-2 py-1 text-[12px] text-fg opacity-0 shadow-xl shadow-black/30 transition-opacity duration-100 group-hover/pip:opacity-100 group-focus-visible/pip:opacity-100"
             >
               {says}
             </span>
@@ -107,20 +161,54 @@ type SegmentedProps<T extends string> = {
   onChange: (value: T) => void;
 };
 
-// A row of buttons for a short list of choices: everything is visible, one click picks.
+// A row of buttons for a short list of choices: everything is visible, one click picks. The picked
+// one sits on a raised thumb that slides to the next pick. Arrow keys move the pick, as in any radio group.
 export function Segmented<T extends string>({ label, value, options, onChange }: SegmentedProps<T>) {
+  const track = useRef<HTMLDivElement>(null);
+  const [thumb, setThumb] = useState<{ x: number; w: number; moved: boolean }>();
+  const at = options.findIndex((o) => o.value === value);
+  useLayoutEffect(() => {
+    const el = track.current;
+    if (!el) return;
+    // Measured, so each choice keeps its own width; again when the fonts land or the row reflows.
+    const place = () => {
+      const button = at < 0 ? undefined : (el.children[at + 1] as HTMLElement | undefined);
+      setThumb((before) => (button ? { x: button.offsetLeft, w: button.offsetWidth, moved: !!before } : undefined));
+    };
+    place();
+    const watch = new ResizeObserver(place);
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, [at]);
+  const pick = (i: number) => {
+    const option = options[(i + options.length) % options.length]!;
+    onChange(option.value);
+    (track.current?.children[options.indexOf(option) + 1] as HTMLElement | undefined)?.focus();
+  };
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex flex-wrap rounded-md border border-edge bg-panel p-0.5">
-      {options.map((option) => {
-        const on = option.value === value;
+    <div ref={track} role="radiogroup" aria-label={label} className="seg-track relative inline-flex rounded-[9px] p-[3px]">
+      <span
+        aria-hidden
+        className={`seg-thumb pointer-events-none absolute inset-y-[3px] left-0 rounded-[7px] ${thumb?.moved ? "transition-[transform,width] duration-[260ms] ease-[cubic-bezier(0.2,0.8,0.2,1)]" : ""} ${thumb ? "" : "hidden"}`}
+        style={thumb && { width: thumb.w, transform: `translateX(${thumb.x}px)` }}
+      />
+      {options.map((option, i) => {
+        const on = i === at;
         return (
           <button
             key={option.value}
             type="button"
             role="radio"
             aria-checked={on}
+            tabIndex={on || (at < 0 && i === 0) ? 0 : -1}
             onClick={() => !on && onChange(option.value)}
-            className={`h-7 rounded-[5px] px-2.5 text-[13px] max-md:h-9 max-md:px-3 max-md:text-[14px] ${soft} ${focus} ${on ? "bg-hover font-medium text-fg shadow-[inset_0_0_0_1px_var(--color-edge)]" : "text-dim hover:bg-hover/50 hover:text-fg"}`}
+            onKeyDown={(e) => {
+              const by = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+              if (!by) return;
+              e.preventDefault();
+              pick(i + by);
+            }}
+            className={`relative h-[26px] whitespace-nowrap rounded-[7px] px-3 text-[13px] font-medium outline-none transition-colors duration-200 focus-visible:ring-1 focus-visible:ring-fg/40 max-md:h-8 max-md:px-3.5 max-md:text-[14px] ${on ? "text-fg" : "text-faint hover:text-dim"}`}
           >
             {option.label}
           </button>
@@ -153,7 +241,7 @@ export const panel = "-mx-4 overflow-clip border-y border-edge bg-panel sm:mx-0 
 // A menu under its button; on a phone, a sheet from the bottom (with a Backdrop and useSheetDrag) and
 // a grab handle on top.
 export const popover =
-  "absolute right-0 top-full z-20 mt-1.5 rounded-lg border border-edge bg-panel shadow-xl shadow-black/30 " +
+  "absolute right-0 top-full z-20 mt-1.5 origin-top-right rounded-xl border border-edge bg-panel shadow-2xl shadow-black/40 md:animate-[menu-in_170ms_cubic-bezier(0.16,1,0.3,1)] " +
   "max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:top-auto max-md:z-50 max-md:mt-0 max-md:max-h-[85dvh] max-md:w-auto max-md:overflow-y-auto max-md:overscroll-contain max-md:rounded-b-none max-md:rounded-t-2xl max-md:border-x-0 max-md:border-b-0 max-md:pb-[env(safe-area-inset-bottom)] max-md:animate-[sheet-up_280ms_cubic-bezier(0.2,0.8,0.2,1)] " +
   "max-md:before:mx-auto max-md:before:mb-1 max-md:before:mt-2 max-md:before:block max-md:before:h-1 max-md:before:w-9 max-md:before:rounded-full max-md:before:bg-edge max-md:before:content-['']";
 
@@ -223,7 +311,7 @@ export function PageTitle({ children, aside, sub, onPhone = "bar" }: { children:
     >
       <div className="min-w-0 flex-1 basis-48">
         <h1
-          className={`font-serif tracking-[-0.01em] ${bar ? "text-[28px] leading-[34px] max-md:truncate max-md:font-sans max-md:text-[17px] max-md:font-semibold max-md:leading-6 max-md:tracking-normal" : "text-[24px] leading-[30px] md:text-[28px] md:leading-[34px]"}`}
+          className={`font-semibold tracking-[-0.015em] ${bar ? "text-[22px] leading-8 max-md:truncate max-md:text-[17px] max-md:leading-6 max-md:tracking-normal" : "text-[20px] leading-7 md:text-[22px] md:leading-8"}`}
         >
           {children}
         </h1>
@@ -248,7 +336,11 @@ export function MobileBar({ back, title, actions }: { back: ReactNode; title: Re
 
 export function Avatar({ me }: { me: MeView }) {
   if (me.avatar) return <img src={me.avatar} alt="" className="size-6 shrink-0 rounded-full" />;
-  return <span className="grid size-6 shrink-0 place-items-center rounded-full bg-hover text-[12px] font-semibold uppercase text-dim">{me.login[0]}</span>;
+  return (
+    <span className="grid size-6 shrink-0 place-items-center rounded-full bg-gradient-to-br from-[#8fa6ff] to-[#b07af5] text-[11px] font-semibold uppercase text-white shadow-[inset_0_0_0_1px_rgb(255_255_255/0.15)]">
+      {me.login[0]}
+    </span>
+  );
 }
 
 export const sha7 = (sha: string) => sha.slice(0, 7);

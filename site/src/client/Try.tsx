@@ -10,7 +10,7 @@ import { ago, api, fixerName, message, useLoad } from "./lib";
 import { LiveRun } from "./Live";
 import { fixedSummary, latestScenarios } from "../run-summary";
 import { GitHubMark, RunMeta, Scenarios } from "./Pull";
-import { bone, focus, kindOf, link, Mark, outline, panel, soft, solid, type Kind } from "./ui";
+import { bone, focus, type Kind, kindOf, link, Logo, Mark, outline, panel, soft, solid } from "./ui";
 
 const prOf = () => {
   const number = /^\/try\/(\d+)$/.exec(location.pathname)?.[1];
@@ -51,8 +51,8 @@ function To({ pr, go, className, children }: { pr?: number; go: Go; className?: 
 function Top() {
   return (
     <header className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-8">
-      <a href="/" className={`rounded font-serif text-xl ${focus}`}>
-        Proofed
+      <a href="/" className={`rounded text-[15px] ${focus}`}>
+        <Logo />
       </a>
       <nav className="flex items-center gap-5 text-[13px] text-dim">
         <a href="/app?demo" className={`rounded hover:text-fg ${focus}`}>
@@ -105,7 +105,7 @@ function Picker({ view, go, reload }: { view: TryView; go: Go; reload: () => Pro
 
   return (
     <main className="mx-auto max-w-3xl px-4 pb-16 pt-6 sm:px-8 sm:pt-12">
-      <h1 className="font-serif text-[32px] leading-[1.1] tracking-[-0.01em] sm:text-[44px]">Break the store yourself</h1>
+      <h1 className="text-[30px] font-semibold leading-[1.1] tracking-[-0.025em] sm:text-[40px]">Break the store yourself</h1>
       <p className="mt-4 max-w-xl text-[15px] text-dim">
         Pick a pull request. Proofed opens it on{" "}
         <a href={`https://github.com/${view.repo}`} className={link}>
@@ -217,7 +217,7 @@ function Run({ repo, pr, go }: { repo: string; pr: number; go: Go }) {
       </To>
       <header className="mt-3 flex flex-wrap items-start gap-x-4 gap-y-3">
         <div className="min-w-0 flex-1 basis-64">
-          <h1 className="flex items-start gap-2.5 font-serif text-[24px] leading-[30px] tracking-[-0.01em] md:text-[28px] md:leading-[34px]">
+          <h1 className="flex items-start gap-2.5 text-[20px] font-semibold leading-[30px] tracking-[-0.015em] md:text-[22px] md:leading-[34px]">
             {kind && (
               <span className="flex h-[30px] shrink-0 items-center md:h-[34px]">
                 <Mark kind={kind} size={18} />
