@@ -217,8 +217,6 @@ function Sidebar({ me, route, go, pulls, repo, onRepo, rail }: SidebarProps) {
           <a href="/" className={`rounded-md px-2 text-[15px] ${focus}`}>
             <Logo />
           </a>
-          {/* Where there's room for it next to the logo. */}
-          {DEMO && <span className="hidden whitespace-nowrap text-[12px] font-medium text-faint @min-[212px]:inline">Sample data</span>}
           <button
             type="button"
             onClick={rail.toggle}

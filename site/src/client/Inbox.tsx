@@ -173,8 +173,6 @@ export function Inbox({ pulls, onRefresh, repo, onRepo, filter, onFilter, go, as
       <PageTitle
         aside={
           <>
-            {/* The sidebar says it on a wider screen. */}
-            {DEMO && <span className="shrink-0 text-[13px] text-faint md:hidden">Sample data</span>}
             {inRepo.length > 0 && (
               <FilterMenu filter={filter} onFilter={narrow} open={filterOpen} onOpen={setFilterOpen} repos={repos} repo={repo} onRepo={onRepo} />
             )}
