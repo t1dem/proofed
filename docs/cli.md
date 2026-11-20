@@ -1,6 +1,26 @@
 # proofed check
 
-The reference for `proofed check`. Installation is in the [README](../README.md#locally-and-from-an-ai-agent).
+The reference for `proofed check`.
+
+## Install
+
+`proofed check` runs the same check on your machine, against the change you haven't pushed yet: the scenarios its files touch, with Kane CLI on their configured targets. A coding agent can run it before it says a UI change is done.
+
+Web checks need Node 22.18 or later, Chrome, [Kane CLI](https://www.npmjs.com/package/@testmuai/kane-cli) signed in (`kane-cli login`) and ffmpeg for the clips.
+
+Install it with `npm install -g proofed-cli` (or `pnpm add -g`, `bun add -g`), or run it once with `npx proofed-cli`.
+
+The command is `proofed`. Run `proofed doctor` to see what's missing. The package ships built JavaScript and has no install scripts. From a clone, `npm link` runs the TypeScript source instead.
+
+In the app's repo:
+
+| Command | What it does |
+|---|---|
+| `proofed doctor` | Checks Node, Git, the scenarios, Kane CLI and its login, credits, Chrome, ffmpeg and the app, each with a fix |
+| `proofed list` | Every scenario, whether the change touches it and whether its pass is cached |
+| `proofed check` | Runs the scenarios the change touches; `proofed check "the cart total updates"` checks just that |
+
+In a repo that already runs Proofed on its PRs, `proofed check` needs no flags. `--dry-run` shows what would run and the credit estimate, for free.
 
 ## What it checks
 
@@ -46,6 +66,24 @@ Use `proofed check --only <id> --dry-run --json` to plan one scenario, or
 covers. Text that is a scenario's id or name is refused with exit 3 and the `--only` command. Remove
 `--dry-run` to run it. Allow at least 10 minutes. Read `reason`, `diagnosis` and `rerun`
 when a scenario fails. `not_checked` is not a pass. On exit 3, follow `error.fix`.
+
+For an agent, add this to the app's `AGENTS.md` or `CLAUDE.md`:
+
+```md
+## Checking UI changes
+
+Run the one command the task needs; `proofed check` checks its own setup first.
+- Check the change: `proofed check --json`. One scenario: `proofed check --only <id> --json`.
+- A behavior no scenario covers: `proofed check "<what>" --json`.
+- To plan without spending credits, add `--dry-run`: it shows what would run and `estimatedCredits`.
+- Only to ask which scenarios a change touches and their cost: `proofed list --json`.
+- Only for setup questions: `proofed doctor --json`.
+Allow at least 10 minutes for a check. stdout is one JSON document; progress is on stderr.
+Exit 0: passed or nothing ran. On `failed`, read `reason` and `diagnosis`, fix and run `rerun`.
+`failedCheck: "scenario_doubted"` is Kane's opinion: review the scenario's expectations.
+`not_checked` is not a pass. On `error`, retry `rerun` once. Exit 3: follow `error.fix`.
+Checks spend Kane credits; planning does not. Use `--no-retry` when another attempt is forbidden.
+```
 
 ## MCP and the Claude Code Stop hook
 
@@ -282,7 +320,7 @@ of uploaded IDs and explicitly reused desktop sessions still work.
 
 ### GitHub Actions examples
 
-Use the PR/comment triggers, permissions and concurrency from the [README workflow](../README.md#setup).
+Use the PR/comment triggers, permissions and concurrency from the [setup workflow](setup.md#setup).
 Pass `vars: ${{ toJSON(vars) }}` to carry the dashboard's **Fix automatically** setting.
 Set the matching `target` in the scenario frontmatter; the action's `target` input
 filters scenario files. Prepare SDKs and devices before the action; Proofed installs
