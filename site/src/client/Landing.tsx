@@ -58,6 +58,18 @@ function AppWindow() {
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [phone, setPhone] = useState(() => matchMedia(PHONE).matches);
   const [shown, setShown] = useState(false);
+  // The demo app inside outweighs the page around it; its scripts load once the landing
+  // has settled, while the frame is still fading in exactly as before.
+  const [load, setLoad] = useState(false);
+  useEffect(() => {
+    const go = () => setLoad(true);
+    if (window.requestIdleCallback) {
+      const id = window.requestIdleCallback(go, { timeout: 1500 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const t = setTimeout(go, 400);
+    return () => clearTimeout(t);
+  }, []);
   useEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -77,11 +89,11 @@ function AppWindow() {
       <div ref={box} className="relative h-[540px] w-full overflow-hidden md:aspect-[16/9] md:h-auto">
         {size.w > 0 && (
           <iframe
-            src="/app?demo"
+            src={load ? "/app?demo" : undefined}
             title="Proofed on sample data"
             inert={phone}
             tabIndex={phone ? -1 : undefined}
-            onLoad={() => setTimeout(() => setShown(true), 250)}
+            onLoad={() => load && setTimeout(() => setShown(true), 250)}
             className={`absolute left-0 top-0 origin-top-left bg-bg transition-opacity duration-700 ${shown ? "opacity-100" : "opacity-0"} ${phone ? "pointer-events-none" : ""}`}
             style={{ width: size.w / scale, height: size.h / scale, transform: `scale(${scale})` }}
           />

@@ -2,7 +2,7 @@ import { ArrowUpRight, Check, CircleCheck, CircleX, GitMerge, GitPullRequest, X 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { BRANDS } from "./brands";
 import { DAWN } from "./dawn";
-import { sampleShipping } from "./demo";
+import { sampleFail, sampleFix } from "./sample";
 import { Compare, Recording, type Seek } from "./PullScenarioMedia";
 
 // The hero's pull request from broken to merged, as one stage and the pull request's history beside
@@ -20,9 +20,8 @@ const DEMO_PR = "https://github.com/t1dem/proofed-demo-store/pull/12#issuecommen
 // The demo store's pull request where Kane turned down Claude's first fix and passed the second.
 const LOOP_PR = "https://github.com/t1dem/proofed-demo-store/pull/9";
 
-const [fixed, broken] = sampleShipping;
-const before = broken!.scenarios[0]!;
-const after = fixed!.scenarios[0]!;
+const before = sampleFail;
+const after = sampleFix;
 const steps = before.steps ?? [];
 // The bag where each run ended, the same part of the page in both (cut from the two recordings).
 const BAG = { before: "/clips/bag-before.jpg", after: "/clips/bag-after.jpg" };
@@ -67,6 +66,9 @@ export function PullShowcase() {
   const [auto, setAuto] = useState(true);
   const [seek, setSeek] = useState<Seek>();
   const [time, setTime] = useState<number>();
+  // The stage's clips and stills wait until the section nears the screen: a visit that never
+  // reaches it doesn't pay for the poster or the clip's first bytes. A dark box keeps its shape.
+  const [near, setNear] = useState(false);
   const later = useRef(0);
   const play = (from: number) => setSeek((s) => ({ at: from, n: (s?.n ?? 0) + 1 }));
   const show = (i: number) => {
@@ -94,6 +96,13 @@ export function PullShowcase() {
     seen.observe(el);
     return () => seen.disconnect();
   }, []);
+  useEffect(() => {
+    const el = box.current;
+    if (!el || near) return;
+    const io = new IntersectionObserver(([e]) => e?.isIntersecting && (setNear(true), io.disconnect()), { rootMargin: "75% 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [near]);
   // The bag as it still was has nothing to play: it stays a few seconds.
   useEffect(() => {
     if (at === 1) next(4000);
@@ -156,14 +165,15 @@ export function PullShowcase() {
 
         <div className="mt-12 grid gap-3 xl:grid-cols-12">
           <div ref={box} className="flex scroll-mt-4 flex-col overflow-hidden rounded-3xl border border-edge bg-bg xl:col-span-8">
-            {at === 0 && <Recording key="broke" clip={before.clip!} steps={steps} seek={seek} onTime={setTime} onEnd={() => next(1200)} />}
-            {at === 1 && (
+            {!near && <div aria-hidden className="aspect-video w-full bg-black" />}
+            {near && at === 0 && <Recording key="broke" clip={before.clip!} steps={steps} seek={seek} onTime={setTime} onEnd={() => next(1200)} />}
+            {near && at === 1 && (
               <Still>
                 <img src={BAG.before} alt="The bag after Claude's first fix: shipping is still Free at €44.50" className="block aspect-video w-full" />
               </Still>
             )}
-            {at === 2 && <Recording key="fixed" clip={after.clip!} seek={seek} onEnd={() => next(1200)} />}
-            {at === 3 && (
+            {near && at === 2 && <Recording key="fixed" clip={after.clip!} seek={seek} onEnd={() => next(1200)} />}
+            {near && at === 3 && (
               <Still>
                 <Compare before={BAG.before} after={BAG.after} />
               </Still>
