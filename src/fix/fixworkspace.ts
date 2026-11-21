@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { lstatSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { get as getHttp } from "node:http";
 import { get as getHttps } from "node:https";
 import { createConnection } from "node:net";
@@ -54,12 +54,32 @@ function probe(url: URL, signal: AbortSignal) {
   });
 }
 
+// The Codex subscription login (auth.json in CODEX_HOME) is on disk only while the fixer runs, so the app's
+// build and server, whose scripts the fixer can edit, can't read it. Returns what puts it back.
+export function hideCodexAuth() {
+  const file = process.env.CODEX_HOME ? join(process.env.CODEX_HOME, "auth.json") : undefined;
+  let saved: string | undefined;
+  try {
+    if (file) saved = readFileSync(file, "utf8");
+  } catch { /* no subscription login */ }
+  if (!file || saved === undefined) return () => {};
+  rmSync(file, { force: true });
+  let restored = false;
+  return () => {
+    if (restored) return;
+    restored = true;
+    writeFileSync(file, saved, { mode: 0o600 });
+    chmodSync(file, 0o600);
+  };
+}
+
 async function serve(appDir: string) {
   const url = new URL(env("PROOFED_URL"));
   const port = Number(url.port || (url.protocol === "https:" ? 443 : 80));
   if (await portOccupied(url.hostname.replace(/^\[|\]$/g, ""), port)) {
     throw new Error(`Port ${port} is already in use; stop the old server before Proofed starts the app.`);
   }
+  const restoreAuth = hideCodexAuth();
   // The app's own commands get no job credentials, as in the check job's build and serve step.
   const proc = spawn(env("PROOFED_SERVE"), { shell: true, detached: true, windowsHide: true, stdio: "ignore", cwd: appDir, env: withoutJobSecrets(process.env) });
   const stopped = new AbortController();
@@ -72,6 +92,7 @@ async function serve(appDir: string) {
     killTree(proc.pid);
     await Promise.race([exited, setTimeout(3000, undefined, { ref: false })]);
     killTree(proc.pid, "SIGKILL");
+    restoreAuth();
   };
   const startup = AbortSignal.any([stopped.signal, AbortSignal.timeout(30_000)]);
   try {
@@ -144,6 +165,7 @@ export function discardLeak(agentName: string, since?: number) {
 }
 
 function build(buildScript: string) {
+  const restoreAuth = hideCodexAuth();
   try {
     // The fixer can build on its own. Only Proofed's build can supply ignored tracked output to Kane.
     const ignored = ignoredTrackedPaths();
@@ -156,6 +178,8 @@ function build(buildScript: string) {
     return undefined;
   } catch (e) {
     return e instanceof Error && "stdout" in e && "stderr" in e ? `${e.stdout}${e.stderr}` : String(e);
+  } finally {
+    restoreAuth();
   }
 }
 

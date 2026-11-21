@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { discardLeak, prepareBuild } from "./fixworkspace.ts";
+import { discardLeak, hideCodexAuth, prepareBuild } from "./fixworkspace.ts";
 
 async function listen(t: TestContext) {
   const server = createServer();
@@ -99,4 +99,25 @@ test("a credential the fixer writes into an ignored file is found and the file r
   writeFileSync(join(dir, ".env"), `TOKEN=${process.env.GITHUB_TOKEN}\n`);
   assert.equal(discardLeak("Claude", since), "Claude's change put a credential of this job into .env. Proofed discarded the change");
   assert.equal(existsSync(join(dir, ".env")), false);
+});
+
+test("the Codex subscription login is off disk until it is put back", { skip: process.platform === "win32" }, (t) => {
+  const home = mkdtempSync(join(tmpdir(), "proofed-codex-home-"));
+  const original = process.env.CODEX_HOME;
+  t.after(() => {
+    if (original === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = original;
+    rmSync(home, { recursive: true, force: true });
+  });
+  process.env.CODEX_HOME = home;
+  const file = join(home, "auth.json");
+  writeFileSync(file, '{"tokens":"x"}', { mode: 0o600 });
+  const restore = hideCodexAuth();
+  assert.equal(existsSync(file), false);
+  restore();
+  restore();
+  assert.equal(readFileSync(file, "utf8"), '{"tokens":"x"}');
+  assert.equal(statSync(file).mode & 0o777, 0o600);
+  rmSync(file);
+  hideCodexAuth()();
+  assert.equal(existsSync(file), false);
 });
