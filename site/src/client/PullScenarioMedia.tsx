@@ -36,9 +36,11 @@ export function Recording({ clip, steps, seek, onTime, onEnd, lit, onLit }: Reco
   const box = useRef<HTMLDivElement>(null);
   const [full, setFull] = useState(false);
 
+  const covered = useRef(0);
   const playFrom = (at?: number) => {
     const v = video.current;
     if (!v) return;
+    clearTimeout(covered.current);
     if (at !== undefined) v.currentTime = at;
     else if (v.ended) v.currentTime = 0;
     setStarting(true);
@@ -65,8 +67,8 @@ export function Recording({ clip, steps, seek, onTime, onEnd, lit, onLit }: Reco
   // other has had time to cover it: stopped at once, its play button would flash under the change.
   useLayoutEffect(() => {
     if (seek) return playFrom(seek.at);
-    const covered = setTimeout(() => video.current?.pause(), 400);
-    return () => clearTimeout(covered);
+    covered.current = window.setTimeout(() => video.current?.pause(), 400);
+    return () => clearTimeout(covered.current);
   }, [seek]);
 
   // The track follows every frame while playing; timeupdate alone moves it in visible jumps.

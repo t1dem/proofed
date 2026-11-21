@@ -348,7 +348,7 @@ export function AsciiVideo({ src, focus, quiet = false, className, style }: Prop
       if (!visible) return;
       const moved = video.currentTime !== last && upload();
       if (moved) last = video.currentTime;
-      if (moved || busy() || pointer) draw();
+      if (moved || busy() || (pointer && !still)) draw();
     };
 
     const seen = new IntersectionObserver(([e]) => {
