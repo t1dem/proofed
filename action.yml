@@ -78,7 +78,7 @@ inputs:
     description: Token for the PR comment, commit status, the clips branch and the fixer's push
     default: ${{ github.token }}
   proofed-url:
-    description: "Proofed's server. With `id-token: write` in the workflow, the dashboard there follows each run as it goes, and the server pushes the fixer's commit to the PR's branch as the Proofed GitHub App, so the workflows on the fix commit run without an approval. The job itself never gets an app token."
+    description: "Proofed's server. With `id-token: write` in the workflow, the dashboard there follows each run as it goes, and the server pushes the fixer's commit to the PR's branch as the Proofed GitHub App, so the workflows on the fix commit run without an approval. The job itself never gets an app token. If the server can't make the push, the job's token pushes instead: push workflows don't run on that commit and pull request workflows wait for an approval."
     default: https://proofed.neptunescodm.workers.dev
   kane-version:
     description: "@testmuai/kane-cli version"

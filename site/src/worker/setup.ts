@@ -218,6 +218,7 @@ permissions:
   issues: write
   statuses: write
   # Lets Proofed's server push the fix commit as the Proofed app, so the workflows on it run without an approval.
+  # If the server can't push, GITHUB_TOKEN does, and those workflows wait for an approval.
   id-token: write
 
 jobs:
