@@ -115,7 +115,7 @@ export function CliInstall() {
   return (
     <div ref={root} className="relative max-w-full">
       <div
-        className={`inline-flex min-h-12 max-w-full items-stretch rounded-full border bg-paper font-mono text-[15px] transition max-sm:text-[14px] ${
+        className={`inline-flex min-h-11 max-w-full items-stretch rounded-lg border bg-paper font-mono text-[15px] transition max-sm:text-[14px] ${
           open ? "border-ink" : "border-ink/25 hover:border-ink"
         }`}
       >
@@ -133,7 +133,7 @@ export function CliInstall() {
               setOpen(true);
             }
           }}
-          className={`group flex shrink-0 cursor-pointer items-center rounded-l-full pl-5 pr-[0.6ch] max-sm:pl-4 ${ring}`}
+          className={`group flex shrink-0 cursor-pointer items-center rounded-l-lg pl-5 pr-[0.6ch] max-sm:pl-4 ${ring}`}
         >
           <span aria-hidden className="select-none pr-[1ch] text-muted max-[359px]:hidden">
             $
@@ -151,7 +151,7 @@ export function CliInstall() {
           onClick={async () => setCopied(await copyText(command))}
           aria-label={`Copy ${command}`}
           title="Copy"
-          className={`group flex min-w-0 cursor-pointer items-center gap-3 rounded-r-full pl-[0.6ch] pr-5 max-sm:gap-2.5 max-sm:pr-4 ${ring}`}
+          className={`group flex min-w-0 cursor-pointer items-center gap-3 rounded-r-lg pl-[0.6ch] pr-5 max-sm:gap-2.5 max-sm:pr-4 ${ring}`}
         >
           <span className="truncate">{managers[manager]}</span>
           {copied ? (

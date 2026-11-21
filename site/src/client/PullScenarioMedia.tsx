@@ -17,12 +17,14 @@ type RecordingProps = {
   steps?: Step[];
   seek?: Seek;
   onTime?: (t: number) => void;
+  // The clip played to its end.
+  onEnd?: () => void;
   // The step pointed at, here on the track or in the list of steps beside the clip.
   lit?: number;
   onLit?: (i: number | undefined) => void;
 };
 
-export function Recording({ clip, steps, seek, onTime, lit, onLit }: RecordingProps) {
+export function Recording({ clip, steps, seek, onTime, onEnd, lit, onLit }: RecordingProps) {
   const video = useRef<HTMLVideoElement>(null);
   const fill = useRef<HTMLSpanElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -118,6 +120,7 @@ export function Recording({ clip, steps, seek, onTime, lit, onLit }: RecordingPr
           }}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
+          onEnded={onEnd}
           onTimeUpdate={(e) => {
             const t = e.currentTarget.currentTime;
             setTime(t);

@@ -482,9 +482,10 @@ export function App() {
   const [repo, setRepo] = useState<string>();
   const [filter, setFilter] = useState<InboxFilter>(NO_FILTER);
   const [asked, askNow] = useAsk(reloadPulls);
-  // The click that starts a run is the moment to ask whether the browser may say when it ends.
+  // The click that starts a run is the moment to ask whether the browser may say when it ends. Not in
+  // the demo: its runs are made up, and on the landing the prompt would pop up over the page.
   const ask: Ask = (pull, action, what) => {
-    if ("Notification" in window && Notification.permission === "default") void Notification.requestPermission();
+    if (!DEMO && "Notification" in window && Notification.permission === "default") void Notification.requestPermission();
     askNow(pull, action, what);
   };
   useTabBadge(list.filter(needsYou).length);

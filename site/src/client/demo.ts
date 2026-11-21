@@ -390,7 +390,7 @@ const recorded = (id: string) => {
 const samplePromo = { id: "promo-code", name: "Promo code total", outcome: "passed" as const, reason: "Discount −€9.10, shipping Free, total €81.90.", ...recorded("promo-code") };
 const sampleOrder = { id: "checkout", name: "Place an order", outcome: "passed" as const, reason: "The order went through, and the confirmation page thanks Ada Lovelace for it.", ...recorded("checkout") };
 
-const sampleShipping: Run[] = [
+export const sampleShipping: Run[] = [
   {
     key: "sample-26-2",
     at: now - 4 * min,

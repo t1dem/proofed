@@ -1,18 +1,18 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 
-// A video shown as if printed in monospace characters on the page's paper. A WebGL shader cuts the frame
+// A video shown as monospace characters on the page's dark ground. A WebGL shader cuts the frame
 // into small cells; each cell becomes one glyph, picked by how dark the picture is there and coloured from
-// it, over a soft wash of the real footage. Up close it is type, from a step back it is the video.
+// it, over a faint wash of the real footage. Up close it is type, from a step back it is the video.
 //
 // Every CYCLE seconds the picture gets a bug and its fix, which is what Proofed does to a pull request:
 // a red patch of scrambled type spreads over the ridges from one point, a cursor flies in and clicks
 // it, and a green ring from the click wipes it away. The visitor can help: a click or tap on the
 // picture sends out a ring of its own, which wipes the red it reaches.
 
-// Light to dense. Many small steps keep a gradient a gradient instead of bands.
-const RAMP = " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
-// The page's paper, --color-paper, so the canvas has no visible edge of its own.
-const PAPER = [244 / 255, 241 / 255, 234 / 255];
+// Light to dense. The steps are few and plain: a lit sky set in brackets and letters reads as text, not as light.
+const RAMP = " .,:-=+*#%@";
+// The landing's ground (.night in index.css), so the canvas has no visible edge of its own.
+const PAPER = [8 / 255, 8 / 255, 10 / 255];
 
 // One bug and its fix, in seconds of the cycle.
 const CYCLE = 10;
@@ -97,23 +97,25 @@ void main() {
   vec3 v = texture2D(uVideo, uCrop.xy + (q + vec2(slip, 0.0)) / uRes * uCrop.zw).rgb;
   float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
 
-  // Ink on paper: a pale sky drops out, shadows fill in; only the sun is brighter than the sky.
-  float ink = pow(1.0 - smoothstep(0.1, 0.8, lum), 1.5);
-  float glow = smoothstep(0.92, 1.0, lum);
-  float tone = max(ink, glow * 0.85);
+  // Light on dark, and airy: the lit sky is fine type, the hills drop out against it, and only the sun is dense.
+  float lit = pow(smoothstep(0.08, 0.95, lum), 1.3);
+  float glow = smoothstep(0.9, 1.0, lum);
+  float tone = max(lit * 0.5, glow);
   float index = floor(tone * (uGlyphs - 1.0) + 0.5);
+  // A step of jitter per cell, so an even sky reads as grain rather than a field of one glyph.
+  index = clamp(index + step(1.5, index) * floor((hash(cell * 1.7) - 0.5) * 3.0 + 0.5), 0.0, uGlyphs - 1.0);
   index = mix(index, floor(mix(0.35, 1.0, hash(cell + tick)) * (uGlyphs - 1.0)), broken);
   float mask = texture2D(uAtlas, vec2((index + f.x) / uGlyphs, f.y)).a;
 
-  // A soft wash of the footage under the type, and the glyph in the cell's own colour, deeper.
-  vec3 wash = mix(uPaper, saturate3(v, 1.15), 0.42);
-  vec3 glyph = saturate3(c, 1.7) * (0.5 + 0.3 * (1.0 - ink)) + vec3(0.35, 0.16, 0.02) * glow;
+  // A wash of the footage under the type, and the glyph in the cell's own colour, warmer than the footage.
+  vec3 wash = mix(uPaper, saturate3(v, 1.7), 0.24);
+  vec3 glyph = saturate3(c, 1.9) * (0.4 + 0.6 * lit) + vec3(0.5, 0.26, 0.06) * glow;
   // Broken type is the red of a failed check; the ring from the click is the green of a passing one.
-  glyph = mix(glyph, vec3(0.76, 0.21, 0.17), broken);
-  wash = mix(wash, vec3(0.97, 0.86, 0.83), broken * 0.6);
+  glyph = mix(glyph, vec3(0.95, 0.38, 0.35), broken);
+  wash = mix(wash, vec3(0.16, 0.05, 0.05), broken * 0.6);
   float ring = max(uRing * exp(-abs(reach - uHeal) / 1.4), helped);
-  glyph = mix(glyph, vec3(0.12, 0.55, 0.26), ring);
-  wash = mix(wash, vec3(0.86, 0.95, 0.88), ring * 0.5);
+  glyph = mix(glyph, vec3(0.3, 0.76, 0.45), ring);
+  wash = mix(wash, vec3(0.04, 0.12, 0.07), ring * 0.5);
   gl_FragColor = vec4(mix(wash, glyph, mask), 1.0);
 }`;
 
@@ -142,9 +144,10 @@ function atlas(cellW: number, cellH: number) {
 }
 
 // `focus` is the point of the clip (fractions of its frame) the crop keeps in view.
-type Props = { src: string; focus: [number, number]; className?: string; style?: CSSProperties };
+// `quiet` keeps the picture but drops the bug, the cursor and the visitor's clicks, for when something sits on top.
+type Props = { src: string; focus: [number, number]; quiet?: boolean; className?: string; style?: CSSProperties };
 
-export function AsciiVideo({ src, focus, className, style }: Props) {
+export function AsciiVideo({ src, focus, quiet = false, className, style }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cursorRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -163,6 +166,7 @@ export function AsciiVideo({ src, focus, className, style }: Props) {
       return;
     }
     const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const calm = still || quiet;
 
     let program: WebGLProgram;
     try {
@@ -233,7 +237,7 @@ export function AsciiVideo({ src, focus, className, style }: Props) {
     const fixData = new Float32Array(FIXES * 4);
     // Between the wipe and the next bug the picture only changes with the footage, unless a ring is still opening.
     const busy = () =>
-      !still &&
+      !calm &&
       ((time() % CYCLE > SPREAD[0]! && time() % CYCLE < DONE) || fixes.some((k) => time() - k.at < FIX_GLOW));
 
     // The bug, the cursor and the click at time `now`. The seed is somewhere on the ridges.
@@ -277,10 +281,10 @@ export function AsciiVideo({ src, focus, className, style }: Props) {
       const s = scene(time());
       gl.uniform1f(u("uTime"), time());
       gl.uniform2f(u("uSeed"), s.seed[0], s.seed[1]);
-      // Reduced motion: no bug, no cursor, just the picture.
-      gl.uniform1f(u("uSpread"), still ? 0 : s.spread);
+      // Reduced motion or quiet: no bug, no cursor, just the picture.
+      gl.uniform1f(u("uSpread"), calm ? 0 : s.spread);
       gl.uniform1f(u("uHeal"), s.heal);
-      gl.uniform1f(u("uRing"), still ? 0 : s.ring);
+      gl.uniform1f(u("uRing"), calm ? 0 : s.ring);
       // A click from an earlier cycle has nothing left to clean.
       const now = time();
       fixes = fixes.filter((k) => Math.floor(k.at / CYCLE) === Math.floor(now / CYCLE));
@@ -290,7 +294,7 @@ export function AsciiVideo({ src, focus, className, style }: Props) {
         fixData.set([k.x, k.y, s.reach * 0.6 * easeOut(clamp01(age / FIX_OPEN)), 1 - clamp01(age / FIX_GLOW)], i * 4);
       });
       gl.uniform4fv(u("uFix"), fixData);
-      if (!still) moveCursor(s);
+      if (!calm) moveCursor(s);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       canvas.style.opacity = "1";
     };
@@ -351,7 +355,7 @@ export function AsciiVideo({ src, focus, className, style }: Props) {
     // The visitor's click or tap anywhere over the picture, except on the hero's own links and buttons.
     // Listened for on the window because the hero's text sits above the top of the canvas.
     const poke = (e: PointerEvent) => {
-      if (still || !hasFrame || (e.target as Element | null)?.closest?.("a, button")) return;
+      if (calm || !hasFrame || (e.target as Element | null)?.closest?.("a, button")) return;
       const r = canvas.getBoundingClientRect();
       const x = (e.clientX - r.left) / r.width;
       const y = (e.clientY - r.top) / r.height;
@@ -379,7 +383,7 @@ export function AsciiVideo({ src, focus, className, style }: Props) {
       video.removeEventListener("seeked", ready);
       window.removeEventListener("pointerdown", poke);
     };
-  }, [fx, fy]);
+  }, [fx, fy, quiet]);
 
   return (
     <>
