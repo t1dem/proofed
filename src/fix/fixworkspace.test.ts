@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,8 +45,8 @@ test("the build launcher preserves literal backslashes in POSIX paths", { skip: 
     if (originalBuild === undefined) delete process.env.PROOFED_BUILD;
     else process.env.PROOFED_BUILD = originalBuild;
   });
-  const { buildCommand } = prepareBuild(dir);
-  assert.equal(execFileSync("bash", ["-c", buildCommand], { encoding: "utf8" }).trimEnd(), dir);
+  prepareBuild(dir);
+  assert.equal(execFileSync("bash", [join(dir, "proofed-build.sh")], { encoding: "utf8" }).trimEnd(), dir);
 });
 
 test("startup accepts the new server on localhost", async (t) => {
@@ -68,6 +68,23 @@ test("startup rejects a port already accepting TCP connections before spawning",
   const { serve } = app(t, url, "");
   delete process.env.PROOFED_SERVE;
   await assert.rejects(serve(), { message: `Port ${new URL(url).port} is already in use; stop the old server before Proofed starts the app.` });
+});
+
+test("a missing serve command leaves the Codex login on disk", async (t) => {
+  const { server, url } = await listen(t);
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  const { serve } = app(t, url, "");
+  delete process.env.PROOFED_SERVE;
+  const home = mkdtempSync(join(tmpdir(), "proofed-codex-home-"));
+  const original = process.env.CODEX_HOME;
+  t.after(() => {
+    if (original === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = original;
+    rmSync(home, { recursive: true, force: true });
+  });
+  process.env.CODEX_HOME = home;
+  writeFileSync(join(home, "auth.json"), '{"tokens":"x"}', { mode: 0o600 });
+  await assert.rejects(serve(), /Missing PROOFED_SERVE/);
+  assert.equal(readFileSync(join(home, "auth.json"), "utf8"), '{"tokens":"x"}');
 });
 
 test("startup stops waiting when a server accepts a connection without response headers", async (t) => {
@@ -98,6 +115,8 @@ test("a credential the fixer writes into an ignored file is found and the file r
   process.env.GITHUB_TOKEN = "ghs_leakedtoken1234567890";
   const since = Date.now();
   writeFileSync(join(dir, ".env"), `TOKEN=${process.env.GITHUB_TOKEN}\n`);
+  // As `touch -t` would: an old mtime doesn't hide the file.
+  utimesSync(join(dir, ".env"), new Date(2020, 0, 1), new Date(2020, 0, 1));
   assert.equal(discardLeak("Claude", since), "Claude's change put a credential of this job into .env. Proofed discarded the change");
   assert.equal(existsSync(join(dir, ".env")), false);
 });
@@ -143,6 +162,9 @@ test("Kane's output is still masked for the Codex login while it is off disk", (
   writeFileSync(join(home, "auth.json"), auth, { mode: 0o600 });
   const before = kaneSecretValues(env);
   const restore = hideCodexAuth();
+  assert.deepEqual(kaneSecretValues(env), before);
+  // A file the app's build put in its place doesn't stop the masking.
+  writeFileSync(join(home, "auth.json"), "{}");
   assert.deepEqual(kaneSecretValues(env), before);
   for (const value of [auth, "access-token-123456", "refresh-token-123456", "id-token-123456"]) assert.ok(kaneSecretValues(env).includes(value));
   restore();

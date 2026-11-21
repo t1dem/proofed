@@ -16,15 +16,13 @@ import { timed } from "../timing.ts";
 export const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8", stdio: "pipe" }).trimEnd();
 
 const sh = (word: string) => (/^[\w./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`);
-// Claude Code allows a compound command only if each part of it is allowed on its own, so it refused
-// `cd site && pnpm build`. Wrapped in a script, any build is one simple command, allowed exactly as is.
+// The app's build as one script: run from the app's folder, stopped by the first command that fails.
 export function prepareBuild(appDir: string) {
   const buildInput = env("PROOFED_BUILD");
   const buildScript = join(process.env.RUNNER_TEMP || tmpdir(), "proofed-build.sh");
-  const buildCommand = `bash ${sh(gitPath(buildScript))}`;
   writeFileSync(buildScript, `set -e -o pipefail\ncd ${sh(gitPath(resolve(appDir)))}\n${buildInput}\n`);
   return {
-    buildInput, buildCommand, build: () => timed("rebuild", () => build(buildScript)), serve: () => serve(appDir),
+    buildInput, build: () => timed("rebuild", () => build(buildScript)), serve: () => serve(appDir),
     cleanup: () => rmSync(buildScript, { force: true }),
   };
 }
@@ -84,9 +82,11 @@ async function serve(appDir: string) {
   if (await portOccupied(url.hostname.replace(/^\[|\]$/g, ""), port)) {
     throw new Error(`Port ${port} is already in use; stop the old server before Proofed starts the app.`);
   }
+  // Read before the login leaves the disk: a missing command must not leave it there.
+  const command = env("PROOFED_SERVE");
   const restoreAuth = hideCodexAuth();
   // The app's own commands get no job credentials, as in the check job's build and serve step.
-  const proc = spawn(env("PROOFED_SERVE"), { shell: true, detached: true, windowsHide: true, stdio: "ignore", cwd: appDir, env: withoutJobSecrets(process.env) });
+  const proc = spawn(command, { shell: true, detached: true, windowsHide: true, stdio: "ignore", cwd: appDir, env: withoutJobSecrets(process.env) });
   const stopped = new AbortController();
   const exited = new Promise<void>((resolve) => {
     const leave = () => { stopped.abort(); resolve(); };
@@ -122,7 +122,11 @@ export const fixChanges = () => [...diffPaths("HEAD"), ...untrackedPaths()];
 export const ignoredUntrackedPaths = () => execFileSync("git", ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"], {
   encoding: "utf8", stdio: "pipe", maxBuffer: 512 * 1024 * 1024,
 }).split("\0").filter(Boolean);
-const writtenSince = (files: string[], since: number) => files.filter((file) => (lstatSync(file, { throwIfNoEntry: false })?.mtimeMs ?? 0) >= since);
+// ctime too: `touch` can set mtime back, but not the time the file itself last changed.
+const writtenSince = (files: string[], since: number) => files.filter((file) => {
+  const stat = lstatSync(file, { throwIfNoEntry: false });
+  return !!stat && Math.max(stat.mtimeMs, stat.ctimeMs) >= since;
+});
 
 export function changesLfsFiles(paths: string[], cached = false) {
   if (!paths.length) return false;
@@ -172,7 +176,7 @@ export function discardLeak(agentName: string, since?: number) {
 function build(buildScript: string) {
   const restoreAuth = hideCodexAuth();
   try {
-    // The fixer can build on its own. Only Proofed's build can supply ignored tracked output to Kane.
+    // Only Proofed's build can supply ignored tracked output to Kane, so what the fixer changed there is put back first.
     const ignored = ignoredTrackedPaths();
     const changedOutputs = diffPaths("HEAD").filter((file) => ignored.has(file));
     if (changedOutputs.length) git("--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--worktree", "--", ...changedOutputs);

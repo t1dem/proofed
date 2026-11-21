@@ -29,8 +29,7 @@ if (import.meta.main) {
     const login = event.sender?.login;
     const permission = login ? (ghApi(`repos/${repo}/collaborators/${encodeURIComponent(login)}/permission`) as { permission?: string }).permission : undefined;
     if (!canFix(permission)) throw new Error(`::error::Only people with write access to this repository can start a Proofed fix. Sender: ${login ?? "unknown"}; permission: ${permission ?? "unknown"}.`);
-    const result = { stdout: JSON.stringify(ghApi(`repos/${repo}/pulls/${process.env.PROOFED_NUMBER}`)) };
-    const refs = fixRefs(JSON.parse(result.stdout) as Branches);
+    const refs = fixRefs(ghApi(`repos/${repo}/pulls/${process.env.PROOFED_NUMBER}`) as Branches);
     if (!refs) throw new Error("::error::Proofed can only fix pull requests from branches in this repository.");
     output(refs);
   } catch (e) { actionError(e); }

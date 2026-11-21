@@ -18,14 +18,16 @@ export function withoutJobSecrets(env: NodeJS.ProcessEnv, keep: string[] = []) {
 let heldCodexAuth: string | undefined;
 export const holdCodexAuth = (auth: string | undefined) => { heldCodexAuth = auth; };
 
-// Only read the auth file that the action staged for this run.
+// Only read the auth file that the action staged for this run. While the login is held, a file in its
+// place is the app's, not the login.
 function codexAuth(env: NodeJS.ProcessEnv) {
   if (env.CODEX_AUTH_JSON) return env.CODEX_AUTH_JSON;
   if (!env.PROOFED_CODEX_HOME) return undefined;
+  if (heldCodexAuth !== undefined) return heldCodexAuth;
   try {
     return readFileSync(join(env.PROOFED_CODEX_HOME, "auth.json"), "utf8");
   } catch {
-    return heldCodexAuth;
+    return undefined;
   }
 }
 
