@@ -8,6 +8,9 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 // a red patch of scrambled type spreads over the ridges from one point, a cursor flies in and clicks
 // it, and a green ring from the click wipes it away. The visitor can help: a click or tap on the
 // picture sends out a ring of its own, which wipes the red it reaches.
+//
+// Hovering the picture scrambles the type under the pointer, in its own colours, as the page's last
+// picture does (Night). A finger has no hover: the scramble follows it while it touches.
 
 // Light to dense. The steps are few and plain: a lit sky set in brackets and letters reads as text, not as light.
 const RAMP = " .,:-=+*#%@";
@@ -26,6 +29,7 @@ const DONE = LEAVE[1]! + 0.1;
 const FIXES = 8;
 const FIX_OPEN = 0.45;
 const FIX_GLOW = 0.8;
+const REACH = 5; // how far around the pointer the type scrambles, in cell widths
 
 const clamp01 = (x: number) => Math.min(Math.max(x, 0), 1);
 const progress = (t: number, [a, b]: number[]) => clamp01((t - a!) / (b! - a!));
@@ -56,6 +60,7 @@ uniform float uSpread;  // how far it has spread, in cell heights; 0 is no bug
 uniform float uHeal;    // how far the ring from the click has wiped it, in cell heights
 uniform float uRing;    // how bright that ring still is, 0..1
 uniform vec4 uFix[${FIXES}]; // the visitor's clicks: centre (fraction), radius (cell heights), glow
+uniform vec2 uPointer;  // the pointer, device px from the top left; off the canvas when there is none
 
 vec3 saturate3(vec3 c, float k) {
   float m = dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -105,6 +110,9 @@ void main() {
   // A step of jitter per cell, so an even sky reads as grain rather than a field of one glyph.
   index = clamp(index + step(1.5, index) * floor((hash(cell * 1.7) - 0.5) * 3.0 + 0.5), 0.0, uGlyphs - 1.0);
   index = mix(index, floor(mix(0.35, 1.0, hash(cell + tick)) * (uGlyphs - 1.0)), broken);
+  // Under the pointer a cell that has type gets any other glyph, re-rolled as often.
+  float poked = step(length(((cell + 0.5) * uCell - uPointer) / uCell.x), ${REACH}.0) * step(0.5, index);
+  index = mix(index, 1.0 + floor(hash(cell * 1.3 + tick) * (uGlyphs - 1.0)), poked);
   float mask = texture2D(uAtlas, vec2((index + f.x) / uGlyphs, f.y)).a;
 
   // A wash of the footage under the type, and the glyph in the cell's own colour, warmer than the footage.
@@ -212,6 +220,7 @@ export function AsciiVideo({ src, focus, quiet = false, className, style }: Prop
     let frame = 0;
     let visible = true;
     let cancelled = false;
+    let pointer: { x: number; y: number } | null = null; // where it is in the window
 
     // Cover the canvas, centred on the focus as far as the frame allows.
     const crop = () => {
@@ -294,6 +303,10 @@ export function AsciiVideo({ src, focus, quiet = false, className, style }: Prop
         fixData.set([k.x, k.y, s.reach * 0.6 * easeOut(clamp01(age / FIX_OPEN)), 1 - clamp01(age / FIX_GLOW)], i * 4);
       });
       gl.uniform4fv(u("uFix"), fixData);
+      const box = pointer && canvas.getBoundingClientRect();
+      const k = box ? canvas.width / box.width : 0;
+      if (pointer && box) gl.uniform2f(u("uPointer"), (pointer.x - box.left) * k, (pointer.y - box.top) * k);
+      else gl.uniform2f(u("uPointer"), -1e4, -1e4);
       if (!calm) moveCursor(s);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       canvas.style.opacity = "1";
@@ -335,7 +348,7 @@ export function AsciiVideo({ src, focus, quiet = false, className, style }: Prop
       if (!visible) return;
       const moved = video.currentTime !== last && upload();
       if (moved) last = video.currentTime;
-      if (moved || busy()) draw();
+      if (moved || busy() || pointer) draw();
     };
 
     const seen = new IntersectionObserver(([e]) => {
@@ -365,6 +378,23 @@ export function AsciiVideo({ src, focus, quiet = false, className, style }: Prop
     };
     window.addEventListener("pointerdown", poke);
 
+    // The pointer anywhere in the window: the hero's words lie on top of the canvas. Without motion
+    // nothing else draws the picture again, so the pointer does.
+    const move = (e: PointerEvent) => {
+      pointer = { x: e.clientX, y: e.clientY };
+      if (still) draw();
+    };
+    const leave = () => {
+      pointer = null;
+      draw();
+    };
+    const up = (e: PointerEvent) => e.pointerType !== "mouse" && leave();
+    window.addEventListener("pointermove", move, { passive: true });
+    window.addEventListener("pointerdown", move, { passive: true });
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    document.documentElement.addEventListener("pointerleave", leave);
+
     // The atlas is drawn with the mono font, so wait for it before the first layout.
     document.fonts.load(`500 12px "IBM Plex Mono"`).finally(() => {
       if (cancelled) return;
@@ -382,6 +412,11 @@ export function AsciiVideo({ src, focus, quiet = false, className, style }: Prop
       video.removeEventListener("loadeddata", ready);
       video.removeEventListener("seeked", ready);
       window.removeEventListener("pointerdown", poke);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerdown", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      document.documentElement.removeEventListener("pointerleave", leave);
     };
   }, [fx, fy, quiet]);
 
