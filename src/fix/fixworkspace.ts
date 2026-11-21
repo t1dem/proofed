@@ -16,13 +16,15 @@ import { timed } from "../timing.ts";
 export const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8", stdio: "pipe" }).trimEnd();
 
 const sh = (word: string) => (/^[\w./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`);
-// The app's build as one script: run from the app's folder, stopped by the first command that fails.
+// Claude Code allows a compound command only if each part of it is allowed on its own, so it refused
+// `cd site && pnpm build`. Wrapped in a script, any build is one simple command, allowed exactly as is.
 export function prepareBuild(appDir: string) {
   const buildInput = env("PROOFED_BUILD");
   const buildScript = join(process.env.RUNNER_TEMP || tmpdir(), "proofed-build.sh");
+  const buildCommand = `bash ${sh(gitPath(buildScript))}`;
   writeFileSync(buildScript, `set -e -o pipefail\ncd ${sh(gitPath(resolve(appDir)))}\n${buildInput}\n`);
   return {
-    buildInput, build: () => timed("rebuild", () => build(buildScript)), serve: () => serve(appDir),
+    buildInput, buildCommand, build: () => timed("rebuild", () => build(buildScript)), serve: () => serve(appDir),
     cleanup: () => rmSync(buildScript, { force: true }),
   };
 }
@@ -176,7 +178,7 @@ export function discardLeak(agentName: string, since?: number) {
 function build(buildScript: string) {
   const restoreAuth = hideCodexAuth();
   try {
-    // Only Proofed's build can supply ignored tracked output to Kane, so what the fixer changed there is put back first.
+    // The fixer can build on its own. Only Proofed's build can supply ignored tracked output to Kane.
     const ignored = ignoredTrackedPaths();
     const changedOutputs = diffPaths("HEAD").filter((file) => ignored.has(file));
     if (changedOutputs.length) git("--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--worktree", "--", ...changedOutputs);

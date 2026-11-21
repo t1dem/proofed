@@ -45,7 +45,7 @@ test("Codex runs once on PATH with a bounded sandbox, stdin prompt and final mes
     assert.equal(called.args.at(-1), '-');
     assert.ok(!called.args.includes('--dangerously-bypass-approvals-and-sandbox'));
     assert.deepEqual(askAgent("fix this", {...options,allowedTools:[]}), {ok:true,text:"SUMMARY: fixed it."});
-    assert.deepEqual(askFixer("empty summary", options), { ok: true, summary: "The fixer gave no change summary." });
+    assert.deepEqual(askFixer("empty summary", options, "bash proofed-build.sh"), { ok: true, summary: "The fixer gave no change summary." });
     for (const [error, expected] of [['Usage limit reached', /usage limit reached/i],['model gpt-6.1-sol is not supported', /isn't available/],['401 Unauthorized', /isn't logged in/],['some failure',/some failure/],['empty',/without a final answer/],['timeout',/didn't finish within/]] as const) {
       const answer = askCodex(error, {...options,timeoutMs:error === 'timeout' ? 100 : 2000});
       assert.equal(answer.ok,false);
