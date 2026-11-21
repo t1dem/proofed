@@ -5,7 +5,7 @@
 // - one run at a time, a few per visitor and per day: each costs Kane credits and Claude's time;
 // - reading is limited to the demo store, which is a public repository anyway.
 import { CLIP_PATH, repoFixer, serveClip } from "./api";
-import { readJsonObject } from "./body";
+import { decodeSegment, readJsonObject } from "./body";
 import { appRequest, gh, GitHubError, installationToken } from "./github";
 import type { Env } from "./index";
 import { getLive, liveFrame } from "./live";
@@ -200,7 +200,10 @@ export async function handleTry(request: Request, env: Env, path: string) {
   const pull = /^\/api\/try\/pulls\/([^/]+\/[^/]+)\/(\d+)(\/live(?:\/([^/]+)\.jpg)?)?$/.exec(path);
   if (pull?.[1] === env.TRY_REPO) {
     const number = Number(pull[2]);
-    if (pull[4]) return liveFrame(env, env.TRY_REPO, number, decodeURIComponent(pull[4]));
+    if (pull[4]) {
+      const name = decodeSegment(pull[4]);
+      return name === undefined ? json({ error: "not_found" }, 404) : liveFrame(env, env.TRY_REPO, number, name);
+    }
     if (pull[3]) return json(await getLive(env, env.TRY_REPO, number, "/api/try"));
     const detail = await getPull(env, env.TRY_REPO, number, "/api/try");
     const fixer = await repoToken(env, env.TRY_REPO).then((token) => repoFixer(token, env.TRY_REPO)).catch(() => null);

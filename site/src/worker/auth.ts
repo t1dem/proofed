@@ -80,9 +80,11 @@ export async function callback(request: Request, env: Env) {
     .run();
 
   const session = randomId();
-  await env.DB.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?1, ?2, ?3)")
-    .bind(session, me.id, now + SESSION_DAYS * 86_400_000)
-    .run();
+  // Expired sessions are cleared here, since nothing else ever deletes them.
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM sessions WHERE expires_at <= ?1").bind(now),
+    env.DB.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?1, ?2, ?3)").bind(session, me.id, now + SESSION_DAYS * 86_400_000),
+  ]);
 
   const headers = new Headers({ location: "/app" });
   headers.append("set-cookie", cookie(SESSION_COOKIE, session, SESSION_DAYS * 86_400));
@@ -91,6 +93,10 @@ export async function callback(request: Request, env: Env) {
 }
 
 export async function logout(request: Request, env: Env) {
+  // A link or image on another site can't sign anyone out: browsers mark those requests cross-site.
+  // Our own Sign out link is same-origin, and typing the address is "none".
+  const site = request.headers.get("sec-fetch-site");
+  if (site && site !== "same-origin" && site !== "none") return new Response(null, { status: 302, headers: { location: "/" } });
   const session = readCookie(request, SESSION_COOKIE);
   if (session) await env.DB.prepare("DELETE FROM sessions WHERE id = ?1").bind(session).run();
   return new Response(null, { status: 302, headers: { location: "/", "set-cookie": cookie(SESSION_COOKIE, "", 0) } });
@@ -110,10 +116,11 @@ export async function currentUser(request: Request, env: Env) {
 
 // GitHub App user tokens last eight hours; refresh quietly when one is about to run out.
 export async function userToken(env: Env, user: UserRow) {
-  const token = await decrypt(env.SECRETS_KEY, user.token);
+  // A token sealed with an old SECRETS_KEY can't be read: treat it as signed out, so signing in again fixes it.
+  const token = await decrypt(env.SECRETS_KEY, user.token).catch(() => undefined);
   if (token && (!user.token_expires || user.token_expires > Date.now() + 60_000)) return token;
 
-  const refresh = await decrypt(env.SECRETS_KEY, user.refresh);
+  const refresh = await decrypt(env.SECRETS_KEY, user.refresh).catch(() => undefined);
   if (!refresh) return undefined;
   const next = await exchange(env, { grant_type: "refresh_token", refresh_token: refresh });
   if (!next.access_token) return undefined;

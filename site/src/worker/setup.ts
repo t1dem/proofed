@@ -20,6 +20,8 @@ async function readFile(token: string, repo: string, path: string, ref?: string)
 }
 
 type Pkg = { scripts?: Record<string, string>; packageManager?: string; workspaces?: string[] | { packages?: string[] } };
+// A folder name as a YAML value: plain when it can't be misread, otherwise double-quoted (JSON is valid YAML).
+const yamlValue = (value: string) => (/^[\w./-]+$/.test(value) ? value : JSON.stringify(value));
 const join = (dir: string, file: string) => (dir === "." ? file : `${dir}/${file}`);
 const readPkg = async (token: string, repo: string, dir: string) => {
   const text = await readFile(token, repo, join(dir, "package.json"));
@@ -190,7 +192,7 @@ export const workflow = (c: Commands | AndroidCommands, bot: string) => {
           device: ${ANDROID_DEVICE}
           os-version: '${ANDROID_OS}'
 ` : `          url: ${c.url}
-${c.dir === "." ? "" : `          working-directory: ${c.dir}\n`}          install: ${c.install}
+${c.dir === "." ? "" : `          working-directory: ${yamlValue(c.dir)}\n`}          install: ${c.install}
           build: ${c.build}
           serve: ${c.serve}
 ${c.cache ? `          cache: ${c.cache}\n` : ""}`;
