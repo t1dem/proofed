@@ -48,7 +48,10 @@ export function appPort(url: string) {
   return parsed.port || (parsed.protocol === "https:" ? "443" : "80");
 }
 
-function portOccupied(url: string, timeout = 500) {
+// A refused connection to a free loopback port arrives at once, but a busy runner can delay the callback past a short timeout.
+const PORT_CHECK_TIMEOUT = 2000;
+
+function portOccupied(url: string, timeout = PORT_CHECK_TIMEOUT) {
   const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
   return new Promise<boolean>((resolve) => {
     const socket = createConnection({ host, port: Number(appPort(url)), signal: AbortSignal.timeout(timeout) });
@@ -79,7 +82,7 @@ export async function stopCheckServer(url: string) {
   }
   const deadline = Date.now() + 10_000;
   for (let remaining = deadline - Date.now(); remaining > 0; remaining = deadline - Date.now()) {
-    if (!(await portOccupied(url, Math.min(500, remaining)))) return;
+    if (!(await portOccupied(url, Math.min(PORT_CHECK_TIMEOUT, remaining)))) return;
     await setTimeout(Math.min(500, Math.max(0, deadline - Date.now())));
   }
   throw new Error(`The check server did not release the port for ${url}.`);
