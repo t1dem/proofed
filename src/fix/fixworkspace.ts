@@ -10,7 +10,7 @@ import { offLimits } from "./guard.ts";
 import { env } from "../env.ts";
 import { gitPath } from "../paths.ts";
 import { findGitBash, killTree } from "../process.ts";
-import { fileWithSecret, withoutJobSecrets } from "../secrets.ts";
+import { fileWithSecret, holdCodexAuth, withoutJobSecrets } from "../secrets.ts";
 import { timed } from "../timing.ts";
 
 export const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8", stdio: "pipe" }).trimEnd();
@@ -63,6 +63,7 @@ export function hideCodexAuth() {
     if (file) saved = readFileSync(file, "utf8");
   } catch { /* no subscription login */ }
   if (!file || saved === undefined) return () => {};
+  holdCodexAuth(saved);
   rmSync(file, { force: true });
   let restored = false;
   return () => {
@@ -73,6 +74,7 @@ export function hideCodexAuth() {
     if (!lstatSync(dirname(file)).isDirectory()) throw new Error("CODEX_HOME was replaced while the app ran; Proofed won't write the Codex login there.");
     writeFileSync(file, saved, { mode: 0o600, flag: "wx" });
     chmodSync(file, 0o600);
+    holdCodexAuth(undefined);
   };
 }
 

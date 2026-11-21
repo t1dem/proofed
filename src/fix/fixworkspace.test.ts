@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { discardLeak, hideCodexAuth, prepareBuild } from "./fixworkspace.ts";
+import { kaneSecretValues } from "../kane/kaneauth.ts";
 
 async function listen(t: TestContext) {
   const server = createServer();
@@ -127,4 +128,25 @@ test("the Codex subscription login is off disk until it is put back", { skip: pr
   rmSync(file);
   hideCodexAuth()();
   assert.equal(existsSync(file), false);
+});
+
+test("Kane's output is still masked for the Codex login while it is off disk", (t) => {
+  const home = mkdtempSync(join(tmpdir(), "proofed-codex-home-"));
+  const original = process.env.CODEX_HOME;
+  t.after(() => {
+    if (original === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = original;
+    rmSync(home, { recursive: true, force: true });
+  });
+  process.env.CODEX_HOME = home;
+  const env = { PROOFED_CODEX_HOME: home };
+  const auth = JSON.stringify({ tokens: { access_token: "access-token-123456", refresh_token: "refresh-token-123456", id_token: "id-token-123456" } });
+  writeFileSync(join(home, "auth.json"), auth, { mode: 0o600 });
+  const before = kaneSecretValues(env);
+  const restore = hideCodexAuth();
+  assert.deepEqual(kaneSecretValues(env), before);
+  for (const value of [auth, "access-token-123456", "refresh-token-123456", "id-token-123456"]) assert.ok(kaneSecretValues(env).includes(value));
+  restore();
+  assert.deepEqual(kaneSecretValues(env), before);
+  rmSync(join(home, "auth.json"));
+  assert.deepEqual(kaneSecretValues(env), []);
 });
