@@ -31,7 +31,7 @@ export function prepareBuild(appDir: string) {
 
 function portOccupied(host: string, port: number) {
   return new Promise<boolean>((resolve, reject) => {
-    const socket = createConnection({ host, port, signal: AbortSignal.timeout(500) });
+    const socket = createConnection({ host, port, signal: AbortSignal.timeout(2000) });
     socket.once("connect", () => {
       socket.destroy();
       resolve(true);

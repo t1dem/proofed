@@ -173,12 +173,22 @@ export const installed = () => matchMedia("(display-mode: standalone)").matches 
 // `scenario` (a pull request's tab, by name) rides in the hash, so the inbox's squares can open one.
 export type Route = { page: "inbox" } | { page: "dashboard" } | { page: "settings" } | { page: "pull"; repo: string; pr: number; scenario?: string };
 
+// A hand-edited or truncated link can carry broken percent-encoding ("#%E0"); keep it as typed
+// rather than let decodeURIComponent throw while the page loads.
+function decodeHash(hash: string) {
+  try {
+    return decodeURIComponent(hash);
+  } catch {
+    return hash;
+  }
+}
+
 function parseRoute({ pathname, hash }: Location): Route {
   const [, , first, second, third] = pathname.split("/");
   if (first === "settings" && !second) return { page: "settings" };
   if (first === "dashboard" && !second) return { page: "dashboard" };
   if (first && second && third && /^\d+$/.test(third)) {
-    const scenario = hash.length > 1 ? decodeURIComponent(hash.slice(1)) : undefined;
+    const scenario = hash.length > 1 ? decodeHash(hash.slice(1)) : undefined;
     return { page: "pull", repo: `${first}/${second}`, pr: Number(third), ...(scenario && { scenario }) };
   }
   return { page: "inbox" };

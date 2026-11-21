@@ -3,6 +3,7 @@ import { registerHooks } from "node:module";
 import { extname } from "node:path";
 import { test, type TestContext } from "node:test";
 import { FIRST_ANDROID_SCENARIO, FIRST_SCENARIO } from "../../src/action/setup.ts";
+import { workflowInputs } from "../../src/targets/target.ts";
 
 const source = new URL("../src/", import.meta.url).href;
 const hook = registerHooks({
@@ -10,14 +11,14 @@ const hook = registerHooks({
     return next(specifier.startsWith(".") && context.parentURL?.startsWith(source) && !extname(specifier) ? specifier + ".ts" : specifier, context);
   },
 });
-const { openSetupPr } = await import("../src/worker/setup.ts");
+const { openSetupPr, yamlValue } = await import("../src/worker/setup.ts");
 hook.deregister();
 
 async function setup(t: TestContext, files: Record<string, string>) {
   const blobs: Record<string, string> = {};
   let body = "";
   t.mock.method(globalThis, "fetch", async (input: string, init: RequestInit) => {
-    const path = new URL(input).pathname.replace(/^\/repos\/fixture\/app\//, "");
+    const path = decodeURIComponent(new URL(input).pathname).replace(/^\/repos\/fixture\/app\//, "");
     if (path.startsWith("contents/")) {
       const content = files[path.slice("contents/".length)];
       return content === undefined ? new Response(null, { status: 404 }) : Response.json({ content: btoa(content) });
@@ -119,4 +120,22 @@ test("a Gradle library keeps the static web fallback", async (t) => {
   assert.match(workflow, /serve: npx --yes serve@14 -l 4173 \./);
   assert.doesNotMatch(workflow, /target: android/);
   assert.equal(scenario, FIRST_SCENARIO);
+});
+
+for (const dir of ["web:app", "-", "true", "No", "null", "123", ".app", 'a"b', "it's"]) {
+  test(`a folder named ${dir} is quoted in the workflow, and the CLI reads it back as typed`, async (t) => {
+    const { workflow } = await setup(t, {
+      [`${dir}/package.json`]: '{"scripts":{"start":"node server.js"}}',
+    });
+    assert.ok(workflow.includes(`          working-directory: '${dir.replaceAll("'", "''")}'\n          install: npm install`), workflow);
+    assert.equal(workflowInputs(workflow)?.["working-directory"], dir);
+  });
+}
+
+test("folder names keep backslashes and quotes when the CLI reads them back", () => {
+  for (const dir of ["site", "apps/web", 'a"b', "back\\slash", "it's", "web #x", "- x"]) {
+    const workflow = `steps:\n  - uses: t1dem/proofed@v1\n    with:\n      working-directory: ${yamlValue(dir)}\n`;
+    assert.equal(workflowInputs(workflow)?.["working-directory"], dir);
+  }
+  assert.equal(yamlValue("apps/web"), "apps/web");
 });
