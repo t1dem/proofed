@@ -43,7 +43,7 @@ const claude = (
 // A moment of the history: its mark on the line and its name. What it says when picked is in
 // `says` below, by its place.
 const MOMENTS: { name: string; mark: ReactNode }[] = [
-  { name: "Kane finds what the diff broke", mark: <X size={18} strokeWidth={3} /> },
+  { name: "Kane finds the bug", mark: <X size={18} strokeWidth={3} /> },
   { name: "Attempt 1: not pushed", mark: <X size={18} strokeWidth={3} /> },
   { name: "Attempt 2: pushed", mark: <Check size={18} strokeWidth={3} /> },
   { name: "Before the fix and after", mark: <GitMerge size={18} strokeWidth={2.5} /> },
@@ -115,7 +115,7 @@ export function PullShowcase() {
   const says: ReactNode[] = [
     <p className={line}>
       <CircleX aria-label="Failed" size={17} strokeWidth={2.25} className="mt-0.5 shrink-0" />
-      <span>{before.reason}</span>
+      <span>The store says “Free shipping from €0.50”.</span>
     </p>,
     <>
       <p className={line}>
@@ -153,6 +153,21 @@ export function PullShowcase() {
     <p className={line}>Where Kane's run ended each time. Drag the line.</p>,
   ];
 
+  // The four moments' pictures, all there at once and one on top of another, so a moment's picture
+  // is loaded before it is picked. The picked one fades in over the one before it, which stays
+  // whole under it until it is covered: the stage never shows through. Only the picked recording
+  // is asked to play.
+  const stage: ReactNode[] = [
+    <Recording clip={before.clip!} steps={steps} seek={at === 0 ? seek : undefined} onTime={setTime} onEnd={() => next(1200)} />,
+    <Still>
+      <img src={BAG.before} alt="The bag after Claude's first fix: shipping is still Free at €44.50" className="block aspect-video w-full" />
+    </Still>,
+    <Recording clip={after.clip!} seek={at === 2 ? seek : undefined} onEnd={() => next(1200)} />,
+    <Still>
+      <Compare before={BAG.before} after={BAG.after} />
+    </Still>,
+  ];
+
   return (
     <section id="how" className="py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-4 sm:px-8">
@@ -166,17 +181,14 @@ export function PullShowcase() {
         <div className="mt-12 grid gap-3 xl:grid-cols-12">
           <div ref={box} className="flex scroll-mt-4 flex-col overflow-hidden rounded-3xl border border-edge bg-bg xl:col-span-8">
             {!near && <div aria-hidden className="aspect-video w-full bg-black" />}
-            {near && at === 0 && <Recording key="broke" clip={before.clip!} steps={steps} seek={seek} onTime={setTime} onEnd={() => next(1200)} />}
-            {near && at === 1 && (
-              <Still>
-                <img src={BAG.before} alt="The bag after Claude's first fix: shipping is still Free at €44.50" className="block aspect-video w-full" />
-              </Still>
-            )}
-            {near && at === 2 && <Recording key="fixed" clip={after.clip!} seek={seek} onEnd={() => next(1200)} />}
-            {near && at === 3 && (
-              <Still>
-                <Compare before={BAG.before} after={BAG.after} />
-              </Still>
+            {near && (
+              <div className="grid">
+                {stage.map((shown, i) => (
+                  <div key={i} inert={i !== at} className={`col-start-1 row-start-1 ${i === at ? "z-10 transition-opacity duration-300" : "invisible opacity-0 transition-[opacity,visibility] delay-300 duration-0"}`}>
+                    {shown}
+                  </div>
+                ))}
+              </div>
             )}
             <div className="flex min-h-[7.5rem] flex-1 flex-col justify-center gap-x-6 gap-y-1.5 border-t border-edge px-4 py-3 sm:min-h-[4.25rem] sm:flex-row sm:items-center sm:justify-between">
               <p className="flex min-w-0 items-center gap-2.5 text-[16px] leading-snug sm:text-[15px]">
@@ -204,7 +216,7 @@ export function PullShowcase() {
                 title="The pull request in these pictures"
                 className="inline-flex shrink-0 items-center gap-1 self-start whitespace-nowrap text-[16px] text-dim underline decoration-white/20 underline-offset-4 transition-colors hover:text-fg sm:self-auto sm:text-[14px]"
               >
-                proofed-demo-store #12 <ArrowUpRight aria-hidden size={15} strokeWidth={2.25} />
+                The real pull request <ArrowUpRight aria-hidden size={15} strokeWidth={2.25} />
               </a>
             </div>
           </div>

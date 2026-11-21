@@ -1,13 +1,15 @@
 import { AsciiVideo } from "./AsciiVideo";
-import { ArrowRight, ArrowUpRight, Check, GitMerge, GitPullRequest, Play, Workflow } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { ArrowRight, ArrowUpRight, Check, GitMerge, GitPullRequest, Play } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { BRANDS } from "./brands";
 import { DAWN } from "./dawn";
 import { Bugs } from "./Bugs";
 import { Mended } from "./Mended";
+import { Night } from "./Night";
 import { Platforms } from "./Platforms";
 import { PullShowcase } from "./PullShowcase";
-import { Logo } from "./ui";
+import { ClaudeMark, TestMuMark } from "./SettingsMarks";
+import { Logo, RepoChip } from "./ui";
 
 const REPO = "https://github.com/t1dem/proofed";
 
@@ -162,125 +164,225 @@ function Hero() {
   );
 }
 
-// The three steps of the README's setup on one tile, and what they end in beside them: the setup pull
-// request, as a sheet that comes up from the tile's corner. It is the sample storefront's, the repo
-// of the pull request further up the page: the workflow and the store's own three scenarios, each
-// with Kane's pass. It fills in once, when the tile is reached (.draw-* in index.css): the pull
-// request is open with its workflow, the scenarios arrive one by one, and then it is merged. The
-// steps' words are there from the start.
-const STEPS: { title: string; body: ReactNode; href: string; go: string }[] = [
+// The three steps of the README's setup on one tile, each with what it looks like once it is done:
+// the keys saved in Proofed, the repos picked for the GitHub App, the setup pull request merged. Each
+// is a dark sheet in the sample account's names, standing on the tile's bottom edge under its step.
+// The steps' words are there from the start; a sheet's ticks, picks and scenarios arrive once, when
+// it is well in view (.draw-* in index.css). On a wide screen the three stand side by side and fill
+// in one after another, each its --lag after the first. Narrower, the steps are a band to swipe,
+// the next one showing at the edge, and each sheet is a card that fills in as it is reached.
+const LAG = ["", "lg:[--lag:1100ms]", "lg:[--lag:2200ms]"];
+const BEAT = 300; // between one row of a sheet and the next, ms
+const at = (ms: number) => ({ "--t": `calc(var(--lag, 0ms) + ${ms}ms)` }) as CSSProperties;
+
+function useDrawn() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [drawn, setDrawn] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const seen = new IntersectionObserver(([e]) => e?.isIntersecting && (seen.disconnect(), setDrawn(true)), { threshold: 0.6 });
+    seen.observe(el);
+    return () => seen.disconnect();
+  }, []);
+  return [ref, drawn] as const;
+}
+
+const line = "flex h-12 items-center gap-3 border-t border-white/[0.07] text-[15px] max-sm:h-11";
+const tick = "draw-pop grid size-5 shrink-0 place-items-center rounded-full bg-ok text-[#0b0b0d]";
+
+function Sheet({ ref, drawn, lag, head, children }: { ref: RefObject<HTMLDivElement | null>; drawn: boolean; lag: number; head: ReactNode; children: ReactNode }) {
+  return (
+    <div
+      ref={ref}
+      aria-hidden
+      data-drawn={drawn || undefined}
+      className={`mt-auto rounded-2xl bg-[#0b0b0d] px-5 pb-1.5 pt-2 text-fg shadow-[0_-18px_50px_-22px_rgb(0_0_0/0.5)] lg:rounded-b-none lg:pb-5 xl:px-6 ${LAG[lag]}`}
+    >
+      <div className="flex h-12 items-center gap-2.5 whitespace-nowrap text-[15px] font-semibold">{head}</div>
+      <ul>{children}</ul>
+    </div>
+  );
+}
+
+// Proofed's own keys page: the two TestMu keys and the fixer's token, each saved.
+const testmu = (
+  <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-[#1c1c1c] text-white ring-1 ring-inset ring-white/10">
+    <TestMuMark size={12} />
+  </span>
+);
+const claude = (
+  <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-[#D97757]">
+    <ClaudeMark size={17} color="#fff" />
+  </span>
+);
+const KEYS: [string, ReactNode][] = [
+  ["TestMu username", testmu],
+  ["TestMu access key", testmu],
+  ["Claude token", claude],
+];
+
+function KeysSheet() {
+  const [ref, drawn] = useDrawn();
+  return (
+    <Sheet
+      ref={ref}
+      drawn={drawn}
+      lag={0}
+      head={
+        <>
+          <img src="/favicon.svg" alt="" className="size-5 rounded-[5px]" />
+          Your keys
+        </>
+      }
+    >
+      {KEYS.map(([name, mark], i) => (
+        <li key={name} className={line}>
+          {mark}
+          <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
+          <span style={at(300 + i * BEAT)} className={tick}>
+            <Check size={13} strokeWidth={3.5} />
+          </span>
+        </li>
+      ))}
+    </Sheet>
+  );
+}
+
+// GitHub's install page for the app: which of the account's repos it is installed on.
+const REPOS: [string, boolean][] = [
+  ["northbean/storefront", true],
+  ["northbean/website", true],
+  ["northbean/docs-site", false],
+];
+
+function InstallSheet() {
+  const [ref, drawn] = useDrawn();
+  return (
+    <Sheet
+      ref={ref}
+      drawn={drawn}
+      lag={1}
+      head={
+        <>
+          <svg viewBox="0 0 24 24" className="size-5 fill-current">
+            <path d={BRANDS.github} />
+          </svg>
+          <span className="flex-1">Install Proofed</span>
+          <span className="inline-flex h-7 items-center rounded-md bg-[#238636] px-3 text-[13px] text-white">Install</span>
+        </>
+      }
+    >
+      {REPOS.map(([repo, picked], i) => (
+        <li key={repo} className={line}>
+          <span className="relative size-[18px] shrink-0 rounded-[5px] border border-white/25">
+            {picked && (
+              <span style={at(300 + i * BEAT)} className="draw-pop absolute -inset-px grid place-items-center rounded-[5px] bg-fg text-[#0b0b0d]">
+                <Check size={13} strokeWidth={3.5} />
+              </span>
+            )}
+          </span>
+          <RepoChip repo={repo} size={22} round="rounded-md" />
+          <span className={`min-w-0 flex-1 truncate font-medium ${picked ? "" : "text-dim"}`}>{repo.split("/")[1]}</span>
+        </li>
+      ))}
+    </Sheet>
+  );
+}
+
+// The setup pull request in the sample storefront, the repo of the pull request further up the
+// page: the store's own three scenarios (.proofed/scenarios in t1dem/proofed-demo-store) arrive one
+// by one, each with Kane's pass, and then it is merged.
+const SCENARIOS = ["Place an order", "Free shipping from €50", "Promo code total"];
+
+function PullSheet() {
+  const [ref, drawn] = useDrawn();
+  const [merged, setMerged] = useState(false);
+  useEffect(() => {
+    if (!drawn || !ref.current) return;
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return setMerged(true);
+    const lag = parseFloat(getComputedStyle(ref.current).getPropertyValue("--lag")) || 0;
+    const later = setTimeout(() => setMerged(true), lag + 300 + SCENARIOS.length * BEAT + 500);
+    return () => clearTimeout(later);
+  }, [drawn, ref]);
+  return (
+    <Sheet
+      ref={ref}
+      drawn={drawn}
+      lag={2}
+      head={
+        <>
+          <span className={`inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[13px] text-white transition-colors duration-500 ${merged ? "bg-[#8250df]" : "bg-[#238636]"}`}>
+            {merged ? <GitMerge size={14} strokeWidth={2.25} /> : <GitPullRequest size={14} strokeWidth={2.25} />}
+            {merged ? "Merged" : "Open"}
+          </span>
+          Add Proofed <span className="font-normal text-faint max-[359px]:hidden">#1</span>
+        </>
+      }
+    >
+      {SCENARIOS.map((name, i) => (
+        <li key={name} style={at(300 + i * BEAT)} className={`draw-rise ${line}`}>
+          <span style={at(450 + i * BEAT)} className={tick}>
+            <Check size={13} strokeWidth={3.5} />
+          </span>
+          <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
+        </li>
+      ))}
+    </Sheet>
+  );
+}
+
+const STEPS: { title: string; body: string; href: string; go: string; sheet: ReactNode }[] = [
   {
     title: "Save your keys",
-    body: (
-      <>
-        Sign in and save two TestMu keys for Kane, and a token from <code className="whitespace-nowrap font-mono text-[0.88em] text-[#111]">claude setup-token</code> or an
-        OpenAI key for fixes. Runs use your own accounts.
-      </>
-    ),
+    body: "Two TestMu keys for Kane, a Claude or OpenAI one for fixes.",
     href: "/app",
     go: "Sign in",
+    sheet: <KeysSheet />,
   },
   {
     title: "Install the GitHub App",
-    body: "Pick the repos. Proofed opens a setup pull request in each one and stores the keys as encrypted Actions secrets.",
+    body: "Pick the repos. Proofed opens a setup pull request in each.",
     href: "/install",
     go: "Install on GitHub",
+    sheet: <InstallSheet />,
   },
   {
     title: "Review and merge",
-    body: "The setup PR holds the workflow and up to five scenarios Claude or Codex wrote. Only the ones Kane passed are in it.",
+    body: "The setup pull request holds only the scenarios Kane passed.",
     href: `${REPO}/blob/main/docs/setup.md`,
     go: "Setup docs",
+    sheet: <PullSheet />,
   },
 ];
 
-// The scenarios in it: the one every setup starts with (home.md) and the demo store's own three
-// (.proofed/scenarios in t1dem/proofed-demo-store), by their names.
-const SCENARIOS = ["Home page loads", "Place an order", "Free shipping from €50", "Promo code total"];
-// When a scenario arrives and when the pull request is merged, in ms from when the tile is reached.
-const ARRIVE = (i: number) => 450 + i * 420;
-const MERGE = ARRIVE(SCENARIOS.length) + 500;
-
 function Setup() {
-  // The sheet is what is watched for: on a phone it is under the steps, a screen below the tile's top.
-  const sheet = useRef<HTMLDivElement>(null);
-  const [drawn, setDrawn] = useState(false);
-  const [merged, setMerged] = useState(false);
-  useEffect(() => {
-    const el = sheet.current;
-    if (!el) return;
-    let later = 0;
-    const seen = new IntersectionObserver(
-      ([e]) => {
-        if (!e?.isIntersecting) return;
-        seen.disconnect();
-        setDrawn(true);
-        if (matchMedia("(prefers-reduced-motion: reduce)").matches) setMerged(true);
-        else later = window.setTimeout(() => setMerged(true), MERGE);
-      },
-      { threshold: 0.5 },
-    );
-    seen.observe(el);
-    return () => (seen.disconnect(), clearTimeout(later));
-  }, []);
-  const row = "flex items-center gap-3.5 border-t border-white/[0.07] py-4 text-[17px] sm:gap-4 sm:py-5 sm:text-[19px]";
   return (
     <section id="setup" className="py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-4 sm:px-8">
         <h2 className={h2}>
-          Set it up in your repo. <span className="text-faint">Three steps.</span>
+          Set it up in your repo.
         </h2>
-        <div data-drawn={drawn || undefined} style={{ "--fill": DAWN.sand } as CSSProperties} className="tile mt-12 grid overflow-hidden rounded-3xl lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
-          <ol className="p-6 sm:p-10 xl:p-12">
-            {STEPS.map((step, i) => (
-              <li key={step.title} className="grid grid-cols-[2rem_minmax(0,1fr)] border-black/10 py-7 first:pt-0 last:pb-0 sm:grid-cols-[2.5rem_minmax(0,1fr)] [&:not(:first-child)]:border-t">
-                <span className="text-[24px] font-semibold leading-tight tabular-nums text-black/40 xl:text-[26px]">{i + 1}</span>
+        <ol
+          style={{ "--fill": DAWN.sand } as CSSProperties}
+          className="tile mt-12 flex snap-x snap-mandatory scroll-px-5 gap-5 overflow-hidden rounded-3xl p-5 [scrollbar-width:none] max-lg:overflow-x-auto sm:scroll-px-10 sm:gap-8 sm:p-10 lg:grid lg:grid-cols-3 lg:pb-0 xl:px-12 xl:pt-12 [&::-webkit-scrollbar]:hidden"
+        >
+          {STEPS.map((step, i) => (
+            <li key={step.title} className="flex w-[86%] shrink-0 snap-start flex-col gap-7 sm:w-[46%] lg:w-auto">
+              <div className="grid grid-cols-[2rem_minmax(0,1fr)] sm:grid-cols-[2.5rem_minmax(0,1fr)]">
+                <span className="text-[24px] font-semibold leading-tight tabular-nums text-black/40 max-[359px]:text-[21px] lg:max-xl:text-[21px]">{i + 1}</span>
                 <div className="flex flex-col">
-                  <p className="text-[24px] font-semibold leading-tight tracking-[-0.025em] xl:text-[26px]">{step.title}</p>
+                  <p className="text-[24px] font-semibold leading-tight tracking-[-0.025em] max-[359px]:text-[21px] lg:max-xl:text-[21px]">{step.title}</p>
                   <p className="mt-2.5 text-pretty text-[16px] leading-relaxed text-black/65">{step.body}</p>
                   <a href={step.href} className="mt-4 inline-flex items-center gap-1.5 self-start text-[16px] font-semibold underline decoration-transparent underline-offset-4 transition-colors hover:decoration-black sm:text-[15px]">
                     {step.go} <ArrowUpRight aria-hidden size={16} strokeWidth={2.25} />
                   </a>
                 </div>
-              </li>
-            ))}
-          </ol>
-
-          <div ref={sheet} aria-hidden className="flex px-3 sm:px-6 lg:pl-0 lg:pr-0 lg:pt-12">
-            <div className="flex-1 rounded-t-3xl bg-[#0b0b0d] px-6 pb-6 pt-7 text-fg shadow-[0_-20px_60px_-20px_rgb(0_0_0/0.45)] sm:px-10 sm:pb-8 sm:pt-10 lg:rounded-tr-none">
-              <p className="flex items-center gap-3 text-[16px] font-medium text-dim">
-                <span className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[14px] font-semibold text-white transition-colors duration-500 ${merged ? "bg-[#8250df]" : "bg-[#238636]"}`}>
-                  {merged ? <GitMerge size={15} strokeWidth={2.25} /> : <GitPullRequest size={15} strokeWidth={2.25} />}
-                  {merged ? "Merged" : "Open"}
-                </span>
-                storefront #1
-              </p>
-              <p className="mt-6 text-[34px] font-semibold leading-none tracking-[-0.035em] sm:text-[44px]">Add Proofed</p>
-              <p className="mt-5 flex items-center gap-2.5 text-[16px] text-dim">
-                <img src="/favicon.svg" alt="" className="size-[22px] rounded-md" />
-                proofed-by-kane
-              </p>
-
-              <ul className="mt-8">
-                <li className={row}>
-                  <Workflow size={24} strokeWidth={2} className="shrink-0 text-dim" />
-                  <span className="min-w-0 truncate font-mono text-[0.88em]">
-                    <span className="text-faint max-sm:hidden">.github/workflows/</span>proofed.yml
-                  </span>
-                </li>
-                {SCENARIOS.map((name, i) => (
-                  <li key={name} style={{ "--t": `${ARRIVE(i)}ms` } as CSSProperties} className={`draw-rise ${row}`}>
-                    <span style={{ "--t": `${ARRIVE(i) + 180}ms` } as CSSProperties} className="draw-pop grid size-6 shrink-0 place-items-center rounded-full bg-ok text-[#0b0b0d]">
-                      <Check size={15} strokeWidth={3.5} />
-                    </span>
-                    <span className="min-w-0 flex-1 font-medium">{name}</span>
-                    <span className="shrink-0 text-[16px] text-dim">Kane passed</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </div>
+              </div>
+              {step.sheet}
+            </li>
+          ))}
+        </ol>
       </div>
     </section>
   );
@@ -294,52 +396,66 @@ const LINKS: [string, string][] = [
   ["Sign in", "/app"],
 ];
 
-// The page's last word, on the page itself and as wide as its column: the heading, and under it the
-// two ways in. Nothing is drawn around it; what happens is in the heading, whose last word gets a
-// bug and Kane's fix once, when it is reached (Mended). On a phone the heading takes two lines. The
-// footer follows: the name and the links, then the small print. Kane's cursor flies in from past
-// the heading's end, which may be off the screen, so the section clips what sticks out of it.
+// The page's last word, as one scene: the heading and under it the two ways in, on a night sky
+// (Night) that runs from the section's top down to the hero's lake. Nothing is drawn around the
+// words; what happens is in the heading, whose last word gets a bug and Kane's fix once, when it is
+// reached (Mended). On a phone the heading takes two lines. Kane's cursor flies in from past the
+// heading's end, which may be off the screen, so the section clips what sticks out of it.
+//
+// The padding under the words is the room Night's picture takes: the height it lays its still out
+// at (Night's LOW of 16:9 of the width, within its FRAME) times the share of the still between
+// where its sky goes black and its FLOOR, and the air between the last line and the first cloud.
+// The lake goes out into the page's ground, and the footer is the line after it: the name and the
+// links, then the small print.
 function Start() {
+  const words = useRef<HTMLDivElement>(null);
   return (
-    <section className="overflow-x-clip pb-8 pt-6 sm:pb-10 sm:pt-12">
-      <div className="mx-auto max-w-6xl px-4 text-center sm:px-8">
-        <h2 aria-label="Merge with proof." className="text-[3.6rem] font-semibold leading-[0.98] tracking-[-0.05em] max-[359px]:text-[3.1rem] sm:whitespace-nowrap sm:text-[min(calc((100vw-4rem)*0.127),8.6rem)]">
-          <span aria-hidden>
-            Merge with <br className="sm:hidden" />
-            <Mended word="proof" tail="." />
-          </span>
-        </h2>
-        <div className="mt-10 flex flex-wrap justify-center gap-3 sm:mt-12">
-          <a href="/install" className={primary}>
-            <svg viewBox="0 0 24 24" aria-hidden className="size-[18px] fill-current">
-              <path d={BRANDS.github} />
-            </svg>
-            Install on GitHub
-          </a>
-          <a href="/try" className={glass}>
-            Break it yourself <ArrowRight size={16} />
-          </a>
-        </div>
-        <p className="mx-auto mt-6 max-w-md text-[16px] leading-relaxed text-white/75">
-          Break it yourself opens a real pull request in the demo store. It takes 8 to 14 minutes and needs no account.
-        </p>
-
-        <footer className="mt-24 px-2 text-left sm:mt-36 sm:px-3">
-          <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-3">
-            <a href="/" aria-label="Proofed">
-              <Logo size={22} className="text-[17px]" />
+    <section className="overflow-x-clip pb-8 sm:pb-10">
+      <div className="relative mx-auto max-w-[1680px]">
+        <Night
+          avoid={words}
+          className="absolute inset-0"
+          style={{ maskImage: "linear-gradient(to right, transparent, #000 8%, #000 92%, transparent), linear-gradient(to bottom, #000 calc(100% - 3rem), transparent)", maskComposite: "intersect" }}
+        />
+        <div ref={words} className="relative mx-auto max-w-6xl px-4 pb-[calc(clamp(390px,34.88vw,586px)*0.69+1.5rem)] pt-6 text-center sm:px-8 sm:pt-12">
+          <h2 aria-label="Merge with proof." className="text-[3.6rem] font-semibold leading-[0.98] tracking-[-0.05em] max-[359px]:text-[3.1rem] sm:whitespace-nowrap sm:text-[min(calc((100vw-4rem)*0.127),8.6rem)]">
+            <span aria-hidden>
+              Merge with <br className="sm:hidden" />
+              <Mended word="proof" tail="." />
+            </span>
+          </h2>
+          <div className="mt-10 flex flex-wrap justify-center gap-3 sm:mt-12">
+            <a href="/install" className={primary}>
+              <svg viewBox="0 0 24 24" aria-hidden className="size-[18px] fill-current">
+                <path d={BRANDS.github} />
+              </svg>
+              Install on GitHub
             </a>
-            <nav aria-label="Footer" className="-mx-3 flex flex-wrap text-[16px] sm:text-[15px]">
-              {LINKS.map(([label, href]) => (
-                <a key={label} href={href} className="px-3 py-2 text-dim transition-colors hover:text-fg">
-                  {label}
-                </a>
-              ))}
-            </nav>
+            <a href="/try" className={glass}>
+              Break it yourself <ArrowRight size={16} />
+            </a>
           </div>
-          <p className="mt-3 text-[16px] text-dim sm:text-[14px]">MIT licensed. Built for the KaneCLI Hackathon, November 2026.</p>
-        </footer>
+          <p className="mx-auto mt-6 max-w-md text-balance text-[16px] leading-relaxed text-white/75">
+            A real pull request in the demo store. 8 to 14 minutes, no account.
+          </p>
+        </div>
       </div>
+
+      <footer className="mx-auto max-w-6xl px-6 sm:px-11">
+        <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-3">
+          <a href="/" aria-label="Proofed">
+            <Logo size={22} className="text-[17px]" />
+          </a>
+          <nav aria-label="Footer" className="-mx-3 flex flex-wrap text-[16px] sm:text-[15px]">
+            {LINKS.map(([label, href]) => (
+              <a key={label} href={href} className="px-3 py-2 text-dim transition-colors hover:text-fg">
+                {label}
+              </a>
+            ))}
+          </nav>
+        </div>
+        <p className="mt-3 text-[16px] text-dim sm:text-[14px]">MIT licensed.</p>
+      </footer>
     </section>
   );
 }

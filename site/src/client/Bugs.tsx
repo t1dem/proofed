@@ -161,8 +161,7 @@ export function Bugs() {
           Nine merged PRs shipped a bug. <span className="text-faint">Kane caught all nine.</span>
         </h2>
         <p className="mt-5 max-w-2xl text-[17px] leading-relaxed text-dim">
-          We replayed each pull request with Proofed. The number is how many days the bug stayed in the project before its maintainers
-          fixed it.
+          We replayed each one with Proofed. The number is how many days the bug lived before a fix.
         </p>
 
         <div ref={box} className="mt-12 scroll-mt-4 overflow-hidden rounded-3xl border border-edge bg-side">
