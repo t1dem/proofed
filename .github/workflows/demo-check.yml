@@ -1,7 +1,8 @@
 name: Demo check
 
 # The live demo (/try) is checked here so a broken one is noticed before a visitor finds it. A failed check
-# opens one issue, assigned to the owner; the next check that passes closes it.
+# opens one issue, assigned to the owner. A check that passes closes it: the daily one closes any, the hourly
+# one only what an hourly check found.
 # - every hour, free: the site answers, the demo store's workflow is on, the last live run ended in a fix;
 # - once a day: a real run, as a visitor would start it. It spends Kane credits and the fixer's time,
 #   and takes one of the day's live runs.
@@ -26,6 +27,8 @@ concurrency: demo-check
 env:
   TITLE: Demo check failed
   GH_TOKEN: ${{ github.token }}
+  MODE: ${{ inputs.mode || (github.event.schedule == '40 5 * * *' && 'full') || 'quick' }}
+  RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
 jobs:
   check:
@@ -40,29 +43,30 @@ jobs:
           node-version: 24
       - id: check
         env:
-          MODE: ${{ inputs.mode || (github.event.schedule == '40 5 * * *' && 'full') || 'quick' }}
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/demo-check.ts "$MODE"
       - name: Open an issue
         if: failure() && steps.check.outputs.problem != ''
         env:
           PROBLEM: ${{ steps.check.outputs.problem }}
-          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           open=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --limit 100 --json number,title --jq 'map(select(.title == env.TITLE))[0].number // empty')
           if [ -z "$open" ]; then
             gh issue create -R "$GITHUB_REPOSITORY" --title "$TITLE" --assignee "$GITHUB_REPOSITORY_OWNER" --body "$PROBLEM
 
-          [The check]($RUN)"
+          Found by [the $MODE check]($RUN)."
           elif ! gh issue view "$open" -R "$GITHUB_REPOSITORY" --json body,comments --jq '.body, .comments[].body' | grep -qF -- "$PROBLEM"; then
             gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "$PROBLEM
 
-          [The check]($RUN)"
+          Found by [the $MODE check]($RUN)."
           fi
       - name: Close the issue
-        if: success()
-        env:
-          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        # A check that was skipped proved nothing.
+        if: success() && steps.check.outputs.skipped != 'true'
         run: |
           open=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --limit 100 --json number,title --jq 'map(select(.title == env.TITLE))[0].number // empty')
-          if [ -n "$open" ]; then gh issue close "$open" -R "$GITHUB_REPOSITORY" --comment "[The check]($RUN) passes again."; fi
+          [ -n "$open" ] || exit 0
+          # What the daily run found is not disproved by an hourly check.
+          if [ "$MODE" = full ] || ! gh issue view "$open" -R "$GITHUB_REPOSITORY" --json body,comments --jq '.body, .comments[].body' | grep -qF "the full check"; then
+            gh issue close "$open" -R "$GITHUB_REPOSITORY" --comment "[The $MODE check]($RUN) passes again."
+          fi
