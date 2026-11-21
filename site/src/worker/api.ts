@@ -1,5 +1,5 @@
 import { currentUser, userToken, type UserRow } from "./auth";
-import { decodeSegment, readJsonObject } from "./body";
+import { decodeSegment, fromOtherSite, readJsonObject } from "./body";
 import { decrypt, encrypt, sealForGitHub } from "./crypto";
 import { gh, GitHubError, installationToken } from "./github";
 import type { Env } from "./index";
@@ -287,6 +287,10 @@ async function testmuKeyWorks(username: string, key: string) {
 }
 
 export async function handleApi(request: Request, env: Env, path: string) {
+  // Every change goes through a POST; only the dashboard itself may make one with the user's cookie.
+  if (request.method !== "GET" && request.method !== "HEAD" && fromOtherSite(request)) {
+    return json({ error: "Make that change from the Proofed dashboard." }, 403);
+  }
   const user = await currentUser(request, env);
   if (!user) return json({ error: "signed_out" }, 401);
   const token = await userToken(env, user);

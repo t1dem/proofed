@@ -5,7 +5,7 @@
 // - one run at a time, a few per visitor and per day: each costs Kane credits and Claude's time;
 // - reading is limited to the demo store, which is a public repository anyway.
 import { CLIP_PATH, repoFixer, serveClip } from "./api";
-import { decodeSegment, readJsonObject } from "./body";
+import { decodeSegment, visitorAddress, readJsonObject } from "./body";
 import { appRequest, gh, GitHubError, installationToken } from "./github";
 import type { Env } from "./index";
 import { getLive, liveFrame } from "./live";
@@ -55,7 +55,7 @@ const repoToken = (env: Env, repo: string) =>
   );
 
 async function visitorOf(request: Request, env: Env) {
-  const address = request.headers.get("cf-connecting-ip") ?? "unknown";
+  const address = visitorAddress(request.headers.get("cf-connecting-ip"));
   const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${address}:${env.SECRETS_KEY}`));
   return [...new Uint8Array(hash).slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -129,9 +129,9 @@ async function tidy(env: Env, token: string) {
 }
 
 async function start(request: Request, env: Env) {
-  // A form on another site can't post JSON here without the browser saying where it came from.
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) return json({ error: "Start it from the Proofed site." }, 403);
+  // Browsers always say where a POST came from, and the /try page posts from this origin; a request that
+  // says nothing (a script running the demo in a loop) is turned away too.
+  if (request.headers.get("origin") !== new URL(request.url).origin) return json({ error: "Start it from the Proofed site." }, 403);
   const id = (await readJsonObject(request))?.bug;
   const bug = BUGS.find((b) => b.id === id);
   if (!bug) return json({ error: "Pick one of the listed pull requests." }, 400);

@@ -51,13 +51,25 @@ test("malformed demo and account requests return 400 before changing anything", 
       const res = await worker.fetch(new Request("https://example.test" + path, {
         method: "POST",
         body,
-        headers: { cookie: "proofed_session=fixture" },
+        headers: { cookie: "proofed_session=fixture", origin: "https://example.test" },
       }), env, ctx);
       assert.equal(res.status, 400, path + " " + body.slice(0, 50));
       assert.equal(typeof (await res.json() as { error?: string }).error, "string");
     }
   }
   assert.equal(reads, 13, "only authenticated requests read a session");
+
+  // Another site can't make the browser start a demo run or change anything with the user's cookie.
+  for (const [path, headers] of [
+    ["/api/try", {}],
+    ["/api/try", { origin: "https://evil.example" }],
+    ["/api/keys", { cookie: "proofed_session=fixture", origin: "https://evil.example" }],
+    ["/api/repos/fixture/demo/pause", { cookie: "proofed_session=fixture", "sec-fetch-site": "cross-site" }],
+  ] as const) {
+    const res = await worker.fetch(new Request("https://example.test" + path, { method: "POST", body: '{"bug":"qty-floor"}', headers }), env, ctx);
+    assert.equal(res.status, 403, path + " " + JSON.stringify(headers));
+  }
+  assert.equal(reads, 13, "a request from another site is turned away before it reads a session");
 });
 
 test("GitHub comment rejections explain what to post and upstream failures propagate", async (t) => {

@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 import { appPort } from "./app.ts";
 import { waitForCodex } from "./background.ts";
 import { gradleCache, packageCache, packageProject, storePath } from "./dependencies.ts";
-import { fixRefs } from "./pr.ts";
+import { canFix, fixRefs } from "./pr.ts";
 import { runtimeEnv } from "./runtime.ts";
 import { ffmpegBuild, toolPlan } from "./tools.ts";
 
@@ -210,4 +210,10 @@ test("app startup refuses an occupied port and detects a serve command that exit
     await new Promise<void>((resolve) => listener.close(() => resolve()));
   }
   await assert.rejects(build, { code: 1, stderr: /serve command exited before .* was ready \(code 42\)/ });
+});
+
+test("the legacy fix action starts only for people with write access", () => {
+  assert.equal(canFix("admin"), true);
+  assert.equal(canFix("write"), true);
+  for (const permission of ["read", "triage", "maintain-less", "none", undefined]) assert.equal(canFix(permission), false);
 });

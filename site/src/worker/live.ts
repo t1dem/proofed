@@ -91,5 +91,5 @@ export async function liveFrame(env: Env, repo: string, pr: number, scenario: st
     .first<{ jpg: number[] | ArrayBuffer }>();
   if (!row) return refuse(404, "no frame");
   // The address carries the frame's time, so a given address is always the same picture.
-  return new Response(new Uint8Array(row.jpg), { headers: { "content-type": "image/jpeg", "cache-control": "private, max-age=3600" } });
+  return new Response(new Uint8Array(row.jpg), { headers: { "content-type": "image/jpeg", "x-content-type-options": "nosniff", "cache-control": "private, max-age=3600" } });
 }
