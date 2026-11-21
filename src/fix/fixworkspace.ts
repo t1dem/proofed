@@ -92,7 +92,10 @@ export const diffPaths = (...args: string[]) => git("diff", "--name-only", "--no
 export const untrackedPaths = () => git("ls-files", "--others", "--exclude-standard", "-z").split("\0").filter(Boolean);
 export const fixChanges = () => [...diffPaths("HEAD"), ...untrackedPaths()];
 // Ignored files are not committed, but the build or the server can still put them on the page Kane records.
-export const ignoredUntrackedPaths = () => git("ls-files", "--others", "--ignored", "--exclude-standard", "-z").split("\0").filter(Boolean);
+// node_modules alone lists far more than execFileSync's default 1 MiB of output.
+export const ignoredUntrackedPaths = () => execFileSync("git", ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"], {
+  encoding: "utf8", stdio: "pipe", maxBuffer: 512 * 1024 * 1024,
+}).split("\0").filter(Boolean);
 const writtenSince = (files: string[], since: number) => files.filter((file) => (lstatSync(file, { throwIfNoEntry: false })?.mtimeMs ?? 0) >= since);
 
 export function changesLfsFiles(paths: string[], cached = false) {
