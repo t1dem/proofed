@@ -217,7 +217,7 @@ permissions:
   pull-requests: write
   issues: write
   statuses: write
-  # Traded for a push token of the Proofed app, so the workflows on the fix commit run without an approval.
+  # Lets Proofed's server push the fix commit as the Proofed app, so the workflows on it run without an approval.
   id-token: write
 
 jobs:
