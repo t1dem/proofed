@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -117,6 +117,13 @@ test("the Codex subscription login is off disk until it is put back", { skip: pr
   restore();
   assert.equal(readFileSync(file, "utf8"), '{"tokens":"x"}');
   assert.equal(statSync(file).mode & 0o777, 0o600);
+  const again = hideCodexAuth();
+  const asset = join(home, "public.txt");
+  writeFileSync(asset, "");
+  symlinkSync(asset, file);
+  again();
+  assert.equal(readFileSync(asset, "utf8"), "");
+  assert.equal(lstatSync(file).isSymbolicLink(), false);
   rmSync(file);
   hideCodexAuth()();
   assert.equal(existsSync(file), false);

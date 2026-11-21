@@ -4,7 +4,7 @@ import { get as getHttp } from "node:http";
 import { get as getHttps } from "node:https";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { offLimits } from "./guard.ts";
 import { env } from "../env.ts";
@@ -68,7 +68,10 @@ export function hideCodexAuth() {
   return () => {
     if (restored) return;
     restored = true;
-    writeFileSync(file, saved, { mode: 0o600 });
+    // The build may have put a link in its place: remove it and create the file anew, never through a link.
+    rmSync(file, { force: true, recursive: true });
+    if (!lstatSync(dirname(file)).isDirectory()) throw new Error("CODEX_HOME was replaced while the app ran; Proofed won't write the Codex login there.");
+    writeFileSync(file, saved, { mode: 0o600, flag: "wx" });
     chmodSync(file, 0o600);
   };
 }
