@@ -12,7 +12,8 @@ import { useEffect, useRef, type CSSProperties, type RefObject } from "react";
 //
 // Hovering the picture scrambles the type under the pointer, in its own colours, for as long as the
 // pointer is there; empty sky has no type to scramble. A finger has no hover: the scramble follows
-// it while it touches, then lets go.
+// it while it touches, then lets go. A tap or a click also sends a ring of scramble out from where
+// it landed, so a phone, where a touch is over in a moment, has something to see.
 
 // Light to dense, the hero's ramp (AsciiVideo).
 const RAMP = " .,:-=+*#%@";
@@ -23,10 +24,12 @@ const STILL = "/clips/hero-dawn.jpg";
 // That line stands on the canvas's bottom edge, and whatever the canvas has above the ridges is sky.
 const FLOOR = 0.92;
 // The still is laid out as wide as the canvas and LOW of its own height: a long low shore, not a wall
-// of dark hills. It is this tall at least, px, and no taller than it gets on the widest canvas; on a
-// phone that leaves the part of its width around FOCUS, with ridges that are still ridges.
+// of dark hills. It is this tall at least, px, and no taller than it gets on the widest canvas. On a
+// phone that would leave a third of its width, most of it the dark near shore: there it is no wider
+// than WIDEST canvases, around FOCUS, so the lake and the far ridges are in the picture too.
 const LOW = 0.62;
 const FRAME = { min: 390, max: 586 };
+const WIDEST = 1.3;
 // The point of the still's width a narrow canvas is centred on: the lake to the left of it, the moon to the right.
 const FOCUS = 0.72;
 // Where the sky is black and where it is as light as it gets, in fractions of the still's height:
@@ -43,6 +46,8 @@ const WIND = 1.5; // the clouds' drift, cells a second
 const PUFF = 28; // a cloud's grain, cells: they repeat every few of these past the canvas's width
 const SWELL = 2.2; // the waves' slide at the near shore, cells a second
 const REACH = 5; // how far around the pointer the type scrambles, in cell widths
+// A tap's ring: how far it opens and how thick it starts, in cell widths, and how long it lasts, seconds.
+const RING = { opens: 30, thick: 5, lasts: 0.9 };
 
 const clamp01 = (x: number) => Math.min(Math.max(x, 0), 1);
 const smooth = (a: number, b: number, x: number) => {
@@ -127,6 +132,7 @@ export function Night({ avoid, className, style }: { avoid: RefObject<HTMLElemen
     let shore = 0; // the lake's first row
     let patch: number[] = []; // the cells under the pointer and next to them
     let pointer: { x: number; y: number } | null = null; // where it is in the window
+    let rings: { x: number; y: number; at: number }[] = []; // taps, in cells of the canvas
 
     let frame = 0;
     let visible = false;
@@ -165,22 +171,30 @@ export function Night({ avoid, className, style }: { avoid: RefObject<HTMLElemen
         held[i] = 0;
         wipe(i);
       }
+      // Scrambles the cells `from` to `to` cell widths away from a point of the canvas, in cells.
+      const scramble = (px: number, py: number, from: number, to: number) => {
+        const down = Math.ceil(((to + 2) * cw) / ch);
+        for (let r = Math.max(Math.floor(py) - down, 0); r <= Math.min(Math.floor(py) + down, rows - 1); r++) {
+          for (let c = Math.max(Math.floor(px - to) - 2, 0); c <= Math.min(Math.floor(px + to) + 2, cols - 1); c++) {
+            const i = r * cols + c;
+            const far = Math.hypot(c + 0.5 - px, ((r + 0.5 - py) * ch) / cw);
+            if (far > to + 1.5 || far < from - 1.5) continue;
+            if (!held[i]) (patch.push(i), wipe(i));
+            held[i] = Math.max(held[i]!, far < to && far >= from && kind[i] !== CLEAR ? 2 : 1);
+          }
+        }
+      };
       const box = pointer && canvas.getBoundingClientRect();
       if (pointer && box && pointer.x >= box.left && pointer.x <= box.right && pointer.y >= box.top && pointer.y <= box.bottom) {
         const k = canvas.width / box.width;
-        const px = ((pointer.x - box.left) * k) / cw;
-        const py = ((pointer.y - box.top) * k) / ch;
-        const down = Math.ceil(((REACH + 2) * cw) / ch);
-        for (let r = Math.max(Math.floor(py) - down, 0); r <= Math.min(Math.floor(py) + down, rows - 1); r++) {
-          for (let c = Math.max(Math.floor(px) - REACH - 2, 0); c <= Math.min(Math.floor(px) + REACH + 2, cols - 1); c++) {
-            const i = r * cols + c;
-            const far = Math.hypot(c + 0.5 - px, ((r + 0.5 - py) * ch) / cw);
-            if (far > REACH + 1.5) continue;
-            held[i] = far < REACH && kind[i] !== CLEAR ? 2 : 1;
-            patch.push(i);
-            wipe(i);
-          }
-        }
+        scramble(((pointer.x - box.left) * k) / cw, ((pointer.y - box.top) * k) / ch, 0, REACH);
+      }
+      // A tap's ring: it opens fast, slows, and thins out as it goes.
+      rings = rings.filter((ring) => now - ring.at < RING.lasts);
+      for (const ring of rings) {
+        const k = (now - ring.at) / RING.lasts;
+        const r = RING.opens * (1 - (1 - k) ** 3);
+        scramble(ring.x, ring.y, r - RING.thick * (1 - k), r);
       }
       for (const i of old) if (!held[i]) draw(i, now);
       for (const i of patch) if (held[i] === 1) draw(i, now);
@@ -249,7 +263,7 @@ export function Night({ avoid, className, style }: { avoid: RefObject<HTMLElemen
 
       // Where the still lies, device px: as wide as the canvas or wider, its FLOOR on the canvas's bottom.
       const fh = Math.min(Math.max((canvas.width * FH * LOW) / FW, FRAME.min * dpr), FRAME.max * dpr);
-      const fw = (fh * FW) / FH / LOW;
+      const fw = Math.min((fh * FW) / FH / LOW, Math.max(canvas.width * WIDEST, canvas.width));
       const ox = Math.min(Math.max(FOCUS * fw - canvas.width / 2, 0), fw - canvas.width);
       const oy = FLOOR * fh - canvas.height;
       under.width = canvas.width;
@@ -371,6 +385,13 @@ export function Night({ avoid, className, style }: { avoid: RefObject<HTMLElemen
       if (still && cols) hover(time());
     };
     const up = (e: PointerEvent) => e.pointerType !== "mouse" && leave();
+    const tap = (e: PointerEvent) => {
+      move(e);
+      const box = canvas.getBoundingClientRect();
+      if (still || !cols || e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom) return;
+      const k = canvas.width / box.width;
+      rings.push({ x: ((e.clientX - box.left) * k) / cw, y: ((e.clientY - box.top) * k) / ch, at: time() });
+    };
 
     const seen = new IntersectionObserver(([e]) => {
       visible = !!e?.isIntersecting;
@@ -411,7 +432,7 @@ export function Night({ avoid, className, style }: { avoid: RefObject<HTMLElemen
         if (avoid.current) resize.observe(avoid.current);
         seen.observe(canvas);
         window.addEventListener("pointermove", move, { passive: true });
-        window.addEventListener("pointerdown", move, { passive: true });
+        window.addEventListener("pointerdown", tap, { passive: true });
         window.addEventListener("pointerup", up);
         window.addEventListener("pointercancel", up);
         document.documentElement.addEventListener("pointerleave", leave);
@@ -425,7 +446,7 @@ export function Night({ avoid, className, style }: { avoid: RefObject<HTMLElemen
       resize.disconnect();
       seen.disconnect();
       window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerdown", move);
+      window.removeEventListener("pointerdown", tap);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
       document.documentElement.removeEventListener("pointerleave", leave);

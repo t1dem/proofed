@@ -10,7 +10,8 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 // picture sends out a ring of its own, which wipes the red it reaches.
 //
 // Hovering the picture scrambles the type under the pointer, in its own colours, as the page's last
-// picture does (Night). A finger has no hover: the scramble follows it while it touches.
+// picture does (Night). A finger has no hover: the scramble follows it while it touches, and a tap
+// or a click sends a ring of scramble out from where it landed.
 
 // Light to dense. The steps are few and plain: a lit sky set in brackets and letters reads as text, not as light.
 const RAMP = " .,:-=+*#%@";
@@ -30,6 +31,8 @@ const FIXES = 8;
 const FIX_OPEN = 0.45;
 const FIX_GLOW = 0.8;
 const REACH = 5; // how far around the pointer the type scrambles, in cell widths
+// A tap's ring: how far it opens and how thick it starts, in cell widths, and how long it lasts, seconds.
+const RING = { opens: 30, thick: 5, lasts: 0.9 };
 
 const clamp01 = (x: number) => Math.min(Math.max(x, 0), 1);
 const progress = (t: number, [a, b]: number[]) => clamp01((t - a!) / (b! - a!));
@@ -61,6 +64,7 @@ uniform float uHeal;    // how far the ring from the click has wiped it, in cell
 uniform float uRing;    // how bright that ring still is, 0..1
 uniform vec4 uFix[${FIXES}]; // the visitor's clicks: centre (fraction), radius (cell heights), glow
 uniform vec2 uPointer;  // the pointer, device px from the top left; off the canvas when there is none
+uniform vec4 uTap;      // a tap's ring: its centre, device px, and its inner and outer edge, cell widths
 
 vec3 saturate3(vec3 c, float k) {
   float m = dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -111,7 +115,8 @@ void main() {
   index = clamp(index + step(1.5, index) * floor((hash(cell * 1.7) - 0.5) * 3.0 + 0.5), 0.0, uGlyphs - 1.0);
   index = mix(index, floor(mix(0.35, 1.0, hash(cell + tick)) * (uGlyphs - 1.0)), broken);
   // Under the pointer a cell that has type gets any other glyph, re-rolled as often.
-  float poked = step(length(((cell + 0.5) * uCell - uPointer) / uCell.x), ${REACH}.0) * step(0.5, index);
+  float tapped = length(((cell + 0.5) * uCell - uTap.xy) / uCell.x);
+  float poked = max(step(length(((cell + 0.5) * uCell - uPointer) / uCell.x), ${REACH}.0), step(uTap.z, tapped) * step(tapped, uTap.w)) * step(0.5, index);
   index = mix(index, 1.0 + floor(hash(cell * 1.3 + tick) * (uGlyphs - 1.0)), poked);
   float mask = texture2D(uAtlas, vec2((index + f.x) / uGlyphs, f.y)).a;
 
@@ -221,6 +226,7 @@ export function AsciiVideo({ src, focus, quiet = false, className, style }: Prop
     let visible = true;
     let cancelled = false;
     let pointer: { x: number; y: number } | null = null; // where it is in the window
+    let tap: { x: number; y: number; at: number } | null = null; // the last tap, as fractions of the canvas
 
     // Cover the canvas, centred on the focus as far as the frame allows.
     const crop = () => {
@@ -307,6 +313,12 @@ export function AsciiVideo({ src, focus, quiet = false, className, style }: Prop
       const k = box ? canvas.width / box.width : 0;
       if (pointer && box) gl.uniform2f(u("uPointer"), (pointer.x - box.left) * k, (pointer.y - box.top) * k);
       else gl.uniform2f(u("uPointer"), -1e4, -1e4);
+      // The ring opens fast, slows, and thins out as it goes.
+      const age = tap ? (now - tap.at) / RING.lasts : 1;
+      if (age >= 1) tap = null;
+      const r = RING.opens * (1 - (1 - age) ** 3);
+      if (tap) gl.uniform4f(u("uTap"), tap.x * canvas.width, tap.y * canvas.height, r - RING.thick * (1 - age), r);
+      else gl.uniform4f(u("uTap"), 0, 0, 1, 0);
       if (!calm) moveCursor(s);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       canvas.style.opacity = "1";
@@ -348,7 +360,7 @@ export function AsciiVideo({ src, focus, quiet = false, className, style }: Prop
       if (!visible) return;
       const moved = video.currentTime !== last && upload();
       if (moved) last = video.currentTime;
-      if (moved || busy() || (pointer && !still)) draw();
+      if (moved || busy() || ((pointer || tap) && !still)) draw();
     };
 
     const seen = new IntersectionObserver(([e]) => {
@@ -389,8 +401,15 @@ export function AsciiVideo({ src, focus, quiet = false, className, style }: Prop
       draw();
     };
     const up = (e: PointerEvent) => e.pointerType !== "mouse" && leave();
+    const down = (e: PointerEvent) => {
+      move(e);
+      const r = canvas.getBoundingClientRect();
+      const x = (e.clientX - r.left) / r.width;
+      const y = (e.clientY - r.top) / r.height;
+      if (!still && x >= 0 && x <= 1 && y >= 0 && y <= 1) tap = { x, y, at: time() };
+    };
     window.addEventListener("pointermove", move, { passive: true });
-    window.addEventListener("pointerdown", move, { passive: true });
+    window.addEventListener("pointerdown", down, { passive: true });
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
     document.documentElement.addEventListener("pointerleave", leave);
@@ -413,7 +432,7 @@ export function AsciiVideo({ src, focus, quiet = false, className, style }: Prop
       video.removeEventListener("seeked", ready);
       window.removeEventListener("pointerdown", poke);
       window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerdown", move);
+      window.removeEventListener("pointerdown", down);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
       document.documentElement.removeEventListener("pointerleave", leave);

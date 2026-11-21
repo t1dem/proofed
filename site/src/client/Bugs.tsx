@@ -170,7 +170,8 @@ export function Bugs() {
               <div className="relative aspect-[9/20] h-[calc(100%-2rem)] overflow-hidden rounded-[1.25rem] border border-edge bg-black lg:absolute lg:h-[calc(100%-2.5rem)]">{screen("phone")}</div>
             </div>
             <div className={`${slot(!bug.phone)} lg:border-l lg:border-edge`}>
-              <div className="relative aspect-video w-full overflow-hidden bg-black">{screen("wide")}</div>
+              {/* On a phone the frame is square, for the Android screen: the wide one stands in it as a window, not between black bars. */}
+              <div className="relative aspect-video w-full overflow-hidden bg-black max-sm:w-[calc(100%-1.5rem)] max-sm:rounded-xl max-sm:border max-sm:border-edge">{screen("wide")}</div>
             </div>
           </div>
 
