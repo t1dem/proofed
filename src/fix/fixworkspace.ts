@@ -10,7 +10,7 @@ import { offLimits } from "./guard.ts";
 import { env } from "../env.ts";
 import { gitPath } from "../paths.ts";
 import { findGitBash, killTree } from "../process.ts";
-import { fileWithSecret } from "../secrets.ts";
+import { fileWithSecret, withoutJobSecrets } from "../secrets.ts";
 import { timed } from "../timing.ts";
 
 export const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8", stdio: "pipe" }).trimEnd();
@@ -60,7 +60,8 @@ async function serve(appDir: string) {
   if (await portOccupied(url.hostname.replace(/^\[|\]$/g, ""), port)) {
     throw new Error(`Port ${port} is already in use; stop the old server before Proofed starts the app.`);
   }
-  const proc = spawn(env("PROOFED_SERVE"), { shell: true, detached: true, windowsHide: true, stdio: "ignore", cwd: appDir });
+  // The app's own commands get no job credentials, as in the check job's build and serve step.
+  const proc = spawn(env("PROOFED_SERVE"), { shell: true, detached: true, windowsHide: true, stdio: "ignore", cwd: appDir, env: withoutJobSecrets(process.env) });
   const stopped = new AbortController();
   const exited = new Promise<void>((resolve) => {
     const leave = () => { stopped.abort(); resolve(); };
@@ -90,6 +91,9 @@ async function serve(appDir: string) {
 export const diffPaths = (...args: string[]) => git("diff", "--name-only", "--no-renames", "-z", ...args).split("\0").filter(Boolean);
 export const untrackedPaths = () => git("ls-files", "--others", "--exclude-standard", "-z").split("\0").filter(Boolean);
 export const fixChanges = () => [...diffPaths("HEAD"), ...untrackedPaths()];
+// Ignored files are not committed, but the build or the server can still put them on the page Kane records.
+export const ignoredUntrackedPaths = () => git("ls-files", "--others", "--ignored", "--exclude-standard", "-z").split("\0").filter(Boolean);
+const writtenSince = (files: string[], since: number) => files.filter((file) => (lstatSync(file, { throwIfNoEntry: false })?.mtimeMs ?? 0) >= since);
 
 export function changesLfsFiles(paths: string[], cached = false) {
   if (!paths.length) return false;
@@ -125,11 +129,14 @@ export function treeBeforeCheck() {
 export const ignoredTrackedPaths = () => new Set(git("ls-files", "-z", "--cached", "--ignored", "--exclude-standard", "--with-tree=HEAD").split("\0").filter(Boolean));
 
 // Checked before the change is built, served to Kane and recorded, since clips and reports are public.
-export function discardLeak(agentName: string) {
-  const leaked = fileWithSecret(fixChanges());
+// `since`: when the agent started, so ignored files it wrote are checked too, not the whole dependency tree.
+export function discardLeak(agentName: string, since?: number) {
+  // A second of slack for file systems with coarse timestamps.
+  const ignored = since === undefined ? [] : writtenSince(ignoredUntrackedPaths(), since - 1000);
+  const leaked = fileWithSecret([...fixChanges(), ...ignored]);
   if (!leaked) return undefined;
   git("restore", "--source=HEAD", "--staged", "--worktree", "--", ".");
-  for (const file of untrackedPaths()) rmSync(file, { force: true });
+  for (const file of [...untrackedPaths(), ...ignored]) rmSync(file, { force: true });
   return `${agentName}'s change put a credential of this job into ${leaked}. Proofed discarded the change`;
 }
 
@@ -139,7 +146,7 @@ function build(buildScript: string) {
     const ignored = ignoredTrackedPaths();
     const changedOutputs = diffPaths("HEAD").filter((file) => ignored.has(file));
     if (changedOutputs.length) git("--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--worktree", "--", ...changedOutputs);
-    execFileSync(findGitBash(), [gitPath(buildScript)], { stdio: "pipe", windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+    execFileSync(findGitBash(), [gitPath(buildScript)], { stdio: "pipe", windowsHide: true, maxBuffer: 64 * 1024 * 1024, env: withoutJobSecrets(process.env) });
     const scenariosDir = env("PROOFED_SCENARIOS", ".proofed/scenarios");
     const protectedFiles = fixChanges().filter((file) => offLimits(file, scenariosDir));
     if (protectedFiles.length) return `The build changed protected files: ${protectedFiles.join(", ")}.`;

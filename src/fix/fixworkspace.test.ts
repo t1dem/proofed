@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { prepareBuild } from "./fixworkspace.ts";
+import { discardLeak, prepareBuild } from "./fixworkspace.ts";
 
 async function listen(t: TestContext) {
   const server = createServer();
@@ -77,4 +77,26 @@ test("startup stops waiting when a server accepts a connection without response 
   t.mock.method(AbortSignal, "timeout", (ms: number) => timeout(ms === 30_000 ? 1700 : ms));
   const { serve } = app(t, url, `require("node:http").createServer(() => {}).listen(${port}, "127.0.0.1");`);
   await assert.rejects(serve(), /didn't come up .* within 30 seconds/);
+});
+
+test("a credential the fixer writes into an ignored file is found and the file removed", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "proofed-leak-test-"));
+  const cwd = process.cwd();
+  const token = process.env.GITHUB_TOKEN;
+  t.after(() => {
+    process.chdir(cwd);
+    if (token === undefined) delete process.env.GITHUB_TOKEN; else process.env.GITHUB_TOKEN = token;
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
+  git("init", "-q");
+  writeFileSync(join(dir, ".gitignore"), ".env\n");
+  git("add", ".");
+  git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init");
+  process.chdir(dir);
+  process.env.GITHUB_TOKEN = "ghs_leakedtoken1234567890";
+  const since = Date.now();
+  writeFileSync(join(dir, ".env"), `TOKEN=${process.env.GITHUB_TOKEN}\n`);
+  assert.equal(discardLeak("Claude", since), "Claude's change put a credential of this job into .env. Proofed discarded the change");
+  assert.equal(existsSync(join(dir, ".env")), false);
 });
