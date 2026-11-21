@@ -20,6 +20,13 @@ async function readFile(token: string, repo: string, path: string, ref?: string)
 }
 
 type Pkg = { scripts?: Record<string, string>; packageManager?: string; workspaces?: string[] | { packages?: string[] } };
+// A folder name as a YAML value: plain only when YAML can't misread it (starting with a letter or "_",
+// so not "-", "." or a number, and not a word YAML reads as a boolean or null). Otherwise single-quoted
+// with ' doubled: YAML keeps everything else in it as typed, and so does the CLI's own workflow reader
+// (src/targets/target.ts), which knows '' but not backslash escapes.
+const YAML_WORDS = /^(?:true|false|yes|no|on|off|y|n|null)$/i;
+export const yamlValue = (value: string) =>
+  /^[A-Za-z_][\w./-]*$/.test(value) && !YAML_WORDS.test(value) ? value : `'${value.replaceAll("'", "''")}'`;
 const join = (dir: string, file: string) => (dir === "." ? file : `${dir}/${file}`);
 const readPkg = async (token: string, repo: string, dir: string) => {
   const text = await readFile(token, repo, join(dir, "package.json"));
@@ -190,7 +197,7 @@ export const workflow = (c: Commands | AndroidCommands, bot: string) => {
           device: ${ANDROID_DEVICE}
           os-version: '${ANDROID_OS}'
 ` : `          url: ${c.url}
-${c.dir === "." ? "" : `          working-directory: ${c.dir}\n`}          install: ${c.install}
+${c.dir === "." ? "" : `          working-directory: ${yamlValue(c.dir)}\n`}          install: ${c.install}
           build: ${c.build}
           serve: ${c.serve}
 ${c.cache ? `          cache: ${c.cache}\n` : ""}`;
@@ -210,7 +217,8 @@ permissions:
   pull-requests: write
   issues: write
   statuses: write
-  # Traded for a push token of the Proofed app, so the workflows on the fix commit run without an approval.
+  # Lets Proofed's server push the fix commit as the Proofed app, so the workflows on it run without an approval.
+  # If the server can't push, GITHUB_TOKEN does, and those workflows wait for an approval.
   id-token: write
 
 jobs:

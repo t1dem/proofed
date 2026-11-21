@@ -13,10 +13,17 @@ export function withoutJobSecrets(env: NodeJS.ProcessEnv, keep: string[] = []) {
   return Object.fromEntries(Object.entries(env).filter(([name]) => keep.includes(name) || !JOB_SECRETS.includes(name)));
 }
 
-// Only read the auth file that the action staged for this run.
+// The Codex login while the fix loop keeps it off disk for the app's build and server (fixworkspace.ts),
+// so output from that time is still masked.
+let heldCodexAuth: string | undefined;
+export const holdCodexAuth = (auth: string | undefined) => { heldCodexAuth = auth; };
+
+// Only read the auth file that the action staged for this run. While the login is held, a file in its
+// place is the app's, not the login.
 function codexAuth(env: NodeJS.ProcessEnv) {
   if (env.CODEX_AUTH_JSON) return env.CODEX_AUTH_JSON;
   if (!env.PROOFED_CODEX_HOME) return undefined;
+  if (heldCodexAuth !== undefined) return heldCodexAuth;
   try {
     return readFileSync(join(env.PROOFED_CODEX_HOME, "auth.json"), "utf8");
   } catch {

@@ -1,4 +1,4 @@
-import { handleActionsToken } from "./actions";
+import { handleActionsPush } from "./actions";
 import { handleApi } from "./api";
 import { callback, login, logout } from "./auth";
 import { handleLivePost } from "./live";
@@ -29,8 +29,8 @@ export default {
     if (pathname === "/api/health") return Response.json({ ok: true });
     if (pathname === "/api/github/webhook" && request.method === "POST") return handleWebhook(request, env, ctx);
     // Called by the action, not the dashboard: it carries a GitHub Actions token, not a session.
-    if (pathname === "/api/actions/token" && request.method === "POST") {
-      return handleActionsToken(request, env).catch((e: unknown) => {
+    if (pathname === "/api/actions/push" && request.method === "POST") {
+      return handleActionsPush(request, env).catch((e: unknown) => {
         console.error(pathname, e);
         return Response.json({ error: "Something went wrong talking to GitHub. Try again." }, { status: 502 });
       });

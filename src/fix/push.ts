@@ -4,26 +4,89 @@ import { oidcToken, proofedServer } from "../action/server.ts";
 import { changesLfsFiles, git, LFS_REFUSAL } from "./fixworkspace.ts";
 
 // GitHub suppresses push workflows from the job's GITHUB_TOKEN and requires approval for PR
-// workflows it triggers. Proofed's server trades the job's OIDC token for a repository-scoped
-// app token so those workflows can start automatically. Without it, use the job's token.
-async function appToken() {
+// workflows it triggers. So Proofed's server pushes the commit as the Proofed app: the job sends the
+// commit's files and metadata with its OIDC token, and the server writes the very same commit (same
+// hash) onto the PR branch. No app token ever reaches the job, where the app's own build could read
+// it (site/src/worker/actions.ts says what the server accepts). Without the server, or if it refuses,
+// the job's token pushes instead.
+
+// "Name <email> 1732190000 +0100" as GitHub's API takes a person: the same instant and offset.
+export function person(line: string) {
+  const m = /^(.*) <(.*)> (\d+) ([+-])(\d\d)(\d\d)$/.exec(line);
+  if (!m) return undefined;
+  const [, name = "", email = "", seconds = "", sign = "", hours = "", minutes = ""] = m;
+  const offset = (sign === "-" ? -1 : 1) * (Number(hours) * 60 + Number(minutes));
+  const local = new Date((Number(seconds) + offset * 60) * 1000).toISOString().replace(/\.\d{3}Z$/, "");
+  return { name, email, date: `${local}${sign}${hours}:${minutes}` };
+}
+
+const MAX_PUSH_BYTES = 32 * 1024 * 1024;
+
+// HEAD as the server needs it, or undefined when the server couldn't reproduce it exactly
+// (a signed or merge commit, a submodule, more than fits in one request).
+export function headCommit(branch: string) {
+  const raw = execFileSync("git", ["cat-file", "commit", "HEAD"], { encoding: "utf8", maxBuffer: 1024 * 1024 });
+  const split = raw.indexOf("\n\n");
+  const headers = (split < 0 ? raw : raw.slice(0, split)).split("\n");
+  const message = split < 0 ? "" : raw.slice(split + 2);
+  const values = (key: string) => headers.filter((l) => l.startsWith(`${key} `)).map((l) => l.slice(key.length + 1));
+  const known = new Set(["tree", "parent", "author", "committer"]);
+  if (headers.some((l) => !known.has(l.split(" ")[0] ?? ""))) return undefined;
+  const [tree] = values("tree");
+  const parents = values("parent");
+  const author = person(values("author")[0] ?? "");
+  const committer = person(values("committer")[0] ?? "");
+  if (!tree || parents.length !== 1 || !author || !committer) return undefined;
+  const parent = parents[0]!;
+  const sha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  // Raw entries: ":<old mode> <new mode> <old sha> <new sha> <status>\0<path>\0".
+  const entries = execFileSync("git", ["diff-tree", "-r", "-z", "--no-renames", "--no-commit-id", parent, "HEAD"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).split("\0");
+  const files: { path: string; mode: string; sha: string | null; content?: string }[] = [];
+  let size = 0;
+  for (let i = 0; i + 1 < entries.length; i += 2) {
+    const [oldMode = "", newMode = "", , newSha = "", status = ""] = entries[i]!.slice(1).split(" ");
+    const path = entries[i + 1]!;
+    if (status === "D") {
+      if (oldMode === "160000") return undefined;
+      files.push({ path, mode: oldMode, sha: null });
+      continue;
+    }
+    if (!["100644", "100755", "120000"].includes(newMode)) return undefined;
+    const content = execFileSync("git", ["cat-file", "blob", newSha], { maxBuffer: MAX_PUSH_BYTES }).toString("base64");
+    size += content.length;
+    if (size > MAX_PUSH_BYTES * 0.9) return undefined;
+    files.push({ path, mode: newMode, sha: newSha, content });
+  }
+  return { branch, commit: { sha, tree, parent, message, author, committer }, files };
+}
+
+// Whether the server pushed HEAD to `branch` as the Proofed app.
+async function serverPush(branch: string) {
   const { ACTIONS_ID_TOKEN_REQUEST_URL: url, ACTIONS_ID_TOKEN_REQUEST_TOKEN: bearer, PROOFED_SERVER: server } = process.env;
   if (!url || !bearer || !server) {
     console.log(`${url && bearer ? "No Proofed server set" : "The workflow has no `id-token: write`"}: pushing with the job's token.`);
-    return undefined;
+    return false;
   }
   try {
-    const exchange = new URL("/api/actions/token", proofedServer(server));
-    const signal = AbortSignal.timeout(10_000);
-    const value = await oidcToken(signal);
-    const res = await fetch(exchange, { method: "POST", headers: { authorization: `Bearer ${value}` }, signal });
-    const { token } = res.ok ? ((await res.json()) as { token?: string }) : {};
-    if (!token) throw new Error(`${exchange.origin} answered ${res.status}`);
-    console.log(`::add-mask::${token}`);
-    return token;
+    const body = headCommit(branch);
+    if (!body) {
+      console.log("Proofed's server can't recreate this commit exactly: pushing with the job's token.");
+      return false;
+    }
+    const endpoint = new URL("/api/actions/push", proofedServer(server));
+    const value = await oidcToken(AbortSignal.timeout(10_000));
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { authorization: `Bearer ${value}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(120_000),
+    });
+    const answer = (await res.json().catch(() => ({}))) as { sha?: string; error?: string };
+    if (!res.ok || answer.sha !== body.commit.sha) throw new Error(`${endpoint.origin} answered ${res.status}${answer.error ? `: ${answer.error}` : ""}`);
+    return true;
   } catch (e) {
-    console.log(`Couldn't get the Proofed app's token (${e instanceof Error ? e.message : e}): pushing with the job's token.`);
-    return undefined;
+    console.log(`Proofed's server couldn't push it (${e instanceof Error ? e.message : e}): pushing with the job's token.`);
+    return false;
   }
 }
 
@@ -78,23 +141,15 @@ function push(ref: string, sha: string, token?: string) {
   }
 }
 
-// HEAD to `branch`, as the Proofed app when it can be, otherwise with the job's token. Returns
+// HEAD to `branch`, as the Proofed app when Proofed's server can push it, otherwise with the job's token. Returns
 // whether the app pushed it.
 export async function pushHead(branch: string) {
   // Hook-free pushes do not upload new Git LFS objects.
   const paths = git("diff-tree", "--root", "--no-commit-id", "-r", "--no-renames", "--diff-filter=AMT", "--name-only", "-z", "HEAD").split("\0").filter(Boolean);
   if (changesLfsFiles(paths, true)) throw new Error(LFS_REFUSAL);
-  const token = await appToken();
-  const jobToken = process.env.GITHUB_TOKEN || undefined;
+  if (await serverPush(branch)) return true;
   const ref = `refs/heads/${branch}`;
   const sha = git("rev-parse", "HEAD");
-  try {
-    push(ref, sha, token ?? jobToken);
-    return !!token;
-  } catch (e) {
-    if (!token) throw e;
-    console.log(`Pushing as the Proofed app failed (${e instanceof Error ? e.message.split("\n")[0] : e}): pushing with the job's token.`);
-    push(ref, sha, jobToken);
-    return false;
-  }
+  push(ref, sha, process.env.GITHUB_TOKEN || undefined);
+  return false;
 }

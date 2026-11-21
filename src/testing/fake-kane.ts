@@ -10,6 +10,7 @@
 //   [fake:flaky]       the same on the first run of an objective in FAKE_KANE_LOG, a pass after
 //   [fake:error]       exits without a run_end     [fake:hang]       never finishes (with a child)
 //   [fake:signedout]   refuses to run, as kane-cli does without a login (so does FAKE_KANE_SIGNED_IN=0)
+//   [fake:nocredits]   ends at once as kane-cli does on an account without credits
 //   [fake-from:name]   whatever the file FAKE_KANE_MODES/name says at the time of the run, so a test can
 //                      have one scenario's outcome change between runs
 // `balance` answers as kane-cli does: without a login or keys (FAKE_KANE_SIGNED_IN=0) it says so, and
@@ -112,6 +113,9 @@ if (mode === "hang") {
   await step("analyze: looking at the page");
   console.error("fake kane-cli: the session ended unexpectedly");
   process.exit(1);
+} else if (mode === "nocredits") {
+  const reason = 'Credits exhausted: {"error":"insufficient credits"}';
+  emit({ type: "run_end", status: "failed", summary: reason, reason, duration: 1, credits_consumed: 0, result_code: 560, reason_code: "infra_error.credits_exhausted" });
 } else if (mode === "text") {
   await step(`assert: ${objective.split("\n")[0]}`);
   end({ status: "passed", reason: "Objective completed" });

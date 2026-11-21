@@ -159,6 +159,22 @@ describe("proofed check, with a fake Kane", { skip: noChrome, concurrency: 3, ti
     }
   });
 
+  test("an account without Kane credits is an error that isn't retried, not a broken scenario", async () => {
+    const r = repo({ shop: { mode: "nocredits" } });
+    const port = await freePort();
+    try {
+      const ran = await cli(r, ["check", "--json", "--url", `http://127.0.0.1:${port}`, "--serve", `node server.cjs ${port}`]);
+      const doc = json(ran);
+      assert.equal(ran.code, 2);
+      assert.equal(doc.counts.failed, 0);
+      assert.equal(doc.scenarios[0]!.outcome, "error");
+      assert.match(JSON.stringify(doc.scenarios[0]), /out of credits, so nothing was checked/);
+      assert.equal(runs(r).length, 1, "a second run can't find credits");
+    } finally {
+      r.cleanup();
+    }
+  });
+
   test("--no-retry returns the first doubted failure and infrastructure error", async () => {
     const r = repo({ shipping: { mode: "refuted", credits: 27.42 }, broken: { mode: "error" } });
     const port = await freePort();

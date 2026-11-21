@@ -109,6 +109,7 @@ What went wrong in real runs and what Proofed does about it.
 ## Limits
 
 - **Kane's verdict on the same failure varies.** On [#6](https://github.com/t1dem/proofed-demo-store/pull/6) the same check that [#9](https://github.com/t1dem/proofed-demo-store/pull/9) shows as a break came back twice as "the test may be wrong". Without a failed check, Proofed marks such a run unconfirmed and doesn't start a fix.
+- **Kane doesn't catch every bug.** In two more replays, IT-Tools [#1202](https://github.com/CorentinTh/it-tools/pull/1202) and [#710](https://github.com/CorentinTh/it-tools/pull/710), Kane passed on the broken code.
 - **A fix needs room in the provider's usage limit.** On [#7](https://github.com/t1dem/proofed-demo-store/pull/7) and [#8](https://github.com/t1dem/proofed-demo-store/pull/8) the limit ran out: Kane caught the bug, no fix followed, and the report says so.
 - **Slower than unit tests.** One to four minutes of Kane per scenario, plus a build and a re-check per fix attempt.
 - **Desktop is experimental:** one Electron window. Cloud iOS and Android devices aren't yet verified on a real plan.

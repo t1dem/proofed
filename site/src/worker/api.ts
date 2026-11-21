@@ -1,5 +1,5 @@
 import { currentUser, userToken, type UserRow } from "./auth";
-import { readJsonObject } from "./body";
+import { decodeSegment, fromOtherSite, readJsonObject } from "./body";
 import { decrypt, encrypt, sealForGitHub } from "./crypto";
 import { gh, GitHubError, installationToken } from "./github";
 import type { Env } from "./index";
@@ -287,6 +287,10 @@ async function testmuKeyWorks(username: string, key: string) {
 }
 
 export async function handleApi(request: Request, env: Env, path: string) {
+  // Every change goes through a POST; only the dashboard itself may make one with the user's cookie.
+  if (request.method !== "GET" && request.method !== "HEAD" && fromOtherSite(request)) {
+    return json({ error: "Make that change from the Proofed dashboard." }, 403);
+  }
   const user = await currentUser(request, env);
   if (!user) return json({ error: "signed_out" }, 401);
   const token = await userToken(env, user);
@@ -323,7 +327,9 @@ export async function handleApi(request: Request, env: Env, path: string) {
       const username = typeof ltUsername === "string" ? ltUsername.trim() : "";
       const key = typeof ltAccessKey === "string" ? ltAccessKey.trim() : "";
       if (!username || !key) return json({ error: "TestMu needs both a username and an access key." }, 400);
-      if (!(await testmuKeyWorks(username, key))) return json({ error: "TestMu didn't accept that username and access key." }, 400);
+      const works = await testmuKeyWorks(username, key).catch(() => undefined);
+      if (works === undefined) return json({ error: "Couldn't reach TestMu to check that key. Try again." }, 502);
+      if (!works) return json({ error: "TestMu didn't accept that username and access key." }, 400);
       updates.push("lt_username = ?", "lt_key = ?");
       binds.push(username, await encrypt(env.SECRETS_KEY, key));
     }
@@ -384,7 +390,10 @@ export async function handleApi(request: Request, env: Env, path: string) {
   if (live && request.method === "GET") {
     const [, repoName = "", number, scenario] = live;
     if (!(await listRepos(env, token)).some((r) => r.full_name === repoName)) return json({ error: "Proofed isn't installed on that repository." }, 404);
-    if (scenario) return liveFrame(env, repoName, Number(number), decodeURIComponent(scenario));
+    if (scenario) {
+      const name = decodeSegment(scenario);
+      return name === undefined ? json({ error: "not_found" }, 404) : liveFrame(env, repoName, Number(number), name);
+    }
     return json(await getLive(env, repoName, Number(number)));
   }
 

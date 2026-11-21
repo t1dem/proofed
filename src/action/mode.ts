@@ -6,7 +6,7 @@ import { appendFileSync } from "node:fs";
 import { acknowledge, ctx, findReport, getPermission, getPullRequest, hasStatus, listFolder, readEvent, readFile, reply, setStatus, type PullRequest } from "../github.ts";
 import { DEFAULT_FIXER, resolveFixer } from "../fix/models.ts";
 import { alreadyReported, fixRequested, readReportData, sameFixRequest } from "../report/report.ts";
-import { parseCommand, parseFix, type FixCommand } from "./requests.ts";
+import { isDescriptionScenario, parseCommand, parseFix, type FixCommand } from "./requests.ts";
 import { APP_LOGIN, FIRST_ANDROID_SCENARIO, FIRST_SCENARIO, onlyFirstScenario, SETUP_BRANCH } from "./setup.ts";
 
 type Event = {
@@ -103,6 +103,10 @@ if (checkbox) {
       const data = report?.body ? readReportData(report.body) : undefined;
       if (!data) await refuse("There's no Proofed report on this PR yet. Comment `/proofed` to run the check first.");
       else if (data.failures.length === 0) await refuse("Nothing to fix: no scenario failed in the last Proofed run on this PR.");
+      // Older reports can hold a description check Kane doubted; the fix job skips it, so answer here.
+      else if (data.failures.every((f) => isDescriptionScenario(f) && f.failedCheck === "scenario_doubted")) {
+        await refuse("Nothing to fix: Kane couldn't verify what the PR description asks, so no agent can fix it. Edit the description and comment `/proofed` to check again.");
+      }
       mode = "fix";
       asked = fix;
     }

@@ -71,7 +71,13 @@ const checked = (steps: Step[]) => steps.some((s) => s.status === "done" && /^as
 const failedAssert = (steps: Step[]) => steps.findLast((s, i) =>
   s.status === "failed" && /^assert:/i.test(s.remark) && !steps.slice(i + 1).some((later) => later.step === s.step && later.status === "done"));
 
+// Kane ends such a run as "failed" too, but it never looked at the app: a second run can't help and
+// there is nothing for a fixer to fix.
+const outOfCredits = (end: RunEnd | undefined) => end?.reason_code === "infra_error.credits_exhausted";
+const OUT_OF_CREDITS = "The TestMu account Kane runs on is out of credits, so nothing was checked. Top it up, or use the keys of an account that has credits.";
+
 function reconciledEnd(end: RunEnd | undefined, steps: Step[]): RunEnd | undefined {
+  if (end && outOfCredits(end)) return { ...end, reason: OUT_OF_CREDITS };
   const failed = end?.status === "passed" && failedAssert(steps);
   return failed && end ? { ...end, status: "failed", reason: failed.remark } : end;
 }
@@ -79,7 +85,7 @@ function reconciledEnd(end: RunEnd | undefined, steps: Step[]): RunEnd | undefin
 export function outcomeOf(end: RunEnd | undefined, steps: Step[]): Outcome {
   // A vague objective lets Kane open the page, wait, and call that a pass.
   if (end?.status === "passed") return failedAssert(steps) ? "failed" : checked(steps) ? "passed" : "unsure";
-  if (end?.status !== "failed" || INFRA.test(end.reason ?? "")) return "error";
+  if (end?.status !== "failed" || INFRA.test(end.reason ?? "") || end.reason_code?.startsWith("infra_error.")) return "error";
   // An unresolved false assertion is a failure even when Kane blames the scenario.
   return end.verdict?.family === "automation_bug" && !failedAssert(steps) ? "unsure" : "failed";
 }
@@ -118,7 +124,7 @@ export async function runScenario(scenario: Scenario, o: RunOptions): Promise<Sc
     return runOnce(scenario, o);
   };
   const settle = async (result: ScenarioResult) => {
-    for (let i = 2; i <= (o.noRetry ? 1 : o.attempts ?? 2) && result.outcome === "error" && !result.notSignedIn && !stopping(); i++) {
+    for (let i = 2; i <= (o.noRetry ? 1 : o.attempts ?? 2) && result.outcome === "error" && !result.notSignedIn && !outOfCredits(result.end) && !stopping(); i++) {
       result = await again(result, result.error ?? "infra error");
     }
     return result;
