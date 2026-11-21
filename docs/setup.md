@@ -48,7 +48,7 @@ jobs:
 ```
 
 - `vars` hands the action every Actions variable of the repo, so a new setting from the dashboard works without editing the workflow.
-- `id-token: write` lets the fixer push the fix commit as the Proofed GitHub App, so your other workflows run on the fix commit without waiting for approval. Without it the fix is pushed with `GITHUB_TOKEN`.
+- `id-token: write` lets Proofed's server push the fix commit as the Proofed GitHub App (the job itself gets no app token), so your other workflows run on the fix commit without waiting for approval. Without it, or when the server can't make the push, the fix is pushed with `GITHUB_TOKEN`: push workflows don't run on that commit and pull request workflows wait for approval.
 - Clips go to a `proofed-clips` branch of the same repo, so the GIFs render in the comment with no storage of your own, in private repos too.
 - Claude aliases: `haiku`, `sonnet`, `opus`, `fable`. A version such as `opus 5.1` and full Claude IDs are accepted. Effort: `low`, `medium`, `high`, `xhigh`, `max`.
 - Codex aliases: `sol`, `terra`, `astra`, `luna`. Full IDs: `gpt-6.2-sol`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-astra`, `gpt-6-luna`. Effort: `low`, `medium`, `high`, `xhigh`, `max`; Sol, Terra and Astra also accept `ultra`.
