@@ -1,3 +1,12 @@
+// A path segment as text, or undefined when its percent-encoding is broken (decodeURIComponent throws on "%E0").
+export function decodeSegment(segment: string) {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return undefined;
+  }
+}
+
 // The body is read up to the limit and no further, so a large upload never sits in memory whole.
 export async function readUpTo(request: Request, max: number): Promise<Uint8Array | undefined> {
   if (Number(request.headers.get("content-length") ?? 0) > max) return undefined;
