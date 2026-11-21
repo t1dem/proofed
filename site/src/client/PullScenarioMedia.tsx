@@ -1,5 +1,5 @@
 import { ChevronsLeftRight, Maximize, Minimize, Pause, Play } from "lucide-react";
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
 import type { RunScenario } from "../worker/runs";
 import { focus, iconButton, plain } from "./ui";
 
@@ -17,27 +17,34 @@ type RecordingProps = {
   steps?: Step[];
   seek?: Seek;
   onTime?: (t: number) => void;
+  // The clip played to its end.
+  onEnd?: () => void;
   // The step pointed at, here on the track or in the list of steps beside the clip.
   lit?: number;
   onLit?: (i: number | undefined) => void;
 };
 
-export function Recording({ clip, steps, seek, onTime, lit, onLit }: RecordingProps) {
+export function Recording({ clip, steps, seek, onTime, onEnd, lit, onLit }: RecordingProps) {
   const video = useRef<HTMLVideoElement>(null);
   const fill = useRef<HTMLSpanElement>(null);
   const [playing, setPlaying] = useState(false);
+  // Asked to play and not playing yet: the play button over the picture would only flash.
+  const [starting, setStarting] = useState(false);
   const [length, setLength] = useState<number>();
   const [time, setTime] = useState(0);
   const still = clip.jpg ?? clip.gif;
   const box = useRef<HTMLDivElement>(null);
   const [full, setFull] = useState(false);
 
+  const covered = useRef(0);
   const playFrom = (at?: number) => {
     const v = video.current;
     if (!v) return;
+    clearTimeout(covered.current);
     if (at !== undefined) v.currentTime = at;
     else if (v.ended) v.currentTime = 0;
-    v.play().catch(() => {});
+    setStarting(true);
+    v.play().catch(() => setStarting(false));
   };
 
   const toggle = () => (video.current?.paused === false ? video.current.pause() : playFrom());
@@ -55,9 +62,13 @@ export function Recording({ clip, steps, seek, onTime, lit, onLit }: RecordingPr
     (video.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null)?.webkitEnterFullscreen?.();
   };
 
-  // A step picked below the clip.
-  useEffect(() => {
-    if (seek) playFrom(seek.at);
+  // A step picked below the clip. Before the paint, so the picture is never seen waiting to be
+  // played. A clip that is no longer asked for (another one has taken its place) stops, once the
+  // other has had time to cover it: stopped at once, its play button would flash under the change.
+  useLayoutEffect(() => {
+    if (seek) return playFrom(seek.at);
+    covered.current = window.setTimeout(() => video.current?.pause(), 400);
+    return () => clearTimeout(covered.current);
   }, [seek]);
 
   // The track follows every frame while playing; timeupdate alone moves it in visible jumps.
@@ -117,7 +128,9 @@ export function Recording({ clip, steps, seek, onTime, lit, onLit }: RecordingPr
             }
           }}
           onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
+          onPlaying={() => setStarting(false)}
+          onPause={() => (setPlaying(false), setStarting(false))}
+          onEnded={onEnd}
           onTimeUpdate={(e) => {
             const t = e.currentTarget.currentTime;
             setTime(t);
@@ -127,7 +140,7 @@ export function Recording({ clip, steps, seek, onTime, lit, onLit }: RecordingPr
           onClick={toggle}
           className={`block w-full cursor-pointer ${full ? "h-full object-contain" : "aspect-video"}`}
         />
-        {!playing && (
+        {!playing && !starting && (
           <span className="pointer-events-none absolute inset-0 grid place-items-center">
             <span className="grid size-14 place-items-center rounded-full bg-black/60 text-white backdrop-blur-sm">
               <Play size={22} fill="currentColor" className="ml-0.5" />

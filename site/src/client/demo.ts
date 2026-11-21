@@ -16,6 +16,8 @@ import type { FixerView, MeView, RepoView } from "../worker/api";
 import type { LiveView } from "../worker/live";
 import type { ActivityRun, PullDetail, PullView, Run } from "../worker/runs";
 import * as tryDemo from "./demo-try";
+// The two showcase scenarios live in sample.ts so the landing gets them without this file's data.
+import { sampleFail, sampleFix, shippingSteps } from "./sample";
 
 const min = 60_000;
 const hour = 60 * min;
@@ -370,15 +372,6 @@ const proofedFileName: Run[] = [
   crashed("pr-13/c9a0100-43525075801", "2026-11-13T23:11:14Z", "c9a010027f98b5a4096a15bf4244b7d7525da28f", "TypeError: Cannot read properties of null (reading '1')", 15),
 ];
 
-// The sample store. `at` is where each step starts in /clips/fail.mp4.
-const shippingSteps = [
-  { remark: "Opened the store. The note under the headline says “Free shipping from €0.50”", at: 0 },
-  { remark: "Added House Espresso to the bag", at: 0.8 },
-  { remark: "Added Paper Filters to the bag", at: 2.6 },
-  { remark: "Opened the bag", at: 3.8 },
-  { remark: "Checked shipping: Free at €44.50, where €4.90 was expected", failed: true, at: 5.5 },
-];
-
 const SAMPLE_FIX = "7d2a9f4c1e8b03d65a7f2c9e4b1d8a6053c7e9f1";
 
 // The sample store's passing scenarios play real recordings of the same store (the demo store's #14).
@@ -390,14 +383,14 @@ const recorded = (id: string) => {
 const samplePromo = { id: "promo-code", name: "Promo code total", outcome: "passed" as const, reason: "Discount −€9.10, shipping Free, total €81.90.", ...recorded("promo-code") };
 const sampleOrder = { id: "checkout", name: "Place an order", outcome: "passed" as const, reason: "The order went through, and the confirmation page thanks Ada Lovelace for it.", ...recorded("checkout") };
 
-const sampleShipping: Run[] = [
+export const sampleShipping: Run[] = [
   {
     key: "sample-26-2",
     at: now - 4 * min,
     sha: SAMPLE_FIX,
     skipped: [],
     scenarios: [
-      { id: "free-shipping", name: "Free shipping from €50", outcome: "passed", reason: "Shipping is €4.90 at €49.40 and Free at €51.00.", clip: { mp4: "/clips/fixed.mp4", jpg: "/clips/fixed.jpg" }, credits: 27, seconds: 41 },
+      sampleFix,
       { ...samplePromo, credits: 24, seconds: 36 },
       { ...sampleOrder, credits: 31, seconds: 52 },
     ],
@@ -420,17 +413,7 @@ const sampleShipping: Run[] = [
     sha: "e4c1b7a0d29f53c86b1e0a7d4f9235c8b6e1d042",
     skipped: [],
     scenarios: [
-      {
-        id: "free-shipping",
-        name: "Free shipping from €50",
-        outcome: "failed",
-        reason: "Shipping is Free at €44.50, and the store says “Free shipping from €0.50”. Expected €4.90 below €50.",
-        diagnosis: "The threshold is now written as 50, in euros, but the cart still counts in cents: every order ships free.",
-        steps: shippingSteps,
-        clip: { mp4: "/clips/fail.mp4", jpg: "/clips/fail.jpg" },
-        credits: 26,
-        seconds: 38,
-      },
+      sampleFail,
       { ...samplePromo, credits: 24, seconds: 36 },
       { ...sampleOrder, credits: 31, seconds: 51 },
     ],

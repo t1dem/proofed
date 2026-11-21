@@ -168,6 +168,63 @@ html[data-theme="light"] .raised:active:not(:disabled) {
     0 0 0 1px color-mix(in srgb, var(--raised-fill), #000 18%);
 }
 
+/* The landing's main button: the same raised key, in white. The page's only blue is inside the app's
+   window, so the page's own button can't be blue too. On a near-black page a dark shadow doesn't show,
+   so its depth is in the face: lit along the top edge, falling off to a light grey, with a lip along
+   the bottom and its own light on the page under it. */
+.raised-white {
+  color: #0b0b0d;
+  background: linear-gradient(180deg, #fafafb, #dcdce2);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    inset 0 -1px 0 rgb(0 0 0 / 0.18),
+    0 1px 2px rgb(0 0 0 / 0.5),
+    0 8px 22px -8px rgb(255 255 255 / 0.28);
+  text-shadow: 0 1px 0 rgb(255 255 255 / 0.7);
+  transition: filter 150ms ease-out, box-shadow 120ms ease-out, transform 120ms ease-out;
+}
+.raised-white:hover {
+  filter: brightness(1.06);
+}
+.raised-white:active {
+  transform: translateY(1px);
+  filter: brightness(0.93);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.6);
+}
+.raised-white:focus-visible {
+  outline: 2px solid rgb(255 255 255 / 0.6);
+  outline-offset: 2px;
+}
+
+/* A tile of the landing's mosaics: one flat colour of the dawn (--fill, from dawn.ts) with ink on it,
+   lit along its top edge like the page's white button. */
+.tile {
+  color: #111;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fill), #fff 14%), var(--fill));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.55),
+    inset 0 -1px 0 rgb(0 0 0 / 0.14);
+}
+
+/* Pieces that arrive once their [data-drawn] is set: .draw-rise comes up into its place and .draw-pop
+   lands with a little spring. Each starts at --t. Without motion they are all there from the start. */
+@media (prefers-reduced-motion: no-preference) {
+  .draw-rise {
+    opacity: 0;
+    transform: translateY(10px);
+    transition: transform 600ms cubic-bezier(0.22, 1, 0.36, 1) var(--t), opacity 300ms linear var(--t);
+  }
+  .draw-pop {
+    opacity: 0;
+    transform: scale(0.5);
+    transition: transform 520ms cubic-bezier(0.3, 1.6, 0.5, 1) var(--t), opacity 120ms linear var(--t);
+  }
+  [data-drawn] :is(.draw-rise, .draw-pop) {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* A segmented control: a shallow track, and the picked choice on a raised thumb. Unlike a field it
    takes no focus ring of its own; the focused choice shows one. */
 .seg-track {
@@ -309,49 +366,51 @@ html[data-app][data-theme="light"] {
   }
 }
 
-/* Landing hero picture: no frame, its edges fade into the paper. On a phone it sits under the buttons and
-   fades in from the top; on a wide screen it sits low on the right and fades from the left and the top too. */
-.hero-art {
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 35%, #000 88%, transparent 100%);
-  mask-image: linear-gradient(to bottom, transparent 0%, #000 35%, #000 88%, transparent 100%);
+/* The landing's dark parts wear the app's palette and type. The landing's own tokens are remapped
+   too, so pieces made for the paper (the CLI command) come out dark here without a second version. */
+.night {
+  /* Near black, as on Raycast's site, with the panels and lines stepping up from it. */
+  --color-bg: #08080a;
+  --color-side: #050506;
+  --color-panel: #111113;
+  --color-hover: #1a1a1d;
+  --color-edge: #1f1f23;
+  --color-paper: #08080a;
+  --color-card: #171717;
+  --color-ink: #ededed;
+  --color-muted: #a3a3a3;
+  --color-line: #262626;
+  --color-pass: #4cc373;
+  --color-pass-bg: #11201a;
+  --color-fail: #f2625a;
+  --color-fail-bg: #2a1514;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-serif: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  color-scheme: dark;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
 }
-@media (width >= 64rem) {
-  .hero-art {
-    -webkit-mask-image:
-      linear-gradient(to right, transparent 0%, #000 40%),
-      linear-gradient(to bottom, transparent 0%, #000 32%, #000 86%, transparent 100%);
-    -webkit-mask-composite: source-in;
-    mask-image:
-      linear-gradient(to right, transparent 0%, #000 40%),
-      linear-gradient(to bottom, transparent 0%, #000 32%, #000 86%, transparent 100%);
-    mask-composite: intersect;
-  }
+
+/* The app framed in the landing's hero (Landing.tsx) scrolls without a bar of its own. */
+html[data-embed] {
+  scrollbar-width: none;
 }
+
+/* The landing is dark from edge to edge, overscroll included. */
+html[data-landing] body {
+  background: #08080a;
+}
+
+
 
 /* The package manager menu under the CLI command opens from its first word. */
 @keyframes pop {
   from {
     opacity: 0;
     transform: translateY(-3px);
-  }
-}
-
-/* The unticked "Fix with Claude" box in the replay asks to be ticked: a soft ring breathes around it. */
-.tick-hint {
-  animation: tick-hint 1.8s ease-in-out infinite;
-}
-@keyframes tick-hint {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgb(31 122 61 / 0);
-  }
-  50% {
-    box-shadow: 0 0 0 5px rgb(31 122 61 / 0.18);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .tick-hint {
-    animation: none;
   }
 }
 

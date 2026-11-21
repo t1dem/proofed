@@ -1,0 +1,10 @@
+# Hashed build output and the font files it pairs with: safe to cache forever, they change name when they change.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+# Clips and avatars keep their names between deploys: a day, then revalidate.
+/clips/*
+  Cache-Control: public, max-age=86400
+/avatars/*
+  Cache-Control: public, max-age=86400
