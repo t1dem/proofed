@@ -133,6 +133,11 @@ test("the server refuses anything but one fast-forward commit on an open PR bran
     assert.equal(res.status, status, JSON.stringify(body));
     assert.ok(!api.some((r) => r.method === "PATCH" || r.path.endsWith("/git/blobs")), JSON.stringify(body));
   }
+  // A pull_request run names its own PR's branch: another PR's branch is refused before anything is written.
+  api.length = 0;
+  assert.equal((await handleActionsPush(await request({ ...good, head_ref: "other-pr" }), env)).status, 409);
+  assert.ok(!api.some((r) => r.method === "PATCH" || r.path.endsWith("/git/blobs")));
+  assert.equal((await handleActionsPush(await request({ ...good, head_ref: "feature/menu" }), env)).status, 200);
   // The PR comes from a fork with the same branch name.
   github.pulls[0].head.repo.id = 999;
   assert.equal((await handleActionsPush(await request(good), env)).status, 409);

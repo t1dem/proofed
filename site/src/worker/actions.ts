@@ -16,6 +16,9 @@
 // - Only jobs in this repository's `.github/workflows/proofed.yml` are accepted.
 // - The push goes only to the head branch of an open pull request from this same repository, only as
 //   one new commit on top of the branch as it is (never a force push), and never touches workflow files.
+//   A `pull_request` run can only push to its own PR's branch (the signed `head_ref` claim). A comment's
+//   run carries no PR in its token, so it can reach any open same-repository PR branch, as the job's own
+//   GITHUB_TOKEN (`contents: write`) already can.
 //   The commit must come out byte for byte as the job made it (same tree and commit hash), so the run's
 //   report names the commit that is really on the branch. Code inside the job can do no more with this
 //   than push to the pull request branch it is already running on.
@@ -38,7 +41,9 @@ export async function jobRepo(request: Request) {
   if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isSafeInteger(repoId) || repoId <= 0) return undefined;
   const workflow = `${repo}/.github/workflows/proofed.yml@`;
   if (typeof claims?.workflow_ref !== "string" || !claims.workflow_ref.startsWith(workflow) || claims.workflow_ref.length === workflow.length) return undefined;
-  return { repo, repoId };
+  // A `pull_request` run's token names its PR's branch; a comment's run (`/proofed fix`) has none.
+  const headRef = typeof claims.head_ref === "string" && claims.head_ref ? claims.head_ref : undefined;
+  return { repo, repoId, ...(headRef && { headRef }) };
 }
 
 // A fix is a few files; scenarios are text. Base64 makes it a third larger.
@@ -99,7 +104,7 @@ const conflict = (error: string) => Response.json({ error }, { status: 409 });
 export async function handleActionsPush(request: Request, env: Env) {
   const job = await jobRepo(request);
   if (!job) return refuse();
-  const { repo, repoId } = job;
+  const { repo, repoId, headRef } = job;
   const bytes = await readUpTo(request, MAX_PUSH_BYTES);
   if (!bytes) return Response.json({ error: "Too large." }, { status: 413 });
   let push: PushRequest | undefined;
@@ -110,6 +115,7 @@ export async function handleActionsPush(request: Request, env: Env) {
   }
   if (!push) return Response.json({ error: "Send the commit as Proofed's action does." }, { status: 400 });
   const { branch, commit, files } = push;
+  if (headRef !== undefined && branch !== headRef) return conflict("Proofed only pushes to the branch of the pull request it ran on.");
 
   let token: string;
   try {
