@@ -121,9 +121,11 @@ test("a Gradle library keeps the static web fallback", async (t) => {
   assert.equal(scenario, FIRST_SCENARIO);
 });
 
-test("a folder name YAML could misread is quoted in the workflow", async (t) => {
-  const { workflow } = await setup(t, {
-    "web:app/package.json": '{"scripts":{"start":"node server.js"}}',
+for (const dir of ["web:app", "-", "true", "No", "null", "123", ".app"]) {
+  test(`a folder named ${dir} is quoted in the workflow, so YAML reads it as text`, async (t) => {
+    const { workflow } = await setup(t, {
+      [`${dir}/package.json`]: '{"scripts":{"start":"node server.js"}}',
+    });
+    assert.ok(workflow.includes(`          working-directory: ${JSON.stringify(dir)}\n          install: npm install`), workflow);
   });
-  assert.match(workflow, /          working-directory: "web:app"\n          install: npm install/);
-});
+}

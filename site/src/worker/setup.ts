@@ -20,8 +20,11 @@ async function readFile(token: string, repo: string, path: string, ref?: string)
 }
 
 type Pkg = { scripts?: Record<string, string>; packageManager?: string; workspaces?: string[] | { packages?: string[] } };
-// A folder name as a YAML value: plain when it can't be misread, otherwise double-quoted (JSON is valid YAML).
-const yamlValue = (value: string) => (/^[\w./-]+$/.test(value) ? value : JSON.stringify(value));
+// A folder name as a YAML value: plain only when YAML can't misread it, otherwise double-quoted (JSON
+// is valid YAML). Plain means starting with a letter or "_" (so not "-", ".", or a number) and not a
+// word YAML reads as a boolean or null.
+const YAML_WORDS = /^(?:true|false|yes|no|on|off|y|n|null)$/i;
+const yamlValue = (value: string) => (/^[A-Za-z_][\w./-]*$/.test(value) && !YAML_WORDS.test(value) ? value : JSON.stringify(value));
 const join = (dir: string, file: string) => (dir === "." ? file : `${dir}/${file}`);
 const readPkg = async (token: string, repo: string, dir: string) => {
   const text = await readFile(token, repo, join(dir, "package.json"));
