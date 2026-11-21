@@ -66,7 +66,8 @@ jobs:
         run: |
           open=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --limit 100 --json number,title --jq 'map(select(.title == env.TITLE))[0].number // empty')
           [ -n "$open" ] || exit 0
-          # What the daily run found is not disproved by an hourly check.
-          if [ "$MODE" = full ] || ! gh issue view "$open" -R "$GITHUB_REPOSITORY" --json body,comments --jq '.body, .comments[].body' | grep -qF "the full check"; then
+          # What the daily run found is not disproved by an hourly check. Read first: a failed read closes nothing.
+          said=$(gh issue view "$open" -R "$GITHUB_REPOSITORY" --json body,comments --jq '.body, .comments[].body')
+          if [ "$MODE" = full ] || ! grep -qF "the full check" <<< "$said"; then
             gh issue close "$open" -R "$GITHUB_REPOSITORY" --comment "[The $MODE check]($RUN) passes again."
           fi
