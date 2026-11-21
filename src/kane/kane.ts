@@ -15,6 +15,8 @@ export type RunEnd = {
   type: "run_end";
   status: "passed" | "failed" | (string & {});
   reason?: string;
+  // Kane's own class of the ending, e.g. "infra_error.credits_exhausted" when the run never judged the app.
+  reason_code?: string;
   final_state?: Record<string, unknown>;
   summary?: string;
   one_liner?: string;
