@@ -216,7 +216,7 @@ function nativeBuildKeys(scenarios: Scenario[]) {
 
 async function runAttempts(plan: FixPlan, app: ReturnType<typeof prepareBuild>) {
   const { fixer, data, failures, checkedFiles, base, appDir, agentName, rev, outDir } = plan;
-  const { build, buildInput, serve } = app;
+  const { build, buildCommand, buildInput, serve } = app;
   const agentTouched = new Set<string>();
   let beforeAnswer = new Map<string, string>();
   let lastAttemptTree: string | undefined;
@@ -233,7 +233,7 @@ async function runAttempts(plan: FixPlan, app: ReturnType<typeof prepareBuild>) 
       const diff = git("diff", `${base}...HEAD`).slice(0, 40_000);
       const scenarios = scenariosFor(plan, failures.map((f) => f.id));
       const asked = Date.now();
-      const answer = askFixer(fixPrompt({ failures, feedback, diff, scenarios, base, appDir, buildInput }), fixer);
+      const answer = askFixer(fixPrompt({ failures, feedback, diff, scenarios, base, appDir, buildCommand, buildInput }), fixer, buildCommand);
       const leak = discardLeak(agentName, asked);
       return leak ? { ok: false, message: leak } : answer;
     },

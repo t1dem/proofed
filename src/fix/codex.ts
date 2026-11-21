@@ -25,7 +25,7 @@ export function askCodex(prompt: string, o: Options): CodexAnswer {
     );
     // Codex has no equivalent of Claude's per-command/per-path tool allowlist. The sandbox
     // limits writes, blocks network and protects .git; the prompt restricts shell use to
-    // reading code. fix.ts/generate.ts undo edits outside their allowed files.
+    // reading code and the build. fix.ts/generate.ts undo edits outside their allowed files.
     // Ignore personal config/rules instead of inheriting personal MCP servers and permission overrides.
     const command = executableCommand("codex", [
       "exec", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--color", "never",

@@ -45,8 +45,8 @@ test("the build launcher preserves literal backslashes in POSIX paths", { skip: 
     if (originalBuild === undefined) delete process.env.PROOFED_BUILD;
     else process.env.PROOFED_BUILD = originalBuild;
   });
-  prepareBuild(dir);
-  assert.equal(execFileSync("bash", [join(dir, "proofed-build.sh")], { encoding: "utf8" }).trimEnd(), dir);
+  const { buildCommand } = prepareBuild(dir);
+  assert.equal(execFileSync("bash", ["-c", buildCommand], { encoding: "utf8" }).trimEnd(), dir);
 });
 
 test("startup accepts the new server on localhost", async (t) => {
