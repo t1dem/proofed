@@ -50,8 +50,9 @@ const SUN: [number, number] = [0.85, 0.56];
 
 // The real app on its sample data, in a window wider than the page's column. On a computer it is the
 // app's desktop layout and it works: laid out no narrower than DESK and scaled down when the window
-// is. On a phone it is the app's phone layout at its real size, as a picture: a pane that scrolls
-// inside the page would trap the thumb.
+// is. On a phone it is the app's phone layout at its real size, and it works too: its tabs and rows
+// answer a tap and it scrolls under a thumb, the page taking over where a screen of it ends. The
+// line under it opens the app full screen.
 const DESK = 1100;
 const PHONE = "(max-width: 767px)";
 
@@ -87,16 +88,14 @@ function AppWindow() {
   }, []);
   const scale = phone ? 1 : Math.min(size.w / DESK, 1);
   return (
-    <div className="overflow-hidden rounded-xl border border-white/[0.1] bg-side shadow-[0_50px_120px_-30px_rgb(0_0_0/0.9)]">
+    <div className="relative overflow-hidden rounded-xl border border-white/[0.1] bg-side shadow-[0_50px_120px_-30px_rgb(0_0_0/0.9)]">
       <div ref={box} className="relative h-[540px] w-full overflow-hidden md:aspect-[16/9] md:h-auto">
         {size.w > 0 && (
           <iframe
             src={load ? "/app?demo" : undefined}
             title="Proofed on sample data"
-            inert={phone}
-            tabIndex={phone ? -1 : undefined}
             onLoad={() => load && setTimeout(() => setShown(true), 250)}
-            className={`absolute left-0 top-0 origin-top-left bg-bg transition-opacity duration-700 ${shown ? "opacity-100" : "opacity-0"} ${phone ? "pointer-events-none" : ""}`}
+            className={`absolute left-0 top-0 origin-top-left bg-bg transition-opacity duration-700 ${shown ? "opacity-100" : "opacity-0"}`}
             style={{ width: size.w / scale, height: size.h / scale, transform: `scale(${scale})` }}
           />
         )}
@@ -158,6 +157,11 @@ function Hero() {
         />
         <div className="relative mx-auto max-w-[1440px] px-3 sm:px-6">
           <AppWindow />
+          <p className="mt-4 text-center text-[16px] md:hidden">
+            <a href="/app?demo" className="inline-flex items-center gap-1.5 py-2 font-medium text-dim underline decoration-white/25 underline-offset-4">
+              Open it full screen <ArrowRight aria-hidden size={16} />
+            </a>
+          </p>
         </div>
       </div>
     </section>
