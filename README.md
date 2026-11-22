@@ -32,7 +32,7 @@
 | **Ships** | GitHub App, Action, [`proofed-cli`](https://www.npmjs.com/package/proofed-cli) on npm, MCP server, Stop hook for Claude Code | |
 | **Verified** | Kane caught 13 bugs out of 13 and confirmed 13 fixes: nine in open-source projects and four in the demo store. A Kane pass without a check, or a pass the page text contradicts, is marked "not checked". [Six Kane failures and what we do about them](#what-we-ran-into-with-kane-cli) | 2 min |
 | **Craft** | Three steps to a PR with the setup and scenarios Kane has already passed: sign in, save the keys, install the GitHub App. `--dry-run` is free. A PR that touches no scenario costs 0 credits | |
-| **Three roles of Kane** | Checks every PR. Works inside the agent's session through `proofed check`, MCP and the Stop hook. Checked this repository's own PRs: 52 runs | |
+| **Three roles of Kane** | Checks every PR. Works inside the agent's session through `proofed check`, MCP and the Stop hook. Checked this repository's own PRs: [64 runs](https://github.com/t1dem/proofed/actions/workflows/proofed.yml), [clips](https://github.com/t1dem/proofed/tree/proofed-clips) and [raw Kane logs](docs/evidence/README.md) | |
 
 ## Bugs from real projects
 
@@ -54,7 +54,7 @@ In eight of the nine cases the agent edited the same files as the maintainers. I
 
 ## Demo store
 
-Four PRs in the [demo store](https://github.com/t1dem/proofed-demo-store), each hiding a bug in an ordinary-looking change. Kane caught all four bugs and confirmed all four of the agent's fixes.
+Four PRs in the [demo store](https://github.com/t1dem/proofed-demo-store), each hiding a bug in an ordinary-looking change ([50 runs](https://github.com/t1dem/proofed-demo-store/actions/workflows/proofed.yml), [clips](https://github.com/t1dem/proofed-demo-store/tree/proofed-clips)). Kane caught all four bugs and confirmed all four of the agent's fixes.
 
 | PR | What Kane found |
 |---|---|
@@ -122,6 +122,7 @@ What went wrong in real runs and what Proofed does about it.
 - [Text checks and uncertain passes](docs/setup.md#text-checks-and-uncertain-passes)
 - [Credits](docs/cli.md#credits)
 - [Code and releases](docs/release.md)
+- [Raw Kane CLI session logs](docs/evidence/README.md)
 
 ## License
 
