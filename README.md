@@ -30,13 +30,13 @@
 | **Bar 2: Kane caught something** | [Nine regressions](#bugs-from-real-projects) that maintainers merged: web, Android and Electron | 2 min |
 | **Bar 3 and Closed loop: the agent and Kane talked to each other** | [demo-store #9](https://github.com/t1dem/proofed-demo-store/pull/9): Kane rejected Claude's first fix, the second one passed and landed in the PR | 1 min |
 | **Ships** | GitHub App, Action, [`proofed-cli`](https://www.npmjs.com/package/proofed-cli) on npm, MCP server, Stop hook for Claude Code | |
-| **Verified** | Kane caught 13 bugs out of 13 and confirmed 13 fixes: nine in open-source projects and four in the demo store. A Kane pass without a check, or a pass the page text contradicts, is marked "not checked". [Six Kane failures and what we do about them](#what-we-ran-into-with-kane-cli) | 2 min |
+| **Verified** | Kane caught 13 bugs out of 15 and confirmed all 13 fixes: nine of eleven open-source replays (missing two IT-Tools PRs, noted in [Limits](#limits)) and four of four in the demo store. A Kane pass without a check, or a pass the page text contradicts, is marked "not checked". [Six Kane failures and what we do about them](#what-we-ran-into-with-kane-cli) | 2 min |
 | **Craft** | Three steps to a PR with the setup and scenarios Kane has already passed: sign in, save the keys, install the GitHub App. `--dry-run` is free. A PR that touches no scenario costs 0 credits | |
 | **Three roles of Kane** | Checks every PR. Works inside the agent's session through `proofed check`, MCP and the Stop hook. Checked this repository's own PRs: [64 runs](https://github.com/t1dem/proofed/actions/workflows/proofed.yml), [clips](https://github.com/t1dem/proofed/tree/proofed-clips) and [raw Kane logs](docs/evidence/README.md) | |
 
 ## Bugs from real projects
 
-Nine merged pull requests from open-source projects. Each one shipped a bug that the maintainers fixed later. For each project we wrote one scenario for the broken user flow and replayed the PR in a copy of the repository with Proofed. In all nine cases Kane caught the bug, Codex GPT-6.2 Sol (medium) fixed it, and Kane checked the fix before it landed in the PR.
+We replayed eleven merged open-source pull requests that shipped a bug the maintainers fixed later, writing one scenario per broken user flow in a copy of each repository. In the nine cases below Kane caught the bug, Codex GPT-6.2 Sol (medium) fixed it, and Kane checked the fix before it landed in the PR (in two more replays, IT-Tools #1202 and #710, Kane passed on the broken code — see [Limits](#limits)).
 
 | PR | Where | What broke | Fix by the agent and the maintainers |
 |---|---|---|---|
