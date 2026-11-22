@@ -402,7 +402,7 @@ One-click setup detects Gradle Android apps and configures checks on real cloud 
 | Target / host | Verified with real Kane runs |
 |---|---|
 | Web, GitHub-hosted Linux/macOS/Windows | Linux/macOS: verified; Windows: not yet verified |
-| Desktop Electron, macOS runner | Verified on GitHub-hosted macOS |
+| Desktop Electron, macOS runner | Verified on GitHub-hosted and self-hosted Apple Silicon macOS |
 | Android local, Apple Silicon Mac / self-hosted runner | Verified on a self-hosted Apple Silicon runner with an Android 14 emulator |
 | Android/iOS cloud real devices, needs a TestMu plan with real devices | Not yet verified |
 | iOS local simulator, Apple Silicon Mac | Not yet verified |

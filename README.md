@@ -32,7 +32,7 @@
 | **Ships** | GitHub App, Action, [`proofed-cli`](https://www.npmjs.com/package/proofed-cli) on npm, MCP server, Stop hook for Claude Code | |
 | **Verified** | Kane caught 13 bugs out of 15 and confirmed all 13 fixes: nine of eleven open-source replays (missing two IT-Tools PRs, noted in [Limits](#limits)) and four of four in the demo store. A Kane pass without a check, or a pass the page text contradicts, is marked "not checked". [Six Kane failures and what we do about them](#what-we-ran-into-with-kane-cli) | 2 min |
 | **Craft** | Three steps to a PR with the setup and scenarios Kane has already passed: sign in, save the keys, install the GitHub App. `--dry-run` is free. A PR that touches no scenario costs 0 credits | |
-| **Three roles of Kane** | Checks every PR. Works inside the agent's session through `proofed check`, MCP and the Stop hook. Checked this repository's own PRs: [64 runs](https://github.com/t1dem/proofed/actions/workflows/proofed.yml), [clips](https://github.com/t1dem/proofed/tree/proofed-clips) and [raw Kane logs](docs/evidence/README.md) | |
+| **Three roles of Kane** | Checks every PR. Works inside the agent's session through `proofed check`, MCP and the Stop hook. Checked this repository's own PRs: [52 completed runs](https://github.com/t1dem/proofed/actions/workflows/proofed.yml), [clips](https://github.com/t1dem/proofed/tree/proofed-clips) and [raw Kane logs](docs/evidence/README.md) | |
 
 ## Bugs from real projects
 
@@ -54,7 +54,7 @@ In eight of the nine cases the agent edited the same files as the maintainers. I
 
 ## Demo store
 
-Four PRs in the [demo store](https://github.com/t1dem/proofed-demo-store), each hiding a bug in an ordinary-looking change ([50 runs](https://github.com/t1dem/proofed-demo-store/actions/workflows/proofed.yml), [clips](https://github.com/t1dem/proofed-demo-store/tree/proofed-clips)). Kane caught all four bugs and confirmed all four of the agent's fixes.
+Four PRs in the [demo store](https://github.com/t1dem/proofed-demo-store), each hiding a bug in an ordinary-looking change ([45 completed runs](https://github.com/t1dem/proofed-demo-store/actions/workflows/proofed.yml), [clips](https://github.com/t1dem/proofed-demo-store/tree/proofed-clips)). Kane caught all four bugs and confirmed all four of the agent's fixes.
 
 | PR | What Kane found |
 |---|---|
@@ -108,7 +108,7 @@ What went wrong in real runs and what Proofed does about it.
 
 ## Limits
 
-- **Kane's verdict on the same failure varies.** On [#6](https://github.com/t1dem/proofed-demo-store/pull/6) the same check that [#9](https://github.com/t1dem/proofed-demo-store/pull/9) shows as a break came back twice as "the test may be wrong". Without a failed check, Proofed marks such a run unconfirmed and doesn't start a fix.
+- **Kane's verdict on the same failure varies.** On [#6](https://github.com/t1dem/proofed-demo-store/pull/6) the same check that [#9](https://github.com/t1dem/proofed-demo-store/pull/9) shows as a break came back twice as "the test may be wrong". Without a failed check, Proofed marks such a run unconfirmed and doesn't start a fix. On [zettlr-pandoc #1](https://github.com/t1dem/zettlr-pandoc/pull/1) Kane also marked a real failure as scenario-doubted, though the clip showed the missing highlight and the agent's fix passed.
 - **Kane doesn't catch every bug.** In two more replays, IT-Tools [#1202](https://github.com/CorentinTh/it-tools/pull/1202) and [#710](https://github.com/CorentinTh/it-tools/pull/710), Kane passed on the broken code.
 - **A fix needs room in the provider's usage limit.** On [#7](https://github.com/t1dem/proofed-demo-store/pull/7) and [#8](https://github.com/t1dem/proofed-demo-store/pull/8) the limit ran out: Kane caught the bug, no fix followed, and the report says so.
 - **Slower than unit tests.** One to four minutes of Kane per scenario, plus a build and a re-check per fix attempt.
