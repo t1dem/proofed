@@ -1,6 +1,6 @@
 {
   "name": "proofed-cli",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Check web, Android and Electron app scenarios with Kane CLI before you call a change done.",
   "repository": {
     "type": "git",
