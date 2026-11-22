@@ -104,7 +104,10 @@ function Account({ me }: { me: MeView }) {
         className={`flex h-9 w-full min-w-0 items-center gap-2.5 rounded-lg px-1.5 text-left ${soft} hover:bg-hover/70 ${open ? "bg-hover/70" : ""} ${focus}`}
       >
         <Avatar me={me} />
-        <span className="min-w-0 flex-1 truncate font-medium">{me.login}</span>
+        <span className="flex min-w-0 flex-1 items-start gap-1">
+          <span className="truncate font-medium">{me.login}</span>
+          {DEMO && <span className="mt-0.5 shrink-0 text-[10px] font-medium leading-none text-faint">Demo</span>}
+        </span>
       </button>
       {open && (
         <div className="absolute bottom-full left-0 z-20 mb-1.5 w-56 origin-bottom-left animate-[menu-in_170ms_cubic-bezier(0.16,1,0.3,1)] rounded-xl border border-edge bg-panel p-1 shadow-2xl shadow-black/40">

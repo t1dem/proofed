@@ -162,6 +162,7 @@ export function Recording({ clip, steps, seek, onTime, onEnd, lit, onLit }: Reco
         >
           <input
             type="range"
+            name="playback-position"
             aria-label="Playback position"
             aria-valuetext={`${clock(time)} of ${clock(length)}`}
             min={0}
