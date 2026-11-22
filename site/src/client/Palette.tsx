@@ -161,6 +161,7 @@ function Panel({ items, close, leaving }: { items: Item[]; close: () => void; le
               else return;
               e.preventDefault();
             }}
+            name="go-to"
             placeholder="Go to a pull request, repository or page"
             aria-label="Go to"
             className="h-14 w-full bg-transparent text-[16px] outline-none placeholder:text-faint"

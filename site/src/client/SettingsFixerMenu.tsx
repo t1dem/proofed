@@ -177,6 +177,7 @@ export function FixerMenu({ repo }: { repo: RepoView }) {
                       setTyping(false);
                       setQuery(e.target.value);
                     }}
+                    name="model-search"
                     placeholder="Search models…"
                     aria-label="Search models"
                     className="h-full min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-faint max-md:text-[16px]"

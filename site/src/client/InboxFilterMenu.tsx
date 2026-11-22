@@ -85,6 +85,7 @@ export function FilterMenu({ filter, onFilter, open, onOpen, repos, repo, onRepo
                 <input
                   ref={input}
                   type="search"
+                  name="pull-filter"
                   enterKeyHint="search"
                   value={filter.text}
                   onChange={(e) => onFilter({ text: e.target.value })}
