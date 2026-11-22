@@ -94,10 +94,13 @@ const RECHECK = "the check failed, but Kane blames the scenario; running it once
 
 // Kane is good at reaching a goal, so on its own it routes around a broken button (a key press, another
 // link) and passes. A user who clicks the button and gets the wrong screen has found a bug.
+// Worded as rules, not a condition: Kane once made "if a click does something other than what the
+// step expects" a checkpoint to verify before the first step, and the run ended unchecked.
 const NO_WORKAROUNDS =
-  "Do each step once, the way it is described. If a click or a key press does something other than what " +
-  "the step expects, the check fails: don't retry it, and don't reach the goal another way (other " +
-  "buttons, links, keyboard shortcuts, typing the URL). Waiting for a slow page to load is fine.";
+  "Rules for doing the steps above, not steps or checks of their own: do each step once, the way it is " +
+  "described. When a click or a key press does something other than what the step expects, that step " +
+  "fails: don't retry it, and don't reach the goal another way (other buttons, links, keyboard " +
+  "shortcuts, typing the URL). Waiting for a slow page to load is fine.";
 
 export function kaneObjective(objective: string) {
   return `${objective}\n\n${NO_WORKAROUNDS}`;
