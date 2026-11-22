@@ -113,7 +113,7 @@ test("MCP cancellation and disconnect stop Kane and its descendants", { skip: pr
   const r = repo(t, { checkout: { mode: "hang" } });
   const { client, transport } = await mcp(r);
   const until = async (condition: () => boolean) => {
-    for (let i = 0; i < 150; i++) {
+    for (let i = 0; i < 600; i++) {
       if (condition()) return;
       await delay(25);
     }

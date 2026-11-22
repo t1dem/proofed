@@ -50,10 +50,10 @@ else if(a.some((x)=>x.startsWith('screenrecord '))) {
   process.on('SIGINT', finish);
   if (index === '1') fs.writeFileSync(${JSON.stringify(secondSegment)}, '');
   if (${mode === "android-pending-pid"} && index === '1') {
-    const wait = setInterval(()=>{if(fs.existsSync(${JSON.stringify(announcePid)})) {clearInterval(wait);console.log(process.pid);}}, 20);
+    const wait = setInterval(()=>{if(fs.existsSync(${JSON.stringify(announcePid)})) {clearInterval(wait);console.log(String(process.pid));}}, 20);
     setTimeout(finish, 4000);
   } else {
-    console.log(process.pid);
+    console.log(String(process.pid));
     setInterval(()=>{if(index === '0' && fs.existsSync(${JSON.stringify(finishSegment)})) finish();}, 20);
   }
 }

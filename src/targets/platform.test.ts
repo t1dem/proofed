@@ -88,7 +88,7 @@ test("process tree cleanup selects taskkill on Windows and process groups on Uni
 });
 
 test("process tree cleanup stops a live child's HTTP server", { timeout: 20_000 }, async () => {
-  const child = "require('node:http').createServer((q,s)=>s.end('alive')).listen(0,'127.0.0.1',function(){console.log(this.address().port)})";
+  const child = "require('node:http').createServer((q,s)=>s.end('alive')).listen(0,'127.0.0.1',function(){console.log(String(this.address().port))})";
   const leader = spawn(process.execPath, ["-e", `require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:['ignore','inherit','inherit']});setInterval(()=>{},1000)`], { detached: true, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   const exited = once(leader, "exit");
   try {
