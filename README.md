@@ -6,8 +6,7 @@
 
 **Kane CLI opens the app from a pull request and checks that its user flows work.<br>When a flow breaks, an agent fixes the code. Only a fix that Kane has checked lands in the PR.**
 
-<!-- video: put "[**▶ Video (3 min)**](URL) · " at the start of the next line -->
-[**Recorded run (1 min)**](https://proofed.neptunescodm.workers.dev/try/9) · [Break it yourself (live, 8–14 min)](https://proofed.neptunescodm.workers.dev/try) · [Install](https://proofed.neptunescodm.workers.dev/install) · [For judges](#for-judges)
+[**▶ Video (3:30)**](https://youtu.be/IbqyddBcyvA) · [Recorded run (1 min)](https://proofed.neptunescodm.workers.dev/try/9) · [Break it yourself (live, 8–14 min)](https://proofed.neptunescodm.workers.dev/try) · [Install](https://proofed.neptunescodm.workers.dev/install) · [For judges](#for-judges)
 
 [![Test CLI](https://github.com/t1dem/proofed/actions/workflows/test.yml/badge.svg)](https://github.com/t1dem/proofed/actions/workflows/test.yml) [![npm](https://img.shields.io/npm/v/proofed-cli)](https://www.npmjs.com/package/proofed-cli)
 
