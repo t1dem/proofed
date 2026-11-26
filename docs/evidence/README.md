@@ -26,5 +26,5 @@ cd docs/evidence && shasum -a 256 -c SHA256SUMS.txt
 | `2026-11-21 17:50:06Z` | `proofed-demo-store` | `0.10.4` | ✓ passed | 23.1 | Place an order (€17.90 confirmation) | [`fa48e69e`](2026-11-21-fa48e69e-proofed-demo-store-passed.events.ndjson) |
 
 For CI runs and recorded clips from GitHub Actions, see:
-- [`t1dem/proofed` Proofed workflow](https://github.com/t1dem/proofed/actions/workflows/proofed.yml) and [`proofed-clips`](https://github.com/t1dem/proofed/tree/proofed-clips)
+- [`t1dem/proofed` Proofed workflow](https://github.com/t1dem/proofed/actions/workflows/proofed.yml) and [`proofed-clips`](https://github.com/t1dem/proofed-clips)
 - [`t1dem/proofed-demo-store` Proofed workflow](https://github.com/t1dem/proofed-demo-store/actions/workflows/proofed.yml) and [`proofed-clips`](https://github.com/t1dem/proofed-demo-store/tree/proofed-clips)

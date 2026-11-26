@@ -31,7 +31,7 @@
 | **Ships** | GitHub App, Action, [`proofed-cli`](https://www.npmjs.com/package/proofed-cli) on npm, MCP server, Stop hook for Claude Code | |
 | **Verified** | Kane caught 13 bugs out of 15 and confirmed all 13 fixes: nine of eleven open-source replays (missing two IT-Tools PRs, noted in [Limits](#limits)) and four of four in the demo store. A Kane pass without a check, or a pass the page text contradicts, is marked "not checked". [Six Kane failures and what we do about them](#what-we-ran-into-with-kane-cli) | 2 min |
 | **Craft** | Three steps to a PR with the setup and scenarios Kane has already passed: sign in, save the keys, install the GitHub App. `--dry-run` is free. A PR that touches no scenario costs 0 credits | |
-| **Three roles of Kane** | Checks every PR. Works inside the agent's session through `proofed check`, MCP and the Stop hook. Checked this repository's own PRs: [52 completed runs](https://github.com/t1dem/proofed/actions/workflows/proofed.yml), [clips](https://github.com/t1dem/proofed/tree/proofed-clips) and [raw Kane logs](docs/evidence/README.md) | |
+| **Three roles of Kane** | Checks every PR. Works inside the agent's session through `proofed check`, MCP and the Stop hook. Checked this repository's own PRs: [52 completed runs](https://github.com/t1dem/proofed/actions/workflows/proofed.yml), [clips](https://github.com/t1dem/proofed-clips) and [raw Kane logs](docs/evidence/README.md) | |
 
 ## Bugs from real projects
 
