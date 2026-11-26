@@ -148,6 +148,10 @@ function Hero() {
           <a href={`${REPO}#for-judges`} className="whitespace-nowrap text-dim underline decoration-faint underline-offset-4 hover:text-fg">
             For judges →
           </a>
+          {" · "}
+          <a href="/try" className="whitespace-nowrap text-dim underline decoration-faint underline-offset-4 hover:text-fg">
+            Try it live →
+          </a>
         </p>
       </div>
       <div className="relative mx-auto mt-[calc(var(--h)*var(--at)+1rem)] w-full max-w-[1680px] [--at:0.6] [--h:max(220px,min(30vw,504px))] md:[--at:0.45]">
