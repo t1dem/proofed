@@ -450,7 +450,7 @@ export function AsciiVideo({ src, focus, quiet = false, className, style }: Prop
         autoPlay={plain}
         preload="auto"
         aria-hidden
-        className={plain ? `${className ?? ""} object-cover` : "pointer-events-none absolute h-px w-px opacity-0"}
+        className={plain ? `select-none ${className ?? ""} object-cover` : "pointer-events-none absolute h-px w-px opacity-0"}
         style={plain ? style : undefined}
       />
       {!plain && (
@@ -476,7 +476,7 @@ export function AsciiVideo({ src, focus, quiet = false, className, style }: Prop
         <canvas
           ref={canvasRef}
           aria-hidden
-          className={className}
+          className={`select-none ${className ?? ""}`}
           style={{ opacity: 0, transition: "opacity 0.9s cubic-bezier(0.22, 1, 0.36, 1)", ...style }}
         />
       )}

@@ -454,7 +454,7 @@ export function Night({ avoid, className, style }: { avoid: RefObject<HTMLElemen
   }, [avoid]);
 
   return (
-    <div ref={rootRef} aria-hidden className={`overflow-hidden ${className ?? ""}`} style={{ opacity: 0, transition: "opacity 0.9s cubic-bezier(0.22, 1, 0.36, 1)", ...style }}>
+    <div ref={rootRef} aria-hidden className={`select-none overflow-hidden ${className ?? ""}`} style={{ opacity: 0, transition: "opacity 0.9s cubic-bezier(0.22, 1, 0.36, 1)", ...style }}>
       <canvas ref={washRef} className="absolute inset-0 h-full w-full" />
       <canvas ref={cloudRef} className="absolute left-0 blur-[6px]" />
       <canvas ref={typeRef} className="absolute inset-0 h-full w-full" />

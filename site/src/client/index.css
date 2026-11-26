@@ -398,6 +398,10 @@ html[data-app][data-theme="light"] {
 html[data-embed] {
   scrollbar-width: none;
 }
+html[data-embed] body {
+  -webkit-user-select: none;
+  user-select: none;
+}
 
 /* The landing is dark from edge to edge, overscroll included. */
 html[data-landing] body {

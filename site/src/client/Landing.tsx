@@ -41,9 +41,9 @@ function Header() {
 }
 
 // The one call to action is white on the night (.raised-white in index.css), with an outline beside it.
-const primary = "raised-white inline-flex h-11 shrink-0 items-center gap-2.5 rounded-lg px-5 text-[15px] font-medium";
+const primary = "raised-white inline-flex h-11 shrink-0 select-text items-center gap-2.5 rounded-lg px-5 text-[15px] font-medium";
 
-const glass = "inline-flex h-11 shrink-0 items-center gap-2 rounded-lg border border-white/[0.12] bg-white/[0.05] px-5 text-[15px] font-medium transition-colors hover:bg-white/[0.1]";
+const glass = "inline-flex h-11 shrink-0 select-text items-center gap-2 rounded-lg border border-white/[0.12] bg-white/[0.05] px-5 text-[15px] font-medium transition-colors hover:bg-white/[0.1]";
 
 // The sun in the dawn clip, in fractions of its frame: a narrow screen keeps it in view.
 const SUN: [number, number] = [0.85, 0.56];
@@ -95,7 +95,7 @@ function AppWindow() {
             src={load ? "/app?demo" : undefined}
             title="Proofed on sample data"
             onLoad={() => load && setTimeout(() => setShown(true), 250)}
-            className={`absolute left-0 top-0 origin-top-left bg-bg transition-opacity duration-700 ${shown ? "opacity-100" : "opacity-0"}`}
+            className={`absolute left-0 top-0 origin-top-left select-none bg-bg transition-opacity duration-700 ${shown ? "opacity-100" : "opacity-0"}`}
             style={{ width: size.w / scale, height: size.h / scale, transform: `scale(${scale})` }}
           />
         )}
@@ -107,7 +107,7 @@ function AppWindow() {
 // The dawn over a lake, drawn in type. It has no edge of its own: `mask` dissolves it into the page.
 function Dawn({ className, mask }: { className: string; mask: string }) {
   return (
-    <div aria-hidden className={`pointer-events-none w-full ${className}`} style={{ maskImage: mask, maskComposite: "intersect" }}>
+    <div aria-hidden className={`select-none w-full ${className}`} style={{ maskImage: mask, maskComposite: "intersect" }}>
       <AsciiVideo src="/clips/hero-dawn.mp4" focus={SUN} quiet className="absolute inset-0 h-full w-full" />
     </div>
   );
@@ -421,8 +421,8 @@ function Start() {
           className="absolute inset-0"
           style={{ maskImage: "linear-gradient(to right, transparent, #000 8%, #000 92%, transparent), linear-gradient(to bottom, #000 calc(100% - 3rem), transparent)", maskComposite: "intersect" }}
         />
-        <div ref={words} className="relative mx-auto max-w-6xl px-4 pb-[calc(clamp(390px,34.88vw,586px)*0.69+1.5rem)] pt-6 text-center sm:px-8 sm:pt-12">
-          <h2 aria-label="Merge with proof." className="text-[3.6rem] font-semibold leading-[0.98] tracking-[-0.05em] max-[359px]:text-[3.1rem] sm:whitespace-nowrap sm:text-[min(calc((100vw-4rem)*0.127),8.6rem)]">
+        <div ref={words} className="relative mx-auto max-w-6xl select-none px-4 pb-[calc(clamp(390px,34.88vw,586px)*0.69+1.5rem)] pt-6 text-center sm:px-8 sm:pt-12">
+          <h2 aria-label="Merge with proof." className="select-text text-[3.6rem] font-semibold leading-[0.98] tracking-[-0.05em] max-[359px]:text-[3.1rem] sm:whitespace-nowrap sm:text-[min(calc((100vw-4rem)*0.127),8.6rem)]">
             <span aria-hidden>
               Merge with <br className="sm:hidden" />
               <Mended word="proof" tail="." />
@@ -439,7 +439,7 @@ function Start() {
               Break it yourself <ArrowRight size={16} />
             </a>
           </div>
-          <p className="mx-auto mt-6 max-w-md text-balance text-[16px] leading-relaxed text-white/75">
+          <p className="mx-auto mt-6 max-w-md select-text text-balance text-[16px] leading-relaxed text-white/75">
             A real pull request in the demo store. 8 to 14 minutes, no account.
           </p>
         </div>
