@@ -1,6 +1,6 @@
 # Releasing proofed-cli
 
-To release, confirm the version in `package.json` (currently `0.2.3`). Published versions cannot be reused.
+To release, confirm the version in `package.json` (currently `0.2.4`). Published versions cannot be reused.
 Publish from macOS or Linux. The package check uses POSIX npm install paths.
 Run these commands from a clean checkout with Node 22.18+.
 
@@ -10,9 +10,9 @@ pnpm --dir site install --frozen-lockfile
 npm login --registry=https://registry.npmjs.org/
 npm whoami --registry=https://registry.npmjs.org/
 npm publish --access public --registry=https://registry.npmjs.org/
-npm view proofed-cli@0.2.3 version bin engines dist.tarball --registry=https://registry.npmjs.org/
-npx --yes proofed-cli@0.2.3 --version
-npx --yes proofed-cli@0.2.3 --help
+npm view proofed-cli@0.2.4 version bin engines dist.tarball --registry=https://registry.npmjs.org/
+npx --yes proofed-cli@0.2.4 --version
+npx --yes proofed-cli@0.2.4 --help
 ```
 
 Use the chosen version in the last three commands. `npm publish` runs typecheck, tests and the package check before packing a fresh build. Publishing is manual; no release workflow runs on pushes or pull requests.
